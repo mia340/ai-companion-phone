@@ -209,72 +209,70 @@ export async function parseBackupFile(
 export async function restoreBackup(
   backup: CompanionBackup
 ): Promise<void> {
+  // Vue 的 ref 可能把备份对象变成响应式 Proxy。
+  // IndexedDB 无法保存 Proxy，因此先转换为纯 JSON 对象。
+  const plainBackup = JSON.parse(
+    JSON.stringify(backup)
+  ) as CompanionBackup
+
   await db.transaction(
     'rw',
     db.tables,
     async () => {
-      // 先清空当前浏览器里的旧数据
-      await Promise.all([
-        db.messages.clear(),
-        db.conversations.clear(),
-        db.characters.clear(),
-        db.contactGroups.clear(),
-        db.userProfiles.clear(),
-        db.worlds.clear()
-      ])
+      // 按依赖顺序清空当前数据
+      await db.messages.clear()
+      await db.conversations.clear()
+      await db.characters.clear()
+      await db.contactGroups.clear()
+      await db.userProfiles.clear()
+      await db.worlds.clear()
 
-      // 再写入备份中的世界
-      if (backup.data.worlds.length > 0) {
+      // 按依赖顺序恢复备份数据
+      if (plainBackup.data.worlds.length > 0) {
         await db.worlds.bulkPut(
-          backup.data.worlds
+          plainBackup.data.worlds
         )
       }
 
-      // 写入通讯录分组
       if (
-        backup.data.contactGroups.length > 0
+        plainBackup.data.contactGroups.length > 0
       ) {
         await db.contactGroups.bulkPut(
-          backup.data.contactGroups
+          plainBackup.data.contactGroups
         )
       }
 
-      // 写入角色
       if (
-        backup.data.characters.length > 0
+        plainBackup.data.characters.length > 0
       ) {
         await db.characters.bulkPut(
-          backup.data.characters
+          plainBackup.data.characters
         )
       }
 
-      // 写入会话
       if (
-        backup.data.conversations.length > 0
+        plainBackup.data.conversations.length > 0
       ) {
         await db.conversations.bulkPut(
-          backup.data.conversations
+          plainBackup.data.conversations
         )
       }
 
-      // 写入聊天消息
       if (
-        backup.data.messages.length > 0
+        plainBackup.data.messages.length > 0
       ) {
         await db.messages.bulkPut(
-          backup.data.messages
+          plainBackup.data.messages
         )
       }
 
-      // 写入用户资料
       if (
-        backup.data.userProfiles.length > 0
+        plainBackup.data.userProfiles.length > 0
       ) {
         await db.userProfiles.bulkPut(
-          backup.data.userProfiles
+          plainBackup.data.userProfiles
         )
       }
     }
   )
 }
-     
