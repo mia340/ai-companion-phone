@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import LockScreen from '../views/LockScreen.vue'
 import HomeScreen from '../views/HomeScreen.vue'
 import ChatList from '../views/ChatList.vue'
@@ -10,7 +10,7 @@ import PlaceholderApp from '../views/PlaceholderApp.vue'
 import UserProfileView from '../views/UserProfileView.vue'
 
 export const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes: [
     { path: '/', component: LockScreen },
     { path: '/home', component: HomeScreen },
