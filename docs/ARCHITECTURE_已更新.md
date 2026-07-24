@@ -1104,3 +1104,102 @@ src/repositories/
 
 但应在功能复杂度确实增长后再迁移，避免过早抽象。
 
+
+
+---
+
+## 20. V0.0.8 角色生命周期架构
+
+### 20.1 页面关系
+
+```text
+ContactsView.vue
+    ↓
+CharacterDetailView.vue
+    ├── 进入聊天
+    ├── 进入编辑
+    └── 安全删除
+
+CharacterEditView.vue
+    ↓
+characterService.ts
+    ↓
+Dexie Transaction
+    ├── characters
+    └── conversations
+```
+
+### 20.2 角色服务职责
+
+`src/services/characterService.ts` 提供：
+
+- `findSingleConversation()`
+- `getOrCreateSingleConversation()`
+- `updateCharacterAndConversation()`
+- `deleteCharacterSafely()`
+
+页面不再自行拼接复杂删除逻辑。
+
+### 20.3 安全删除策略
+
+```text
+删除请求
+↓
+查找关联会话
+├── 单聊 → 删除消息与会话
+└── 群聊
+    ├── 仍有成员 → 移除角色
+    └── 无成员 → 删除消息与群聊
+↓
+删除角色
+↓
+提交事务
+```
+
+### 20.4 更新一致性
+
+角色改名时，同一事务同步更新 Character 与对应单聊 Conversation，保证通讯录、详情页和聊天标题一致。
+
+### 20.5 当前路由
+
+```text
+/characters/new
+/characters/:id/edit
+/characters/:id
+```
+
+固定路径位于动态路径之前，同一路径不得重复注册。
+
+### 20.6 当前服务层
+
+```text
+src/services
+├── ai/provider.ts
+├── userProfile.ts
+├── characterService.ts
+└── dataBackup.ts
+```
+
+### 20.7 当前版本与阶段
+
+```text
+V0.0.8
+```
+
+当前阶段：
+
+```text
+本地角色完整生命周期、数据备份和角色化聊天闭环
+```
+
+下一架构重点：
+
+```text
+模型设置
+↓
+真实 AI Provider
+↓
+短期记忆
+↓
+错误降级与安全策略
+```

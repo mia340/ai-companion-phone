@@ -37,7 +37,7 @@ npm run build
 
 构建成功后运行：
 
-npm run preview
+npm run dev
 
 之后打开：
 
