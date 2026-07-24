@@ -8,12 +8,14 @@ import CharacterCreate from '../views/CharacterCreate.vue'
 import SettingsView from '../views/SettingsView.vue'
 import PlaceholderApp from '../views/PlaceholderApp.vue'
 import UserProfileView from '../views/UserProfileView.vue'
+import DataBackupView from '../views/DataBackupView.vue'
 
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/', component: LockScreen },
     { path: '/home', component: HomeScreen },
+    {path: '/backup',component: DataBackupView},
     { path: '/chat', component: ChatList },
     { path: '/chat/:id', component: ChatRoom },
     { path: '/contacts', component: ContactsView },
