@@ -11,6 +11,9 @@ import CharacterAvatar from '../components/CharacterAvatar.vue'
 
 import { db } from '../db/database'
 import { MockProvider } from '../services/ai/provider'
+import type { ChatRequest } from '../services/ai/provider'
+import { createProvider } from '../services/ai/providerFactory'
+import { getModelSettings } from '../services/modelSettings'
 import {
   getOrCreateUserProfile
 } from '../services/userProfile'
@@ -23,7 +26,6 @@ import type {
 } from '../types/domain'
 
 const route = useRoute()
-const provider = new MockProvider()
 
 const conversation = ref<Conversation>()
 const character = ref<Character>()
@@ -220,9 +222,16 @@ async function send() {
           content: message.content
         }))
 
-    const reply = await provider.chat({
-      model: 'mock',
-      temperature: 0.8,
+    const modelSettings =
+      await getModelSettings()
+
+    const provider =
+      createProvider(modelSettings)
+
+    const request: ChatRequest = {
+      model: modelSettings.model,
+      temperature:
+        modelSettings.temperature,
 
       character: activeCharacter
         ? {
@@ -263,7 +272,7 @@ async function send() {
 
       messages: [
         {
-          role: 'system',
+          role: 'system' as const,
           content: buildSystemPrompt(
             activeCharacter,
             activeProfile
@@ -271,7 +280,33 @@ async function send() {
         },
         ...recentTurns
       ]
-    })
+    }
+
+    let reply
+
+    try {
+      reply = await provider.chat(request)
+    } catch (providerError) {
+      if (
+        modelSettings.provider === 'mock' ||
+        !modelSettings.fallbackToMock
+      ) {
+        throw providerError
+      }
+
+      console.warn(
+        '真实模型调用失败，已降级到本地模拟：',
+        providerError
+      )
+
+      const fallbackProvider =
+        new MockProvider()
+
+      reply = await fallbackProvider.chat({
+        ...request,
+        model: 'mock'
+      })
+    }
 
     const replyTime =
       new Date().toISOString()

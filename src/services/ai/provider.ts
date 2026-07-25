@@ -818,3 +818,135 @@ implements ModelProvider {
     return true
   }
 }
+
+export interface OpenAICompatibleProviderOptions {
+  id: string
+  name: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  maxTokens?: number
+}
+
+interface OpenAIChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string
+    }
+  }>
+  error?: {
+    message?: string
+  }
+}
+
+function normalizeBaseUrl(value: string) {
+  return value.trim().replace(/\/+$/, '')
+}
+
+export class OpenAICompatibleProvider
+implements ModelProvider {
+  id: string
+  name: string
+
+  private readonly baseUrl: string
+  private readonly apiKey: string
+  private readonly model: string
+  private readonly maxTokens: number
+
+  constructor(
+    options: OpenAICompatibleProviderOptions
+  ) {
+    this.id = options.id
+    this.name = options.name
+    this.baseUrl = normalizeBaseUrl(
+      options.baseUrl
+    )
+    this.apiKey = options.apiKey.trim()
+    this.model = options.model.trim()
+    this.maxTokens = options.maxTokens ?? 600
+  }
+
+  private validateConfig() {
+    if (!this.baseUrl) {
+      throw new Error('请填写 API 地址。')
+    }
+
+    if (!this.apiKey) {
+      throw new Error('请填写 API Key。')
+    }
+
+    if (!this.model) {
+      throw new Error('请填写模型名称。')
+    }
+  }
+
+  async chat(
+    request: ChatRequest
+  ): Promise<ChatResponse> {
+    this.validateConfig()
+
+    const response = await fetch(
+      `${this.baseUrl}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: request.model || this.model,
+          messages: request.messages,
+          temperature:
+            request.temperature ?? 0.8,
+          max_tokens: this.maxTokens,
+          stream: false
+        })
+      }
+    )
+
+    let data: OpenAIChatCompletionResponse
+
+    try {
+      data = await response.json() as
+        OpenAIChatCompletionResponse
+    } catch {
+      throw new Error(
+        `模型服务返回了无法解析的数据（HTTP ${response.status}）。`
+      )
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.error?.message ||
+        `模型请求失败（HTTP ${response.status}）。`
+      )
+    }
+
+    const text =
+      data.choices?.[0]?.message?.content?.trim()
+
+    if (!text) {
+      throw new Error('模型没有返回有效回复。')
+    }
+
+    return {
+      text,
+      raw: data
+    }
+  }
+
+  async testConnection(): Promise<boolean> {
+    await this.chat({
+      model: this.model,
+      temperature: 0,
+      messages: [
+        {
+          role: 'user',
+          content: '请只回复“连接成功”。'
+        }
+      ]
+    })
+
+    return true
+  }
+}

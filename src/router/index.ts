@@ -14,6 +14,7 @@ import CharacterEditView from '../views/CharacterEditView.vue'
 import UserProfileView from '../views/UserProfileView.vue'
 import DataBackupView from '../views/DataBackupView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import ModelSettingsView from '../views/ModelSettingsView.vue'
 import PlaceholderApp from '../views/PlaceholderApp.vue'
 
 export const router = createRouter({
@@ -62,6 +63,10 @@ export const router = createRouter({
     {
       path: '/backup',
       component: DataBackupView
+    },
+    {
+      path: '/settings/models',
+      component: ModelSettingsView
     },
     {
       path: '/settings',

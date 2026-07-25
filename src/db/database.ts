@@ -11,6 +11,8 @@ import type {
   World
 } from '../types/domain'
 
+import type { ModelSettings } from '../types/modelSettings'
+
 export class CompanionDatabase extends Dexie {
   worlds!: EntityTable<World, 'id'>
   characters!: EntityTable<Character, 'id'>
@@ -18,6 +20,7 @@ export class CompanionDatabase extends Dexie {
   conversations!: EntityTable<Conversation, 'id'>
   messages!: EntityTable<Message, 'id'>
   userProfiles!: EntityTable<UserProfile, 'id'>
+  modelSettings!: EntityTable<ModelSettings, 'id'>
 
   constructor() {
     super('companion-world-v1')
@@ -48,6 +51,23 @@ export class CompanionDatabase extends Dexie {
         'id, worldId, conversationId, createdAt',
       userProfiles:
         'id, updatedAt'
+    })
+
+    // V3：新增模型设置表
+    this.version(3).stores({
+      worlds: 'id, createdAt',
+      characters:
+        'id, worldId, name, *groups, createdAt',
+      contactGroups:
+        'id, worldId, order',
+      conversations:
+        'id, worldId, type, updatedAt, pinned',
+      messages:
+        'id, worldId, conversationId, createdAt',
+      userProfiles:
+        'id, updatedAt',
+      modelSettings:
+        'id, provider, updatedAt'
     })
   }
 }
