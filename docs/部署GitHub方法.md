@@ -42,3 +42,10 @@ npm run dev
 之后打开：
 
 https://mia340.github.io/ai-companion-phone/#/
+
+
+
+
+git add .
+git commit -m "docs: 更新V0.0.8角色生命周期开发记录"
+git push
