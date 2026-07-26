@@ -29,12 +29,19 @@ export interface ChatResponse {
   raw?: unknown
 }
 
+export interface ProviderModel {
+  id: string
+  name?: string
+  ownedBy?: string
+}
+
 export interface ModelProvider {
   id: string
   name: string
   chat(
     request: ChatRequest
   ): Promise<ChatResponse>
+  listModels(): Promise<ProviderModel[]>
   testConnection(): Promise<boolean>
 }
 
@@ -814,6 +821,16 @@ implements ModelProvider {
     }
   }
 
+  async listModels(): Promise<ProviderModel[]> {
+    return [
+      {
+        id: 'mock',
+        name: '本地模拟模型',
+        ownedBy: 'local'
+      }
+    ]
+  }
+
   async testConnection() {
     return true
   }
@@ -836,11 +853,230 @@ interface OpenAIChatCompletionResponse {
   }>
   error?: {
     message?: string
+    code?: string
   }
+  message?: string
+  detail?: string
+}
+
+interface OpenAIModelListResponse {
+  data?: unknown
+  models?: unknown
+  error?: {
+    message?: string
+    code?: string
+  }
+  message?: string
+  detail?: string
 }
 
 function normalizeBaseUrl(value: string) {
-  return value.trim().replace(/\/+$/, '')
+  return value
+    .trim()
+    .replace(/\/(?:chat\/completions|models)\/?$/i, '')
+    .replace(/\/+$/, '')
+}
+
+function buildEndpoint(
+  baseUrl: string,
+  path: string
+) {
+  return `${normalizeBaseUrl(baseUrl)}/${path.replace(/^\/+/, '')}`
+}
+
+function extractErrorMessage(
+  data: unknown
+) {
+  if (
+    typeof data === 'object' &&
+    data !== null
+  ) {
+    const record = data as Record<string, unknown>
+    const error = record.error
+
+    if (
+      typeof error === 'object' &&
+      error !== null
+    ) {
+      const message = (
+        error as Record<string, unknown>
+      ).message
+
+      if (typeof message === 'string') {
+        return message
+      }
+    }
+
+    if (typeof error === 'string') {
+      return error
+    }
+
+    if (typeof record.message === 'string') {
+      return record.message
+    }
+
+    if (typeof record.detail === 'string') {
+      return record.detail
+    }
+  }
+
+  return ''
+}
+
+function createHttpError(
+  status: number,
+  providerMessage = ''
+) {
+  const suffix = providerMessage
+    ? `：${providerMessage}`
+    : ''
+
+  if (status === 400) {
+    return new Error(
+      `请求格式或模型名称错误${suffix}`
+    )
+  }
+
+  if (status === 401) {
+    return new Error(
+      `API Key 无效或已失效${suffix}`
+    )
+  }
+
+  if (status === 403) {
+    return new Error(
+      `没有接口访问权限，或账户余额不足${suffix}`
+    )
+  }
+
+  if (status === 404) {
+    return new Error(
+      `没有找到接口，请检查 API 地址是否需要包含 /v1${suffix}`
+    )
+  }
+
+  if (status === 429) {
+    return new Error(
+      `请求过于频繁，或接口额度不足${suffix}`
+    )
+  }
+
+  if (status >= 500) {
+    return new Error(
+      `模型服务暂时异常（HTTP ${status}）${suffix}`
+    )
+  }
+
+  return new Error(
+    `模型请求失败（HTTP ${status}）${suffix}`
+  )
+}
+
+async function readJsonResponse(
+  response: Response
+): Promise<unknown> {
+  try {
+    return await response.json()
+  } catch {
+    throw new Error(
+      `模型服务返回了无法解析的数据（HTTP ${response.status}）。`
+    )
+  }
+}
+
+function parseModelEntries(
+  source: unknown
+): ProviderModel[] {
+  const candidates: unknown[] = []
+
+  if (Array.isArray(source)) {
+    candidates.push(...source)
+  } else if (
+    typeof source === 'object' &&
+    source !== null
+  ) {
+    const record = source as Record<string, unknown>
+
+    if (Array.isArray(record.data)) {
+      candidates.push(...record.data)
+    }
+
+    if (Array.isArray(record.models)) {
+      candidates.push(...record.models)
+    }
+  }
+
+  const models = candidates
+    .map((item): ProviderModel | null => {
+      if (typeof item === 'string') {
+        const id = item.trim()
+
+        return id
+          ? { id }
+          : null
+      }
+
+      if (
+        typeof item !== 'object' ||
+        item === null
+      ) {
+        return null
+      }
+
+      const record =
+        item as Record<string, unknown>
+
+      const rawId =
+        record.id ??
+        record.model ??
+        record.name
+
+      if (typeof rawId !== 'string') {
+        return null
+      }
+
+      const id = rawId.trim()
+
+      if (!id) return null
+
+      const name =
+        typeof record.name === 'string'
+          ? record.name.trim()
+          : undefined
+
+      const ownedByRaw =
+        record.owned_by ??
+        record.ownedBy ??
+        record.provider
+
+      const ownedBy =
+        typeof ownedByRaw === 'string'
+          ? ownedByRaw.trim()
+          : undefined
+
+      return {
+        id,
+        name: name || undefined,
+        ownedBy: ownedBy || undefined
+      }
+    })
+    .filter(
+      (item): item is ProviderModel =>
+        item !== null
+    )
+
+  const unique = new Map<
+    string,
+    ProviderModel
+  >()
+
+  for (const model of models) {
+    if (!unique.has(model.id)) {
+      unique.set(model.id, model)
+    }
+  }
+
+  return [...unique.values()]
 }
 
 export class OpenAICompatibleProvider
@@ -866,7 +1102,7 @@ implements ModelProvider {
     this.maxTokens = options.maxTokens ?? 600
   }
 
-  private validateConfig() {
+  private validateEndpointConfig() {
     if (!this.baseUrl) {
       throw new Error('请填写 API 地址。')
     }
@@ -874,9 +1110,15 @@ implements ModelProvider {
     if (!this.apiKey) {
       throw new Error('请填写 API Key。')
     }
+  }
+
+  private validateConfig() {
+    this.validateEndpointConfig()
 
     if (!this.model) {
-      throw new Error('请填写模型名称。')
+      throw new Error(
+        '请选择或手动填写模型名称。'
+      )
     }
   }
 
@@ -885,40 +1127,48 @@ implements ModelProvider {
   ): Promise<ChatResponse> {
     this.validateConfig()
 
-    const response = await fetch(
-      `${this.baseUrl}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          model: request.model || this.model,
-          messages: request.messages,
-          temperature:
-            request.temperature ?? 0.8,
-          max_tokens: this.maxTokens,
-          stream: false
-        })
-      }
-    )
-
-    let data: OpenAIChatCompletionResponse
+    let response: Response
 
     try {
-      data = await response.json() as
-        OpenAIChatCompletionResponse
-    } catch {
+      response = await fetch(
+        buildEndpoint(
+          this.baseUrl,
+          'chat/completions'
+        ),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization:
+              `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            model:
+              request.model || this.model,
+            messages: request.messages,
+            temperature:
+              request.temperature ?? 0.8,
+            max_tokens: this.maxTokens,
+            stream: false
+          })
+        }
+      )
+    } catch (error) {
       throw new Error(
-        `模型服务返回了无法解析的数据（HTTP ${response.status}）。`
+        error instanceof Error
+          ? `网络连接失败：${error.message}`
+          : '网络连接失败，请检查 API 地址。'
       )
     }
 
+    const data = await readJsonResponse(
+      response
+    ) as OpenAIChatCompletionResponse
+
     if (!response.ok) {
-      throw new Error(
-        data.error?.message ||
-        `模型请求失败（HTTP ${response.status}）。`
+      throw createHttpError(
+        response.status,
+        extractErrorMessage(data)
       )
     }
 
@@ -933,6 +1183,56 @@ implements ModelProvider {
       text,
       raw: data
     }
+  }
+
+  async listModels(): Promise<ProviderModel[]> {
+    this.validateEndpointConfig()
+
+    let response: Response
+
+    try {
+      response = await fetch(
+        buildEndpoint(
+          this.baseUrl,
+          'models'
+        ),
+        {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            Authorization:
+              `Bearer ${this.apiKey}`
+          }
+        }
+      )
+    } catch (error) {
+      throw new Error(
+        error instanceof Error
+          ? `网络连接失败：${error.message}`
+          : '网络连接失败，请检查 API 地址。'
+      )
+    }
+
+    const data = await readJsonResponse(
+      response
+    ) as OpenAIModelListResponse
+
+    if (!response.ok) {
+      throw createHttpError(
+        response.status,
+        extractErrorMessage(data)
+      )
+    }
+
+    const models = parseModelEntries(data)
+
+    if (models.length === 0) {
+      throw new Error(
+        '接口已连接，但没有返回可用模型列表。请改用手动填写。'
+      )
+    }
+
+    return models
   }
 
   async testConnection(): Promise<boolean> {

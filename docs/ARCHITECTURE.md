@@ -1203,3 +1203,69 @@ V0.0.8
 ↓
 错误降级与安全策略
 ```
+
+
+---
+
+## 21. V0.1.0 模型发现与选择架构
+
+### 21.1 Provider 接口扩展
+
+```text
+ModelProvider
+├── chat(request)
+├── listModels()
+└── testConnection()
+```
+
+`listModels()` 返回统一的 `ProviderModel[]`，页面不直接解析各服务商的原始响应。
+
+### 21.2 模型拉取流程
+
+```text
+用户填写 API 地址与 Key
+↓
+点击“拉取模型”
+↓
+OpenAICompatibleProvider.listModels()
+↓
+GET {baseUrl}/models
+↓
+解析 data / models / 字符串数组
+↓
+去重模型 ID
+↓
+生成下拉框
+↓
+保存可用模型列表与当前选择
+```
+
+### 21.3 双模式选择
+
+```text
+模型列表可用 → 下拉选择
+接口不支持 /models → 手动填写
+```
+
+该设计保证标准接口操作方便，也兼容不提供模型枚举的第三方服务。
+
+### 21.4 地址规范化
+
+保存前移除：
+
+- 末尾多余 `/`
+- `/models`
+- `/chat/completions`
+
+Provider 再统一拼接实际接口路径，避免地址重复。
+
+### 21.5 旧模型迁移
+
+读取 DeepSeek 设置时，如发现旧模型：
+
+```text
+deepseek-chat
+deepseek-reasoner
+```
+
+自动迁移到当前默认模型，并保留拉取模型功能供用户刷新服务端实际列表。

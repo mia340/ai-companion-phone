@@ -12,7 +12,7 @@ AI Companion Phone
 
 ## 当前版本
 
-V0.0.8
+V0.1.0
 
 ---
 
@@ -20,7 +20,7 @@ V0.0.8
 
 项目已从 Phone OS 基础页面阶段进入：
 
-**角色创建、详情、编辑、安全删除、数据备份与本地角色化回复均已形成完整闭环的可交互原型阶段。**
+**角色完整生命周期、数据备份、模型配置、模型列表拉取和真实 OpenAI 兼容接口已形成可交互闭环。**
 
 ---
 
@@ -35,6 +35,8 @@ V0.0.8
 - IndexedDB
 - PWA
 - 本地 Mock Provider
+- OpenAI Compatible Provider
+- DeepSeek API
 
 ---
 
@@ -140,17 +142,22 @@ V0.0.8
 - 会话更新时间同步
 - 最近聊天上下文参与回复
 
-### 9. AI Provider
+### 9. AI Provider 与模型设置
 
 - 统一 ModelProvider 接口
-- ChatRequest 与 ChatResponse
-- CharacterReplyContext
+- ChatRequest、ChatResponse 与 ProviderModel
 - MockProvider
-- Provider 连接测试接口
-- 角色身份、人设和说话方式进入上下文
-- 用户资料进入上下文
-- 最近消息进入上下文
-- 林夏与顾言已表现出不同回复风格
+- OpenAICompatibleProvider
+- DeepSeek 官方接口
+- OpenAI 兼容接口
+- API 地址、API Key、模型、温度与最大输出长度设置
+- 通过 `GET /models` 拉取可用模型
+- 模型下拉选择与手动填写双模式
+- 模型列表缓存到 IndexedDB
+- 真实聊天连接测试
+- HTTP 错误中文解释
+- 请求失败时降级到本地角色化回复
+- 角色身份、人设、说话方式、用户资料和最近消息进入上下文
 
 ### 10. 数据系统
 
@@ -162,12 +169,13 @@ V0.0.8
 - conversations
 - messages
 - userProfiles
+- modelSettings
 
 已实现：
 
 - IndexedDB 本地持久化
 - Dexie 版本管理
-- 数据库 V1 → V2 升级
+- 数据库 V1 → V3 升级
 - 关键写入事务
 - 角色、会话和消息使用 UUID
 
@@ -175,8 +183,6 @@ V0.0.8
 
 ## 当前已知限制
 
-- 当前 AI 回复仍是本地规则模拟
-- 尚未接入真实大语言模型
 - 不同浏览器环境的数据相互隔离
 - 尚未实现四层记忆
 - 尚未实现关系数值和情绪演化
@@ -191,29 +197,32 @@ V0.0.8
 
 ## 正在开发
 
-真实 AI Provider、模型设置与基础短期记忆。
+基础短期记忆、上下文控制与真实模型稳定性测试。
 
 ---
 
 ## 下一里程碑
 
-### V0.1.0：真实 AI 单角色长期聊天最小闭环
+### V0.1.0：真实 AI 单角色聊天最小闭环
 
 已完成：
 
 1. 角色详情与编辑
 2. 角色删除与关联数据清理
 3. 数据导出、导入与备份
+4. 模型设置页面
+5. DeepSeek 与 OpenAI 兼容 Provider
+6. 模型列表拉取与下拉选择
+7. API 连通性测试
+8. 错误降级
+9. 隐私和 API Key 安全提示
 
 下一步计划：
 
-4. 模型设置页面
-5. 真实 AI Provider
-6. API 连通性测试
-7. 错误降级
-8. 最近上下文控制
-9. 基础短期记忆
-10. 隐私和 API Key 安全提示
+10. 最近上下文长度控制
+11. 基础短期记忆
+12. 流式输出与停止生成
+13. Provider 调用日志与成本统计
 
 ---
 

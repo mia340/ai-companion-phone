@@ -12,6 +12,8 @@ export interface ModelSettings {
   temperature: number
   maxTokens: number
   fallbackToMock: boolean
+  availableModels?: string[]
+  modelsUpdatedAt?: string
   updatedAt: string
 }
 

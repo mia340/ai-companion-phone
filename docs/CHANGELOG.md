@@ -1,5 +1,41 @@
 # AI Companion Phone 更新记录
 
+## V0.1.0 — 2026-07-25
+
+### 新增
+
+- 保留 DeepSeek 与 OpenAI 兼容接口两类在线模型配置
+- 模型名称下拉框
+- 通过 OpenAI 兼容 `GET /models` 接口拉取可用模型
+- 拉取模型时的加载状态、模型数量和当前模型提示
+- 接口不支持模型列表时可切换为手动填写
+- 已拉取模型列表保存在 IndexedDB，刷新后继续显示
+- 测试连接成功后显示当前模型与大致耗时
+- API 错误代码参考
+
+### 调整
+
+- DeepSeek 默认模型更新为 `deepseek-v4-flash`
+- DeepSeek 下拉框默认提供 `deepseek-v4-flash` 与 `deepseek-v4-pro`
+- 自动迁移旧的 `deepseek-chat` 和 `deepseek-reasoner` 设置
+- API 地址会自动清理末尾的 `/models`、`/chat/completions` 和多余斜杠
+- OpenAI 兼容接口支持第三方中转、本地模型及其他兼容服务
+
+### 修复
+
+- 将 API Key 名称误填为模型名称后无法连接的问题
+- 模型名称只能手动输入，容易填写错误的问题
+- 服务端错误信息缺少中文解释的问题
+- 部分 OpenAI 兼容接口返回不同模型列表格式时无法识别的问题
+
+### 验证
+
+- TypeScript 类型检查通过
+- 本地模拟 Provider 继续可用
+- 在线 Provider 支持模型拉取、手动填写、连接测试和保存
+
+---
+
 ## V0.0.8 — 2026-07-24
 
 ### 新增
