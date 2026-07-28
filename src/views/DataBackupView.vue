@@ -166,7 +166,7 @@ async function importData() {
 
           <p>
             导出角色、头像、聊天记录、
-            世界设置和“我的资料”。
+            世界设置、“我的资料”、聊天偏好和角色记忆。
           </p>
 
           <button
@@ -236,6 +236,11 @@ async function importData() {
           <span>
             <b>{{ summary.userProfiles }}</b>
             份用户资料
+          </span>
+
+          <span>
+            <b>{{ summary.memories }}</b>
+            条角色记忆
           </span>
         </div>
 

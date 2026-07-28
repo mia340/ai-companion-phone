@@ -208,9 +208,16 @@ export async function deleteCharacterSafely(
             .equals(conversation.id)
             .delete()
 
-          await db.conversations.delete(
-            conversation.id
-          )
+          await Promise.all([
+            db.conversations.delete(conversation.id),
+            db.chatSettings.delete(conversation.id),
+            db.conversationStates.delete(conversation.id),
+            db.musicStates.delete(conversation.id),
+            db.memories
+              .where('conversationId')
+              .equals(conversation.id)
+              .delete()
+          ])
 
           result.deletedMessages +=
             messageCount
@@ -241,9 +248,16 @@ export async function deleteCharacterSafely(
             .equals(conversation.id)
             .delete()
 
-          await db.conversations.delete(
-            conversation.id
-          )
+          await Promise.all([
+            db.conversations.delete(conversation.id),
+            db.chatSettings.delete(conversation.id),
+            db.conversationStates.delete(conversation.id),
+            db.musicStates.delete(conversation.id),
+            db.memories
+              .where('conversationId')
+              .equals(conversation.id)
+              .delete()
+          ])
 
           result.deletedMessages +=
             messageCount

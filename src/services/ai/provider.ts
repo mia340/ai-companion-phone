@@ -22,6 +22,7 @@ export interface ChatRequest {
   messages: ChatTurn[]
   temperature?: number
   character?: CharacterReplyContext
+  signal?: AbortSignal
 }
 
 export interface ChatResponse {
@@ -809,6 +810,23 @@ implements ModelProvider {
   async chat(
     request: ChatRequest
   ): Promise<ChatResponse> {
+    if (request.signal?.aborted) {
+      throw new DOMException('请求已取消', 'AbortError')
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(resolve, 320)
+
+      request.signal?.addEventListener(
+        'abort',
+        () => {
+          window.clearTimeout(timer)
+          reject(new DOMException('请求已取消', 'AbortError'))
+        },
+        { once: true }
+      )
+    })
+
     const text = createMockReply(request)
 
     return {
@@ -1150,10 +1168,18 @@ implements ModelProvider {
               request.temperature ?? 0.8,
             max_tokens: this.maxTokens,
             stream: false
-          })
+          }),
+          signal: request.signal
         }
       )
     } catch (error) {
+      if (
+        error instanceof DOMException &&
+        error.name === 'AbortError'
+      ) {
+        throw error
+      }
+
       throw new Error(
         error instanceof Error
           ? `网络连接失败：${error.message}`

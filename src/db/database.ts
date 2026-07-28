@@ -4,9 +4,13 @@ import Dexie, {
 
 import type {
   Character,
+  CharacterMemory,
+  ChatSettings,
   ContactGroup,
   Conversation,
+  ConversationState,
   Message,
+  MusicState,
   UserProfile,
   World
 } from '../types/domain'
@@ -21,53 +25,54 @@ export class CompanionDatabase extends Dexie {
   messages!: EntityTable<Message, 'id'>
   userProfiles!: EntityTable<UserProfile, 'id'>
   modelSettings!: EntityTable<ModelSettings, 'id'>
+  chatSettings!: EntityTable<ChatSettings, 'id'>
+  memories!: EntityTable<CharacterMemory, 'id'>
+  conversationStates!: EntityTable<ConversationState, 'id'>
+  musicStates!: EntityTable<MusicState, 'id'>
 
   constructor() {
     super('companion-world-v1')
 
-    // 原有数据库结构
     this.version(1).stores({
       worlds: 'id, createdAt',
-      characters:
-        'id, worldId, name, *groups, createdAt',
-      contactGroups:
-        'id, worldId, order',
-      conversations:
-        'id, worldId, type, updatedAt, pinned',
-      messages:
-        'id, worldId, conversationId, createdAt'
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt'
     })
 
-    // V2：新增用户资料表
     this.version(2).stores({
       worlds: 'id, createdAt',
-      characters:
-        'id, worldId, name, *groups, createdAt',
-      contactGroups:
-        'id, worldId, order',
-      conversations:
-        'id, worldId, type, updatedAt, pinned',
-      messages:
-        'id, worldId, conversationId, createdAt',
-      userProfiles:
-        'id, updatedAt'
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt',
+      userProfiles: 'id, updatedAt'
     })
 
-    // V3：新增模型设置表
     this.version(3).stores({
       worlds: 'id, createdAt',
-      characters:
-        'id, worldId, name, *groups, createdAt',
-      contactGroups:
-        'id, worldId, order',
-      conversations:
-        'id, worldId, type, updatedAt, pinned',
-      messages:
-        'id, worldId, conversationId, createdAt',
-      userProfiles:
-        'id, updatedAt',
-      modelSettings:
-        'id, provider, updatedAt'
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt',
+      userProfiles: 'id, updatedAt',
+      modelSettings: 'id, provider, updatedAt'
+    })
+
+    // V4：聊天偏好、三层记忆、角色心理状态与一起听歌。
+    this.version(4).stores({
+      worlds: 'id, createdAt',
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt, status',
+      userProfiles: 'id, updatedAt',
+      modelSettings: 'id, provider, updatedAt',
+      chatSettings: 'id, conversationId, updatedAt',
+      memories: 'id, conversationId, characterId, importance, updatedAt',
+      conversationStates: 'id, updatedAt',
+      musicStates: 'id, updatedAt'
     })
   }
 }

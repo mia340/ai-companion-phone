@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { useSlots } from 'vue'
 import StatusBar from './StatusBar.vue'
+
+const slots = useSlots()
 
 defineProps<{
   title?: string
@@ -14,10 +17,22 @@ defineProps<{
 
       <StatusBar />
 
-      <div v-if="title" class="app-header">
+      <div
+        v-if="slots.header"
+        class="app-header app-header--custom"
+      >
+        <slot name="header" />
+      </div>
+
+      <div
+        v-else-if="title"
+        class="app-header"
+      >
         <button
           v-if="showBack"
           class="icon-button"
+          type="button"
+          aria-label="返回"
           @click="$router.back()"
         >
           ‹
