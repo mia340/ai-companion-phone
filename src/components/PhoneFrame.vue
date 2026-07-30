@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { useSlots } from 'vue'
+import {
+  onMounted,
+  onUnmounted,
+  useSlots
+} from 'vue'
 import StatusBar from './StatusBar.vue'
 
 const slots = useSlots()
@@ -8,6 +12,27 @@ defineProps<{
   title?: string
   showBack?: boolean
 }>()
+
+function syncViewportHeight() {
+  const height = window.visualViewport?.height ?? window.innerHeight
+  document.documentElement.style.setProperty(
+    '--app-viewport-height',
+    `${Math.round(height)}px`
+  )
+}
+
+onMounted(() => {
+  syncViewportHeight()
+  window.addEventListener('resize', syncViewportHeight)
+  window.visualViewport?.addEventListener('resize', syncViewportHeight)
+  window.visualViewport?.addEventListener('scroll', syncViewportHeight)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', syncViewportHeight)
+  window.visualViewport?.removeEventListener('resize', syncViewportHeight)
+  window.visualViewport?.removeEventListener('scroll', syncViewportHeight)
+})
 </script>
 
 <template>
@@ -47,10 +72,12 @@ defineProps<{
         <slot />
       </div>
 
-      <div
+      <button
         class="home-indicator"
+        type="button"
+        aria-label="返回主屏幕"
         @click="$router.push('/home')"
-      ></div>
+      ></button>
     </section>
   </main>
 </template>
@@ -59,7 +86,9 @@ defineProps<{
 .phone-content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }

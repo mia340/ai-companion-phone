@@ -35,7 +35,7 @@ const sections = [
   {
     icon: 'ℹ️',
     title: '关于',
-    description: '角色由 AI 驱动；当前为 V0.2.0 原型'
+    description: '角色由 AI 驱动；当前为 V0.3.1 原型'
   }
 ]
 

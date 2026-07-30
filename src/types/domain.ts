@@ -73,12 +73,19 @@ export type MessageStatus =
   | 'failed'
   | 'cancelled'
 
+export interface MessageReplyReference {
+  messageId: UUID
+  senderName: string
+  preview: string
+  type: 'text' | 'music' | 'image'
+}
+
 export interface Message {
   id: UUID
   worldId: UUID
   conversationId: UUID
   senderId: UUID | 'user'
-  type: 'text' | 'system' | 'music'
+  type: 'text' | 'system' | 'music' | 'image'
   content: string
   status: MessageStatus
   createdAt: string
@@ -88,6 +95,9 @@ export interface Message {
   fallback?: boolean
   errorText?: string
   replyGroupId?: UUID
+  replyTo?: MessageReplyReference
+  imageDataUrl?: string
+  imageName?: string
 }
 
 export type MemoryStrength = 'light' | 'standard' | 'deep'

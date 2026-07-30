@@ -3,19 +3,21 @@ import { db } from '../db/database'
 import type {
   Character,
   CharacterMemory,
+  CharacterRelationship,
   ChatSettings,
   ContactGroup,
   Conversation,
   ConversationState,
   Message,
   MusicState,
+  RelationshipEvent,
   UserProfile,
   World
 } from '../types/domain'
 
 export interface CompanionBackup {
   format: 'ai-companion-phone-backup'
-  version: 2
+  version: 3
   exportedAt: string
 
   data: {
@@ -29,6 +31,8 @@ export interface CompanionBackup {
     memories: CharacterMemory[]
     conversationStates: ConversationState[]
     musicStates: MusicState[]
+    relationships: CharacterRelationship[]
+    relationshipEvents: RelationshipEvent[]
   }
 }
 
@@ -40,6 +44,8 @@ export interface BackupSummary {
   messages: number
   userProfiles: number
   memories: number
+  relationships: number
+  relationshipEvents: number
 }
 
 function isRecord(
@@ -63,7 +69,9 @@ export async function createBackup(): Promise<CompanionBackup> {
     chatSettings,
     memories,
     conversationStates,
-    musicStates
+    musicStates,
+    relationships,
+    relationshipEvents
   ] = await Promise.all([
     db.worlds.toArray(),
     db.characters.toArray(),
@@ -74,12 +82,14 @@ export async function createBackup(): Promise<CompanionBackup> {
     db.chatSettings.toArray(),
     db.memories.toArray(),
     db.conversationStates.toArray(),
-    db.musicStates.toArray()
+    db.musicStates.toArray(),
+    db.relationships.toArray(),
+    db.relationshipEvents.toArray()
   ])
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     data: {
       worlds,
@@ -91,7 +101,9 @@ export async function createBackup(): Promise<CompanionBackup> {
       chatSettings,
       memories,
       conversationStates,
-      musicStates
+      musicStates,
+      relationships,
+      relationshipEvents
     }
   }
 }
@@ -106,7 +118,9 @@ export function getBackupSummary(
     conversations: backup.data.conversations.length,
     messages: backup.data.messages.length,
     userProfiles: backup.data.userProfiles.length,
-    memories: backup.data.memories.length
+    memories: backup.data.memories.length,
+    relationships: backup.data.relationships.length,
+    relationshipEvents: backup.data.relationshipEvents.length
   }
 }
 
@@ -163,7 +177,7 @@ export async function parseBackupFile(
     throw new Error('这不是 AI Companion Phone 备份文件。')
   }
 
-  if (parsed.version !== 1 && parsed.version !== 2) {
+  if (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3) {
     throw new Error('当前版本暂不支持此备份版本。')
   }
 
@@ -192,7 +206,7 @@ export async function parseBackupFile(
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 2,
+    version: 3,
     exportedAt:
       typeof parsed.exportedAt === 'string'
         ? parsed.exportedAt
@@ -207,7 +221,9 @@ export async function parseBackupFile(
       chatSettings: optionalArray('chatSettings') as ChatSettings[],
       memories: optionalArray('memories') as CharacterMemory[],
       conversationStates: optionalArray('conversationStates') as ConversationState[],
-      musicStates: optionalArray('musicStates') as MusicState[]
+      musicStates: optionalArray('musicStates') as MusicState[],
+      relationships: optionalArray('relationships') as CharacterRelationship[],
+      relationshipEvents: optionalArray('relationshipEvents') as RelationshipEvent[]
     }
   }
 }
@@ -230,6 +246,8 @@ export async function restoreBackup(
     await db.memories.clear()
     await db.conversationStates.clear()
     await db.musicStates.clear()
+    await db.relationships.clear()
+    await db.relationshipEvents.clear()
 
     if (plainBackup.data.worlds.length) {
       await db.worlds.bulkPut(plainBackup.data.worlds)
@@ -260,6 +278,12 @@ export async function restoreBackup(
     }
     if (plainBackup.data.musicStates.length) {
       await db.musicStates.bulkPut(plainBackup.data.musicStates)
+    }
+    if (plainBackup.data.relationships.length) {
+      await db.relationships.bulkPut(plainBackup.data.relationships)
+    }
+    if (plainBackup.data.relationshipEvents.length) {
+      await db.relationshipEvents.bulkPut(plainBackup.data.relationshipEvents)
     }
   })
 }

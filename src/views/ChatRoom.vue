@@ -62,6 +62,7 @@ import type {
   Conversation,
   ConversationState,
   Message,
+  MessageReplyReference,
   MusicState,
   UserProfile
 } from '../types/domain'
@@ -92,13 +93,21 @@ const newMemoryText = ref('')
 const settingsTab = ref<'chat' | 'memory' | 'advanced'>('chat')
 const activePanel = ref<'thought' | 'music' | 'settings' | 'message' | null>(null)
 const selectedMessage = ref<Message>()
+const replyTarget = ref<Message>()
+const showScrollButton = ref(false)
+const previewImageUrl = ref('')
+const panelDragOffset = ref(0)
+const isPanelDragging = ref(false)
 
 const messageListRef = ref<HTMLElement>()
+const composerRef = ref<HTMLTextAreaElement>()
+const imageInputRef = ref<HTMLInputElement>()
 const audioRef = ref<HTMLAudioElement>()
 let abortController: AbortController | undefined
 let longPressTimer: number | undefined
 let localAudioObjectUrl = ''
 let lastMusicSaveSecond = -1
+let panelDragStartY = 0
 
 const title = computed(() => {
   return character.value?.name || conversation.value?.title || '聊天'
@@ -119,6 +128,11 @@ const providerLabel = computed(() => {
   if (settings.provider === 'openai-compatible') return 'OpenAI 兼容接口'
   return '本地模拟'
 })
+
+const panelStyle = computed(() => ({
+  transform: `translate3d(0, ${panelDragOffset.value}px, 0)`,
+  transition: isPanelDragging.value ? 'none' : undefined
+}))
 
 const memoryCategoryNames: Record<CharacterMemory['category'], string> = {
   profile: '个人信息',
@@ -171,6 +185,19 @@ async function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
     top: element.scrollHeight,
     behavior
   })
+  showScrollButton.value = false
+}
+
+function updateScrollButton() {
+  const element = messageListRef.value
+  if (!element) return
+  const distance = element.scrollHeight - element.scrollTop - element.clientHeight
+  showScrollButton.value = distance > 120
+}
+
+function handleMessageScroll() {
+  rememberScrollPosition()
+  updateScrollButton()
 }
 
 function rememberScrollPosition() {
@@ -196,6 +223,128 @@ async function restoreScrollPosition(conversationId: string) {
   } else {
     element.scrollTop = element.scrollHeight
   }
+}
+
+function messagePreview(message: Message, maxLength = 42) {
+  if (message.type === 'image') return '[图片]'
+  const text = message.content.replace(/\s+/g, ' ').trim()
+  return text.length > maxLength
+    ? `${text.slice(0, maxLength)}…`
+    : text
+}
+
+function messageSenderName(message: Message) {
+  return message.senderId === 'user'
+    ? (userProfile.value?.name || '我')
+    : title.value
+}
+
+function createReplyReference(message: Message): MessageReplyReference {
+  return {
+    messageId: message.id,
+    senderName: messageSenderName(message),
+    preview: messagePreview(message),
+    type: message.type === 'image'
+      ? 'image'
+      : message.type === 'music'
+        ? 'music'
+        : 'text'
+  }
+}
+
+function formatMessageForPrompt(message: Message) {
+  const base = message.type === 'image'
+    ? '用户发送了一张图片。请自然回应这次分享，不要虚构无法确认的图片细节。'
+    : message.content
+
+  if (!message.replyTo) return base
+  return `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。\n${base}`
+}
+
+function autoResizeComposer() {
+  void nextTick(() => {
+    const element = composerRef.value
+    if (!element) return
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, 112)}px`
+  })
+}
+
+function handleComposerFocus() {
+  window.setTimeout(() => {
+    void scrollToBottom('smooth')
+  }, 180)
+}
+
+function openMessageMenu(message: Message) {
+  cancelLongPress()
+  selectedMessage.value = message
+  activePanel.value = 'message'
+  if ('vibrate' in navigator) navigator.vibrate?.(12)
+}
+
+function beginPanelDrag(event: PointerEvent) {
+  panelDragStartY = event.clientY
+  panelDragOffset.value = 0
+  isPanelDragging.value = true
+  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+}
+
+function movePanelDrag(event: PointerEvent) {
+  if (!isPanelDragging.value) return
+  panelDragOffset.value = Math.max(0, event.clientY - panelDragStartY)
+}
+
+function endPanelDrag() {
+  if (!isPanelDragging.value) return
+  isPanelDragging.value = false
+  if (panelDragOffset.value > 92) {
+    activePanel.value = null
+  }
+  panelDragOffset.value = 0
+}
+
+function readFileAsDataUrl(file: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('图片读取失败。'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImage(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('无法解析这张图片。'))
+    image.src = dataUrl
+  })
+}
+
+async function compressImage(file: File) {
+  if (file.size > 12 * 1024 * 1024) {
+    throw new Error('图片不能超过 12 MB。')
+  }
+
+  const source = await readFileAsDataUrl(file)
+  const image = await loadImage(source)
+  const maxSide = 1440
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight))
+
+  if (scale === 1 && file.size <= 1.8 * 1024 * 1024) return source
+
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('当前浏览器无法处理图片。')
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', .84)
+}
+
+function openImagePicker() {
+  imageInputRef.value?.click()
 }
 
 async function loadConversation(conversationId: string) {
@@ -281,6 +430,8 @@ async function loadConversation(conversationId: string) {
 
     await restoreScrollPosition(conversationId)
     await nextTick()
+    autoResizeComposer()
+    updateScrollButton()
     applyAudioState()
   } catch (error) {
     console.error('读取聊天失败：', error)
@@ -482,7 +633,7 @@ async function requestAssistantReply(options?: {
         role: message.senderId === 'user'
           ? ('user' as const)
           : ('assistant' as const),
-        content: message.content
+        content: formatMessageForPrompt(message)
       }))
 
     if (options?.musicPrompt) {
@@ -632,7 +783,10 @@ async function send() {
         type: 'text',
         content: text,
         status: 'read',
-        createdAt: now
+        createdAt: now,
+        replyTo: replyTarget.value
+          ? createReplyReference(replyTarget.value)
+          : undefined
       })
 
       await db.conversations.update(activeConversation.id, {
@@ -640,6 +794,9 @@ async function send() {
       })
     }
   )
+
+  replyTarget.value = undefined
+  autoResizeComposer()
 
   messages.value = await db.messages
     .where('conversationId')
@@ -666,6 +823,75 @@ async function send() {
   }
 
   await requestAssistantReply()
+}
+
+async function handleImageSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+
+  if (!file || !conversation.value || !character.value || isSending.value) return
+  if (!file.type.startsWith('image/')) {
+    noticeMessage.value = '请选择图片文件。'
+    return
+  }
+
+  const activeConversation = conversation.value
+  const messageId = crypto.randomUUID()
+  const now = new Date().toISOString()
+
+  try {
+    noticeMessage.value = '正在整理图片…'
+    const imageDataUrl = await compressImage(file)
+
+    await db.transaction(
+      'rw',
+      db.messages,
+      db.conversations,
+      async () => {
+        await db.messages.add({
+          id: messageId,
+          worldId: activeConversation.worldId,
+          conversationId: activeConversation.id,
+          senderId: 'user',
+          type: 'image',
+          content: '分享了一张图片',
+          status: 'read',
+          createdAt: now,
+          imageDataUrl,
+          imageName: file.name,
+          replyTo: replyTarget.value
+            ? createReplyReference(replyTarget.value)
+            : undefined
+        })
+
+        await db.conversations.update(activeConversation.id, {
+          updatedAt: now
+        })
+      }
+    )
+
+    replyTarget.value = undefined
+    noticeMessage.value = ''
+    messages.value = await db.messages
+      .where('conversationId')
+      .equals(activeConversation.id)
+      .sortBy('createdAt')
+
+    await scrollToBottom()
+
+    relationship.value = await recordInteraction({
+      character: character.value,
+      conversationId: activeConversation.id,
+      message: messages.value[messages.value.length - 1]
+    })
+
+    await requestAssistantReply()
+  } catch (error) {
+    noticeMessage.value = error instanceof Error
+      ? error.message
+      : '图片发送失败。'
+  }
 }
 
 function stopGeneration() {
@@ -794,8 +1020,7 @@ async function clearConversationMessages() {
 function startLongPress(message: Message) {
   cancelLongPress()
   longPressTimer = window.setTimeout(() => {
-    selectedMessage.value = message
-    activePanel.value = 'message'
+    openMessageMenu(message)
   }, 480)
 }
 
@@ -813,6 +1038,17 @@ async function copySelectedMessage() {
   activePanel.value = null
 }
 
+function replyToSelectedMessage() {
+  if (!selectedMessage.value) return
+  replyTarget.value = selectedMessage.value
+  activePanel.value = null
+  void nextTick(() => composerRef.value?.focus())
+}
+
+function cancelReply() {
+  replyTarget.value = undefined
+}
+
 async function deleteSelectedMessage() {
   const message = selectedMessage.value
   if (!message) return
@@ -825,6 +1061,9 @@ async function deleteSelectedMessage() {
 
   await db.messages.bulkDelete(ids)
   messages.value = messages.value.filter(item => !ids.includes(item.id))
+  if (replyTarget.value && ids.includes(replyTarget.value.id)) {
+    replyTarget.value = undefined
+  }
   activePanel.value = null
 }
 
@@ -1005,10 +1244,16 @@ watch(
 )
 
 watch(draft, value => {
+  autoResizeComposer()
   if (!conversation.value) return
   const key = draftStorageKey(conversation.value.id)
   if (value) localStorage.setItem(key, value)
   else localStorage.removeItem(key)
+})
+
+watch(activePanel, () => {
+  panelDragOffset.value = 0
+  isPanelDragging.value = false
 })
 
 onUnmounted(() => {
@@ -1093,7 +1338,7 @@ onUnmounted(() => {
       <div
         ref="messageListRef"
         class="message-list"
-        @scroll="rememberScrollPosition"
+        @scroll="handleMessageScroll"
       >
         <template
           v-for="(message, index) in messages"
@@ -1126,29 +1371,58 @@ onUnmounted(() => {
                 :class="[
                   'bubble',
                   'bubble--theirs',
-                  { 'bubble--music': message.type === 'music' }
+                  {
+                    'bubble--music': message.type === 'music',
+                    'bubble--image': message.type === 'image'
+                  }
                 ]"
                 type="button"
                 @pointerdown="startLongPress(message)"
                 @pointerup="cancelLongPress"
                 @pointerleave="cancelLongPress"
-                @contextmenu.prevent="selectedMessage = message; activePanel = 'message'"
+                @pointercancel="cancelLongPress"
+                @contextmenu.prevent="openMessageMenu(message)"
               >
-                <span v-if="message.type === 'music'" class="music-message-mark">♫</span>
-                {{ message.content }}
+                <span v-if="message.replyTo" class="message-reply-quote">
+                  <b>{{ message.replyTo.senderName }}</b>
+                  <span>{{ message.replyTo.preview }}</span>
+                </span>
+                <img
+                  v-if="message.type === 'image' && message.imageDataUrl"
+                  :src="message.imageDataUrl"
+                  :alt="message.imageName || '聊天图片'"
+                  class="message-image"
+                  @click.stop="previewImageUrl = message.imageDataUrl || ''"
+                />
+                <template v-else>
+                  <span v-if="message.type === 'music'" class="music-message-mark">♫</span>
+                  {{ message.content }}
+                </template>
               </button>
             </template>
 
             <template v-else>
               <button
-                class="bubble bubble--mine"
+                :class="['bubble', 'bubble--mine', { 'bubble--image': message.type === 'image' }]"
                 type="button"
                 @pointerdown="startLongPress(message)"
                 @pointerup="cancelLongPress"
                 @pointerleave="cancelLongPress"
-                @contextmenu.prevent="selectedMessage = message; activePanel = 'message'"
+                @pointercancel="cancelLongPress"
+                @contextmenu.prevent="openMessageMenu(message)"
               >
-                {{ message.content }}
+                <span v-if="message.replyTo" class="message-reply-quote message-reply-quote--mine">
+                  <b>{{ message.replyTo.senderName }}</b>
+                  <span>{{ message.replyTo.preview }}</span>
+                </span>
+                <img
+                  v-if="message.type === 'image' && message.imageDataUrl"
+                  :src="message.imageDataUrl"
+                  :alt="message.imageName || '聊天图片'"
+                  class="message-image"
+                  @click.stop="previewImageUrl = message.imageDataUrl || ''"
+                />
+                <template v-else>{{ message.content }}</template>
               </button>
 
               <CharacterAvatar
@@ -1183,20 +1457,48 @@ onUnmounted(() => {
         </p>
       </div>
 
+      <button
+        v-if="showScrollButton"
+        class="scroll-bottom-button"
+        type="button"
+        aria-label="回到最新消息"
+        @click="scrollToBottom()"
+      >
+        ↓
+      </button>
+
+      <div v-if="replyTarget" class="reply-preview-bar">
+        <div>
+          <b>回复 {{ messageSenderName(replyTarget) }}</b>
+          <span>{{ messagePreview(replyTarget, 56) }}</span>
+        </div>
+        <button type="button" aria-label="取消回复" @click="cancelReply">×</button>
+      </div>
+
       <form class="composer" @submit.prevent="send">
+        <input
+          ref="imageInputRef"
+          class="image-input"
+          type="file"
+          accept="image/*"
+          @change="handleImageSelected"
+        />
         <button
           type="button"
           class="composer-side-button"
-          @click="openMusicPanel"
+          @click="openImagePicker"
         >
           ＋
         </button>
 
         <textarea
+          ref="composerRef"
           v-model="draft"
           :disabled="isSending"
           rows="1"
           placeholder="输入消息..."
+          @input="autoResizeComposer"
+          @focus="handleComposerFocus"
           @keydown="handleComposerKeydown"
         ></textarea>
 
@@ -1227,8 +1529,15 @@ onUnmounted(() => {
         <section
           v-if="activePanel === 'thought'"
           class="bottom-panel thought-panel"
+          :style="panelStyle"
         >
-          <div class="panel-handle"></div>
+          <div
+            class="panel-handle"
+            @pointerdown="beginPanelDrag"
+            @pointermove="movePanelDrag"
+            @pointerup="endPanelDrag"
+            @pointercancel="endPanelDrag"
+          ></div>
           <div class="panel-title-row">
             <div>
               <small>此刻的 {{ title }}</small>
@@ -1279,8 +1588,15 @@ onUnmounted(() => {
         <section
           v-else-if="activePanel === 'music'"
           class="bottom-panel music-panel"
+          :style="panelStyle"
         >
-          <div class="panel-handle"></div>
+          <div
+            class="panel-handle"
+            @pointerdown="beginPanelDrag"
+            @pointermove="movePanelDrag"
+            @pointerup="endPanelDrag"
+            @pointercancel="endPanelDrag"
+          ></div>
           <div class="panel-title-row">
             <div>
               <small>共享此刻的声音</small>
@@ -1354,8 +1670,15 @@ onUnmounted(() => {
         <section
           v-else-if="activePanel === 'settings'"
           class="bottom-panel settings-panel"
+          :style="panelStyle"
         >
-          <div class="panel-handle"></div>
+          <div
+            class="panel-handle"
+            @pointerdown="beginPanelDrag"
+            @pointermove="movePanelDrag"
+            @pointerup="endPanelDrag"
+            @pointercancel="endPanelDrag"
+          ></div>
           <div class="panel-title-row">
             <div>
               <small>{{ title }}</small>
@@ -1489,10 +1812,25 @@ onUnmounted(() => {
         <section
           v-else-if="activePanel === 'message'"
           class="action-panel"
+          :style="panelStyle"
         >
-          <div class="panel-handle"></div>
-          <p class="selected-preview">{{ selectedMessage?.content }}</p>
-          <button type="button" @click="copySelectedMessage">复制</button>
+          <div
+            class="panel-handle"
+            @pointerdown="beginPanelDrag"
+            @pointermove="movePanelDrag"
+            @pointerup="endPanelDrag"
+            @pointercancel="endPanelDrag"
+          ></div>
+          <div class="selected-preview">
+            <img
+              v-if="selectedMessage?.type === 'image' && selectedMessage.imageDataUrl"
+              :src="selectedMessage.imageDataUrl"
+              alt="所选图片"
+            />
+            <p>{{ selectedMessage ? messagePreview(selectedMessage, 90) : '' }}</p>
+          </div>
+          <button type="button" @click="replyToSelectedMessage">回复</button>
+          <button v-if="selectedMessage?.type !== 'image'" type="button" @click="copySelectedMessage">复制</button>
           <button
             v-if="selectedMessage?.senderId !== 'user'"
             type="button"
@@ -1504,6 +1842,15 @@ onUnmounted(() => {
           <button type="button" class="danger-text" @click="deleteSelectedMessage">删除</button>
           <button type="button" @click="activePanel = null">取消</button>
         </section>
+      </div>
+
+      <div
+        v-if="previewImageUrl"
+        class="image-preview-backdrop"
+        @click="previewImageUrl = ''"
+      >
+        <button type="button" aria-label="关闭图片预览">×</button>
+        <img :src="previewImageUrl" alt="聊天图片预览" />
       </div>
     </section>
   </PhoneFrame>
@@ -2092,4 +2439,269 @@ onUnmounted(() => {
 .relationship-glance small { color: #8b6d79; }
 .relationship-glance strong { color: #b65f86; }
 .relationship-glance small { grid-column: 1 / -1; }
+
+
+/* V0.3.1：沉浸式聊天交互 */
+.message-list {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.message-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.message-row {
+  animation: bubble-in .22s cubic-bezier(.2, .82, .24, 1) both;
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 7px, 0) scale(.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.bubble {
+  overflow: hidden;
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+}
+
+.bubble--image {
+  width: min(248px, 68vw);
+  max-width: 74%;
+  padding: 4px;
+  line-height: 0;
+}
+
+.message-image {
+  display: block;
+  width: 100%;
+  max-height: 330px;
+  object-fit: cover;
+  border-radius: 13px;
+  cursor: zoom-in;
+}
+
+.message-reply-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: -3px -4px 8px;
+  padding: 6px 8px;
+  overflow: hidden;
+  border-left: 3px solid rgba(210, 102, 148, .58);
+  border-radius: 7px;
+  background: rgba(221, 195, 206, .25);
+  line-height: 1.35;
+  font-size: 11px;
+  color: #856673;
+}
+
+.message-reply-quote b,
+.message-reply-quote span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-reply-quote--mine {
+  border-left-color: rgba(255, 255, 255, .72);
+  background: rgba(255, 255, 255, .18);
+  color: rgba(255, 255, 255, .92);
+}
+
+.reply-preview-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 7px;
+  border-top: 1px solid rgba(0, 0, 0, .045);
+  background: rgba(255, 255, 255, .91);
+}
+
+.reply-preview-bar > div {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 9px;
+  border-left: 3px solid #da729f;
+}
+
+.reply-preview-bar b {
+  color: #ba5e86;
+  font-size: 12px;
+}
+
+.reply-preview-bar span {
+  overflow: hidden;
+  color: #8c717c;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reply-preview-bar > button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: #f4e9ed;
+  color: #785d69;
+  font-size: 19px;
+}
+
+.image-input {
+  display: none;
+}
+
+.composer textarea {
+  height: 42px;
+  overflow-y: auto;
+  transition: height .12s ease;
+}
+
+.scroll-bottom-button {
+  position: absolute;
+  z-index: 8;
+  right: 17px;
+  bottom: calc(78px + env(safe-area-inset-bottom));
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(113, 75, 91, .1);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .94);
+  color: #9c6079;
+  font-size: 20px;
+  box-shadow: 0 7px 22px rgba(80, 49, 62, .15);
+  backdrop-filter: blur(14px);
+  animation: scroll-button-in .18s ease both;
+}
+
+@keyframes scroll-button-in {
+  from { opacity: 0; transform: translateY(8px) scale(.92); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.panel-backdrop {
+  animation: backdrop-in .18s ease both;
+}
+
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.bottom-panel,
+.action-panel {
+  transition: transform .24s cubic-bezier(.22, .8, .24, 1);
+  will-change: transform;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.panel-handle {
+  position: relative;
+  width: 84px;
+  height: 17px;
+  margin-top: -3px;
+  background: transparent;
+  touch-action: none;
+  cursor: grab;
+}
+
+.panel-handle::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 42px;
+  height: 5px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: #dccbd2;
+}
+
+.panel-handle:active {
+  cursor: grabbing;
+}
+
+.selected-preview {
+  max-height: 140px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.selected-preview img {
+  width: 68px;
+  height: 68px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border-radius: 11px;
+}
+
+.selected-preview p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  line-height: 1.55;
+}
+
+.image-preview-backdrop {
+  position: absolute;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(25, 18, 22, .91);
+  backdrop-filter: blur(14px);
+  animation: backdrop-in .18s ease both;
+}
+
+.image-preview-backdrop img {
+  max-width: 100%;
+  max-height: 88%;
+  object-fit: contain;
+  border-radius: 18px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .34);
+}
+
+.image-preview-backdrop button {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  right: 14px;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+  font-size: 25px;
+}
+
+@media (max-width: 460px) {
+  .composer {
+    padding-bottom: max(14px, calc(env(safe-area-inset-bottom) + 7px));
+  }
+
+  .scroll-bottom-button {
+    bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+}
+
 </style>

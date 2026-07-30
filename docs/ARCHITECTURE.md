@@ -1305,3 +1305,30 @@ deepseek-reasoner
 ### 22.6 请求取消与降级
 
 `ChatRequest` 支持 `AbortSignal`。用户点击停止后中断网络请求、Mock 等待或多气泡间隔。在线 Provider 失败时是否降级由全局模型设置和当前会话 `autoFallback` 共同决定。
+
+---
+
+## V0.3.1 交互层补充
+
+### 消息扩展
+
+`Message` 支持：
+
+- `type: 'image'`
+- `imageDataUrl`
+- `imageName`
+- `replyTo` 引用消息快照
+
+引用使用快照而不是运行时关联查询，即使原消息被删除，已发送的引用气泡仍能显示当时的发送者与摘要。
+
+### 图片保存策略
+
+图片选择后在浏览器端缩放到最长边不超过 1440 像素，并在需要时压缩为 JPEG。压缩结果以 Data URL 写入 IndexedDB，适合当前本地原型；未来大量图片场景应迁移到 Blob 表或对象存储。
+
+### 视口与键盘
+
+`PhoneFrame` 监听 `window.visualViewport`，将可视高度写入 `--app-viewport-height`。手机软键盘出现时，手机外框和聊天区域使用新的可视高度重新布局，减少输入框被遮挡或页面整体跳动。
+
+### 底部面板手势
+
+面板顶部拖动条使用 Pointer Events 和 pointer capture。向下位移超过阈值时关闭，未超过阈值时回弹。面板内容区域仍保持独立滚动。
