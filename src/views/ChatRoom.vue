@@ -1625,6 +1625,17 @@ onUnmounted(() => {
   overflow-y: auto;
   padding: 12px 13px 24px;
   overscroll-behavior: contain;
+
+  /* 隐藏滚动条 */
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE / Edge */
+  -webkit-overflow-scrolling: touch;
+}
+
+.message-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .message-time {

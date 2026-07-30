@@ -54,3 +54,19 @@ defineProps<{
     </section>
   </main>
 </template>
+
+<style scoped>
+.phone-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.phone-content::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+</style>
