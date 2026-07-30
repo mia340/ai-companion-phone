@@ -20,6 +20,8 @@ export function createDefaultChatSettings(
     naturalDelay: true,
     innerThoughtVisibility: 'thoughts',
     autoFallback: true,
+    proactiveEnabled: true,
+    proactiveIntervalHours: 12,
     updatedAt: new Date().toISOString()
   }
 }
@@ -38,6 +40,8 @@ export async function saveChatSettings(
   await db.chatSettings.put({
     ...value,
     id: value.conversationId,
+    proactiveEnabled: value.proactiveEnabled ?? true,
+    proactiveIntervalHours: Math.min(168, Math.max(1, Math.round(value.proactiveIntervalHours ?? 12))),
     recentMessageLimit: Math.min(
       60,
       Math.max(6, Math.round(value.recentMessageLimit))

@@ -11,6 +11,8 @@ import type {
   ConversationState,
   Message,
   MusicState,
+  CharacterRelationship,
+  RelationshipEvent,
   UserProfile,
   World
 } from '../types/domain'
@@ -29,6 +31,8 @@ export class CompanionDatabase extends Dexie {
   memories!: EntityTable<CharacterMemory, 'id'>
   conversationStates!: EntityTable<ConversationState, 'id'>
   musicStates!: EntityTable<MusicState, 'id'>
+  relationships!: EntityTable<CharacterRelationship, 'id'>
+  relationshipEvents!: EntityTable<RelationshipEvent, 'id'>
 
   constructor() {
     super('companion-world-v1')
@@ -74,6 +78,24 @@ export class CompanionDatabase extends Dexie {
       conversationStates: 'id, updatedAt',
       musicStates: 'id, updatedAt'
     })
+
+    // V5：关系成长、动态情绪、主动陪伴与关系事件。
+    this.version(5).stores({
+      worlds: 'id, createdAt',
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt, status',
+      userProfiles: 'id, updatedAt',
+      modelSettings: 'id, provider, updatedAt',
+      chatSettings: 'id, conversationId, updatedAt',
+      memories: 'id, conversationId, characterId, importance, updatedAt',
+      conversationStates: 'id, updatedAt',
+      musicStates: 'id, updatedAt',
+      relationships: 'id, characterId, stage, updatedAt',
+      relationshipEvents: 'id, characterId, conversationId, createdAt'
+    })
+
   }
 }
 

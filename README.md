@@ -1,6 +1,6 @@
 # 虚拟手机 · AI 陪伴世界
 
-V0.2.0 可交互原型：Vue 3 + TypeScript + Vite + Pinia + Vue Router + Dexie + PWA。
+V0.3.0 可交互原型：Vue 3 + TypeScript + Vite + Pinia + Vue Router + Dexie + PWA。
 
 ## 本地运行
 
@@ -15,7 +15,7 @@ npm run dev
 npm run build
 ```
 
-## V0.2.0 已完成
+## V0.3.0 已完成
 
 - 干净的真实手机式聊天页，不在主界面展示模型名称或接口状态
 - 点击聊天顶部头像查看角色化心情、状态与可公开的心理活动

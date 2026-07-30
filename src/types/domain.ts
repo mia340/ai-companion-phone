@@ -97,6 +97,7 @@ export type InnerThoughtVisibility =
   | 'thoughts'
   | 'detailed'
 export type ReplyLength = 'short' | 'natural' | 'long'
+export type RelationshipStage = '初识' | '熟悉' | '亲近' | '依赖' | '特别关系'
 
 export interface ChatSettings {
   id: UUID
@@ -110,6 +111,8 @@ export interface ChatSettings {
   naturalDelay: boolean
   innerThoughtVisibility: InnerThoughtVisibility
   autoFallback: boolean
+  proactiveEnabled: boolean
+  proactiveIntervalHours: number
   updatedAt: string
 }
 
@@ -156,4 +159,31 @@ export interface MusicState {
   isPlaying: boolean
   lastReactionTrackKey?: string
   updatedAt: string
+}
+
+
+export interface CharacterRelationship {
+  id: UUID
+  characterId: UUID
+  intimacy: number
+  trust: number
+  familiarity: number
+  stage: RelationshipStage
+  emotion: string
+  emotionReason: string
+  lastInteractionAt: string
+  lastProactiveAt: string
+  chatDays: number
+  musicCount: number
+  updatedAt: string
+}
+
+export interface RelationshipEvent {
+  id: UUID
+  characterId: UUID
+  conversationId: UUID
+  type: 'first-chat' | 'stage' | 'music' | 'promise' | 'special'
+  title: string
+  description: string
+  createdAt: string
 }

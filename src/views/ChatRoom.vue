@@ -44,12 +44,20 @@ import {
   generateVisibleCharacterState
 } from '../services/characterStateService'
 import {
+  getRelationship,
+  maybeCreateProactiveMessage,
+  recordInteraction,
+  recordMusicMoment,
+  relationshipPrompt
+} from '../services/relationshipService'
+import {
   getOrCreateUserProfile
 } from '../services/userProfile'
 
 import type {
   Character,
   CharacterMemory,
+  CharacterRelationship,
   ChatSettings,
   Conversation,
   ConversationState,
@@ -73,6 +81,7 @@ const chatSettings = ref<ChatSettings>()
 const conversationState = ref<ConversationState>()
 const musicState = ref<MusicState>()
 const modelSettings = ref<ModelSettings>()
+const relationship = ref<CharacterRelationship>()
 
 const draft = ref('')
 const isSending = ref(false)
@@ -237,6 +246,9 @@ async function loadConversation(conversationId: string) {
     musicState.value = musicRow
     memories.value = memoryRows
     modelSettings.value = modelRow
+    relationship.value = characterRow
+      ? await getRelationship(characterRow.id)
+      : undefined
     draft.value = localStorage.getItem(draftStorageKey(conversationId)) ?? ''
 
     if (musicRow.sourceType === 'local') {
@@ -250,6 +262,21 @@ async function loadConversation(conversationId: string) {
     if (conversationRow.unread > 0) {
       await db.conversations.update(conversationRow.id, { unread: 0 })
       conversation.value = { ...conversationRow, unread: 0 }
+    }
+
+    if (characterRow) {
+      const proactive = await maybeCreateProactiveMessage({
+        character: characterRow,
+        conversationId,
+        worldId: conversationRow.worldId,
+        messages: messageRows,
+        enabled: settingsRow.proactiveEnabled ?? true,
+        intervalHours: settingsRow.proactiveIntervalHours ?? 12
+      })
+      if (proactive) {
+        messages.value = [...messageRows, proactive]
+        relationship.value = await getRelationship(characterRow.id)
+      }
     }
 
     await restoreScrollPosition(conversationId)
@@ -290,6 +317,7 @@ function buildSystemPrompt(
     `用户身份：${activeProfile?.identity ?? '未设置'}`,
     `用户简介：${activeProfile?.bio ?? '未设置'}`,
     memoryPrompt,
+    relationship.value ? relationshipPrompt(relationship.value) : '',
     lengthRule,
     settings.multiBubble
       ? '可以用空行把自然的连续消息分开，最多三段。'
@@ -620,6 +648,12 @@ async function send() {
 
   await scrollToBottom()
 
+  relationship.value = await recordInteraction({
+    character: character.value,
+    conversationId: activeConversation.id,
+    message: messages.value[messages.value.length - 1]
+  })
+
   if (chatSettings.value?.memoryEnabled) {
     await rememberFromMessage({
       conversationId: activeConversation.id,
@@ -923,6 +957,11 @@ async function askMusicReaction() {
     '不要说你无法听歌，也不要解释技术限制。'
   ].join('\n')
 
+  if (character.value && conversation.value) {
+    await recordMusicMoment(character.value.id, conversation.value.id, music.title)
+    relationship.value = await getRelationship(character.value.id)
+  }
+
   activePanel.value = null
   await requestAssistantReply({
     musicPrompt: prompt,
@@ -1216,6 +1255,12 @@ onUnmounted(() => {
               “{{ conversationState?.innerThought || '正在想着你刚才说的话。' }}”
             </blockquote>
 
+            <div v-if="relationship" class="relationship-glance">
+              <span>你们的关系</span>
+              <strong>{{ relationship.stage }}</strong>
+              <small>{{ relationship.emotionReason }}</small>
+            </div>
+
             <button
               class="panel-primary"
               type="button"
@@ -1224,7 +1269,6 @@ onUnmounted(() => {
             >
               {{ isLoadingThought ? '正在感受此刻…' : '看看现在有没有变化' }}
             </button>
-           
           </template>
 
           <div v-else class="panel-empty">
@@ -1358,6 +1402,21 @@ onUnmounted(() => {
                 <option value="simple">简单状态</option>
                 <option value="thoughts">心情与想法</option>
                 <option value="detailed">详细内心独白</option>
+              </select>
+            </label>
+
+            <label class="setting-switch">
+              <span><b>主动来找你</b><small>久未聊天时，打开应用可能收到一条自然问候</small></span>
+              <input v-model="chatSettings.proactiveEnabled" type="checkbox" @change="persistChatSettings" />
+            </label>
+
+            <label v-if="chatSettings.proactiveEnabled" class="setting-control">
+              <span><b>多久后会想起你</b><small>至少间隔一段时间，不会频繁打扰</small></span>
+              <select v-model.number="chatSettings.proactiveIntervalHours" @change="persistChatSettings">
+                <option :value="6">6 小时</option>
+                <option :value="12">12 小时</option>
+                <option :value="24">1 天</option>
+                <option :value="72">3 天</option>
               </select>
             </label>
 
@@ -2008,4 +2067,18 @@ onUnmounted(() => {
   font-weight: 700;
 }
 .action-panel .danger-text { color: #b44f68; }
+
+.relationship-glance {
+  margin: 14px 0;
+  padding: 13px 15px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 12px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.68);
+}
+.relationship-glance span,
+.relationship-glance small { color: #8b6d79; }
+.relationship-glance strong { color: #b65f86; }
+.relationship-glance small { grid-column: 1 / -1; }
 </style>
