@@ -72,13 +72,12 @@ function handleKeydown(event: KeyboardEvent) {
   if (
     event.key === 'Enter' &&
     !event.shiftKey &&
-    !event.isComposing
+    !event.isComposing &&
+    props.canSend &&
+    !props.isSending
   ) {
     event.preventDefault()
-
-    if (props.canSend && !props.isSending) {
-      emit('submit')
-    }
+    emit('submit')
   }
 }
 
@@ -163,8 +162,12 @@ defineExpose({
     <textarea
       ref="textareaRef"
       :value="modelValue"
-      :disabled="isSending"
       rows="1"
+      inputmode="text"
+      enterkeyhint="send"
+      autocomplete="off"
+      autocapitalize="sentences"
+      aria-label="消息输入框"
       :placeholder="pendingImage ? '为图片添加一句话…' : '输入消息…'"
       @input="handleInput"
       @focus="emit('focus')"
@@ -283,6 +286,10 @@ defineExpose({
   background: #fff;
   line-height: 1.45;
   transition: height .12s ease;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: auto;
+  pointer-events: auto;
 }
 
 .image-input { display: none; }
