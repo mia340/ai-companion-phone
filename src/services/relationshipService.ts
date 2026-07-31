@@ -64,14 +64,28 @@ export async function recordInteraction(options: {
   message: Message
 }) {
   const current = await getRelationship(options.character.id)
-  const mood = inferEmotion(options.message.content)
+  const isImage = options.message.type === 'image'
+  const mood = isImage
+    ? {
+      emotion: '好奇',
+      reason: options.message.content.trim()
+        ? '正在认真看你分享的图片和附言'
+        : '因为你愿意分享眼前的画面'
+    }
+    : inferEmotion(options.message.content)
   const oldStage = current.stage
   const now = new Date().toISOString()
   const next: CharacterRelationship = {
     ...current,
-    intimacy: current.intimacy + (options.message.content.length > 20 ? 2 : 1),
+    intimacy: current.intimacy + (
+      isImage
+        ? 2
+        : options.message.content.length > 20
+          ? 2
+          : 1
+    ),
     trust: current.trust + (/秘密|相信|答应|约定/.test(options.message.content) ? 2 : 0.5),
-    familiarity: current.familiarity + 1,
+    familiarity: current.familiarity + (isImage ? 1.5 : 1),
     emotion: mood.emotion,
     emotionReason: mood.reason,
     lastInteractionAt: now

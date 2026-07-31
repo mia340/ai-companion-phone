@@ -1,6 +1,23 @@
+export interface ChatTextPart {
+  type: 'text'
+  text: string
+}
+
+export interface ChatImagePart {
+  type: 'image_url'
+  image_url: {
+    url: string
+    detail?: 'auto' | 'low' | 'high'
+  }
+}
+
+export type ChatTurnContent =
+  | string
+  | Array<ChatTextPart | ChatImagePart>
+
 export interface ChatTurn {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: ChatTurnContent
 }
 
 export interface CharacterReplyContext {
@@ -44,6 +61,7 @@ export interface ModelProvider {
   ): Promise<ChatResponse>
   listModels(): Promise<ProviderModel[]>
   testConnection(): Promise<boolean>
+  testVision(): Promise<boolean>
 }
 
 interface StyleProfile {
@@ -89,6 +107,15 @@ function pick<T>(
   seed: number
 ): T {
   return values[seed % values.length]
+}
+
+function contentToText(content: ChatTurnContent) {
+  if (typeof content === 'string') return content
+
+  return content
+    .filter((part): part is ChatTextPart => part.type === 'text')
+    .map(part => part.text)
+    .join('\n')
 }
 
 function firstSentence(value?: string) {
@@ -212,7 +239,13 @@ function createMockReply(
     [...request.messages]
       .reverse()
       .find(item => item.role === 'user')
-      ?.content.trim() ?? ''
+      ? contentToText(
+        [...request.messages]
+          .reverse()
+          .find(item => item.role === 'user')!
+          .content
+      ).trim()
+      : ''
 
   const context = request.character
   const style = detectStyle(context)
@@ -852,6 +885,10 @@ implements ModelProvider {
   async testConnection() {
     return true
   }
+
+  async testVision() {
+    return false
+  }
 }
 
 export interface OpenAICompatibleProviderOptions {
@@ -866,7 +903,7 @@ export interface OpenAICompatibleProviderOptions {
 interface OpenAIChatCompletionResponse {
   choices?: Array<{
     message?: {
-      content?: string
+      content?: string | Array<{ type?: string; text?: string }>
     }
   }>
   error?: {
@@ -941,6 +978,18 @@ function extractErrorMessage(
   return ''
 }
 
+export class ProviderHttpError extends Error {
+  readonly status: number
+  readonly providerMessage: string
+
+  constructor(status: number, message: string, providerMessage = '') {
+    super(message)
+    this.name = 'ProviderHttpError'
+    this.status = status
+    this.providerMessage = providerMessage
+  }
+}
+
 function createHttpError(
   status: number,
   providerMessage = ''
@@ -949,46 +998,61 @@ function createHttpError(
     ? `：${providerMessage}`
     : ''
 
+  let message: string
+
   if (status === 400) {
-    return new Error(
-      `请求格式或模型名称错误${suffix}`
-    )
+    message = `请求格式或模型名称错误${suffix}`
+  } else if (status === 401) {
+    message = `API Key 无效或已失效${suffix}`
+  } else if (status === 403) {
+    message = `没有接口访问权限，或账户余额不足${suffix}`
+  } else if (status === 404) {
+    message = `没有找到接口，请检查 API 地址是否需要包含 /v1${suffix}`
+  } else if (status === 429) {
+    message = `请求过于频繁，或接口额度不足${suffix}`
+  } else if (status >= 500) {
+    message = `模型服务暂时异常（HTTP ${status}）${suffix}`
+  } else {
+    message = `模型请求失败（HTTP ${status}）${suffix}`
   }
 
-  if (status === 401) {
-    return new Error(
-      `API Key 无效或已失效${suffix}`
-    )
-  }
-
-  if (status === 403) {
-    return new Error(
-      `没有接口访问权限，或账户余额不足${suffix}`
-    )
-  }
-
-  if (status === 404) {
-    return new Error(
-      `没有找到接口，请检查 API 地址是否需要包含 /v1${suffix}`
-    )
-  }
-
-  if (status === 429) {
-    return new Error(
-      `请求过于频繁，或接口额度不足${suffix}`
-    )
-  }
-
-  if (status >= 500) {
-    return new Error(
-      `模型服务暂时异常（HTTP ${status}）${suffix}`
-    )
-  }
-
-  return new Error(
-    `模型请求失败（HTTP ${status}）${suffix}`
-  )
+  return new ProviderHttpError(status, message, providerMessage)
 }
+
+export function isVisionUnsupportedError(error: unknown) {
+  if (!(error instanceof Error)) return false
+
+  const source = error.message.toLowerCase()
+  const visionTerms = [
+    'image_url',
+    'image input',
+    'vision',
+    'multimodal',
+    'content must be a string',
+    'unsupported content',
+    'does not support image',
+    '不支持图片',
+    '不支持图像',
+    '不支持多模态',
+    '消息内容必须是字符串',
+    'invalid content type',
+    'content array',
+    'array is not allowed',
+    'expected string'
+  ]
+
+  const status = error instanceof ProviderHttpError
+    ? error.status
+    : undefined
+
+  return (
+    status === 400 ||
+    status === 404 ||
+    status === 415 ||
+    status === 422
+  ) && visionTerms.some(term => source.includes(term))
+}
+
 
 async function readJsonResponse(
   response: Response
@@ -1097,6 +1161,21 @@ function parseModelEntries(
   return [...unique.values()]
 }
 
+function extractAssistantText(
+  content: string | Array<{ type?: string; text?: string }> | undefined
+) {
+  if (typeof content === 'string') return content.trim()
+  if (!Array.isArray(content)) return ''
+
+  return content
+    .map(part => typeof part?.text === 'string' ? part.text : '')
+    .join('')
+    .trim()
+}
+
+const VISION_TEST_IMAGE =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zq2sAAAAASUVORK5CYII='
+
 export class OpenAICompatibleProvider
 implements ModelProvider {
   id: string
@@ -1198,8 +1277,9 @@ implements ModelProvider {
       )
     }
 
-    const text =
-      data.choices?.[0]?.message?.content?.trim()
+    const text = extractAssistantText(
+      data.choices?.[0]?.message?.content
+    )
 
     if (!text) {
       throw new Error('模型没有返回有效回复。')
@@ -1269,6 +1349,33 @@ implements ModelProvider {
         {
           role: 'user',
           content: '请只回复“连接成功”。'
+        }
+      ]
+    })
+
+    return true
+  }
+
+  async testVision(): Promise<boolean> {
+    await this.chat({
+      model: this.model,
+      temperature: 0,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: '这是一张极小的测试图片。请只回复“图片可读”。'
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: VISION_TEST_IMAGE,
+                detail: 'low'
+              }
+            }
+          ]
         }
       ]
     })

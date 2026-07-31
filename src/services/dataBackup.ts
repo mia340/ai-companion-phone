@@ -1,4 +1,5 @@
 import { db } from '../db/database'
+import { estimateDataUrlBytes } from './imageService'
 
 import type {
   Character,
@@ -17,7 +18,7 @@ import type {
 
 export interface CompanionBackup {
   format: 'ai-companion-phone-backup'
-  version: 3
+  version: 4
   exportedAt: string
 
   data: {
@@ -46,6 +47,8 @@ export interface BackupSummary {
   memories: number
   relationships: number
   relationshipEvents: number
+  images: number
+  imageBytes: number
 }
 
 function isRecord(
@@ -58,7 +61,9 @@ function isRecord(
   )
 }
 
-export async function createBackup(): Promise<CompanionBackup> {
+export async function createBackup(options?: {
+  includeImages?: boolean
+}): Promise<CompanionBackup> {
   const [
     worlds,
     characters,
@@ -87,16 +92,25 @@ export async function createBackup(): Promise<CompanionBackup> {
     db.relationshipEvents.toArray()
   ])
 
+  const includeImages = options?.includeImages ?? true
+  const exportMessages = includeImages
+    ? messages
+    : messages.map(message => ({
+      ...message,
+      imageDataUrl: undefined,
+      imageBytes: undefined
+    }))
+
   return {
     format: 'ai-companion-phone-backup',
-    version: 3,
+    version: 4,
     exportedAt: new Date().toISOString(),
     data: {
       worlds,
       characters,
       contactGroups,
       conversations,
-      messages,
+      messages: exportMessages,
       userProfiles,
       chatSettings,
       memories,
@@ -120,7 +134,12 @@ export function getBackupSummary(
     userProfiles: backup.data.userProfiles.length,
     memories: backup.data.memories.length,
     relationships: backup.data.relationships.length,
-    relationshipEvents: backup.data.relationshipEvents.length
+    relationshipEvents: backup.data.relationshipEvents.length,
+    images: backup.data.messages.filter(message => Boolean(message.imageDataUrl)).length,
+    imageBytes: backup.data.messages.reduce((total, message) => {
+      if (!message.imageDataUrl) return total
+      return total + (message.imageBytes || estimateDataUrlBytes(message.imageDataUrl))
+    }, 0)
   }
 }
 
@@ -177,7 +196,7 @@ export async function parseBackupFile(
     throw new Error('这不是 AI Companion Phone 备份文件。')
   }
 
-  if (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3) {
+  if (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4) {
     throw new Error('当前版本暂不支持此备份版本。')
   }
 
@@ -206,7 +225,7 @@ export async function parseBackupFile(
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 3,
+    version: 4,
     exportedAt:
       typeof parsed.exportedAt === 'string'
         ? parsed.exportedAt

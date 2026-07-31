@@ -11,13 +11,18 @@ import PhoneFrame from '../components/PhoneFrame.vue'
 import {
   getModelSettings,
   getProviderDefaults,
+  getVisionCapability,
   normalizeApiBaseUrl,
-  saveModelSettings
+  saveModelSettings,
+  saveVisionCapability
 } from '../services/modelSettings'
 
 import {
   createProvider
 } from '../services/ai/providerFactory'
+import {
+  isVisionUnsupportedError
+} from '../services/ai/provider'
 
 import type {
   ModelSettings,
@@ -34,6 +39,7 @@ const form = ref<ModelSettings>({
   maxTokens: 600,
   fallbackToMock: true,
   availableModels: ['mock'],
+  visionMode: 'auto',
   updatedAt: new Date().toISOString()
 })
 
@@ -44,6 +50,7 @@ const isLoading = ref(true)
 const isSaving = ref(false)
 const isTesting = ref(false)
 const isFetchingModels = ref(false)
+const isTestingVision = ref(false)
 
 const successMessage = ref('')
 const errorMessage = ref('')
@@ -73,6 +80,28 @@ const providerOptions: Array<{
 
 const isRemoteProvider = computed(() => {
   return form.value.provider !== 'mock'
+})
+
+const visionStatus = computed(() => {
+  const capability = getVisionCapability(form.value)
+
+  if (form.value.provider === 'mock') {
+    return '本地模拟不会读取图片内容'
+  }
+
+  if (capability === 'supported') {
+    return form.value.visionMode === 'enabled'
+      ? '已强制启用图片理解'
+      : '当前模型已通过图片理解测试'
+  }
+
+  if (capability === 'unsupported') {
+    return form.value.visionMode === 'disabled'
+      ? '已关闭图片理解'
+      : '当前模型不支持图片理解，将自动使用自然兜底'
+  }
+
+  return '尚未检测，首次发送图片时会自动尝试'
 })
 
 const visibleModelOptions = computed(() => {
@@ -132,6 +161,9 @@ watch(
       ...defaults.models
     ]
     form.value.modelsUpdatedAt = undefined
+    form.value.visionSupported = provider === 'mock' ? false : undefined
+    form.value.visionTestedSignature = undefined
+    form.value.visionTestedAt = undefined
 
     modelOptions.value = [
       ...defaults.models
@@ -328,6 +360,50 @@ async function testConnection() {
     isTesting.value = false
   }
 }
+async function testVision() {
+  if (isTestingVision.value) return
+
+  isTestingVision.value = true
+  clearMessages()
+
+  try {
+    validate()
+
+    if (form.value.provider === 'mock') {
+      errorMessage.value = '本地模拟模型只生成演示回复，不能读取图片内容。'
+      return
+    }
+
+    await saveModelSettings(form.value)
+    form.value = await getModelSettings()
+
+    const startedAt = performance.now()
+    const provider = createProvider(form.value)
+    await provider.testVision()
+
+    form.value = await saveVisionCapability(form.value, true)
+
+    const elapsed = Math.max(
+      1,
+      Math.round(performance.now() - startedAt)
+    )
+
+    successMessage.value =
+      `图片理解可用，测试耗时约 ${elapsed} ms。`
+  } catch (error) {
+    if (isVisionUnsupportedError(error)) {
+      form.value = await saveVisionCapability(form.value, false)
+      errorMessage.value = '当前模型或接口不支持图片理解，聊天时会自动使用自然兜底。'
+    } else {
+      errorMessage.value = error instanceof Error
+        ? `图片理解测试失败：${error.message}`
+        : '图片理解测试失败，请检查配置。'
+    }
+  } finally {
+    isTestingVision.value = false
+  }
+}
+
 </script>
 
 <template>
@@ -395,7 +471,7 @@ async function testConnection() {
             <button
               type="button"
               class="fetch-model-button"
-              :disabled="isFetchingModels || isTesting || isSaving"
+              :disabled="isFetchingModels || isTesting || isTestingVision || isSaving"
               @click="fetchModels"
             >
               {{
@@ -507,6 +583,37 @@ async function testConnection() {
         </label>
       </section>
 
+      <section class="setting-card field-card vision-card">
+        <h2>图片理解</h2>
+
+        <label>
+          使用方式
+          <select v-model="form.visionMode" class="model-select">
+            <option value="auto">自动检测并降级</option>
+            <option value="enabled">始终按视觉模型发送</option>
+            <option value="disabled">关闭图片理解</option>
+          </select>
+          <small>
+            自动模式会在发送图片时尝试读取；若接口不支持，会改用不猜测图片细节的自然回应。
+          </small>
+        </label>
+
+        <div class="vision-status-row">
+          <span>
+            <b>能力状态</b>
+            <small>{{ visionStatus }}</small>
+          </span>
+          <button
+            type="button"
+            class="vision-test-button"
+            :disabled="!isRemoteProvider || isTestingVision || isTesting || isSaving || isFetchingModels"
+            @click="testVision"
+          >
+            {{ isTestingVision ? '正在检测…' : '测试图片理解' }}
+          </button>
+        </div>
+      </section>
+
       <p class="security-notice">
         API Key 会保存在当前浏览器的 IndexedDB 中，不会写入 GitHub。
         纯前端应用无法彻底隐藏密钥，正式公开发布时应改用服务端代理。
@@ -530,7 +637,7 @@ async function testConnection() {
         <button
           type="button"
           class="secondary-action"
-          :disabled="isTesting || isSaving || isFetchingModels"
+          :disabled="isTesting || isTestingVision || isSaving || isFetchingModels"
           @click="testConnection"
         >
           {{ isTesting ? '正在测试……' : '测试连接' }}
@@ -539,7 +646,7 @@ async function testConnection() {
         <button
           type="submit"
           class="primary-action"
-          :disabled="isSaving || isTesting || isFetchingModels"
+          :disabled="isSaving || isTesting || isTestingVision || isFetchingModels"
         >
           {{ isSaving ? '正在保存……' : '保存设置' }}
         </button>
@@ -795,4 +902,35 @@ button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+.vision-status-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 15px;
+  background: #fff2f7;
+}
+
+.vision-status-row > span {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+
+.vision-test-button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: #ffe0ec;
+  color: #b6537d;
+  font-weight: 700;
+}
+
+.vision-test-button:disabled {
+  opacity: .45;
+}
+
 </style>

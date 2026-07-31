@@ -1332,3 +1332,62 @@ deepseek-reasoner
 ### 底部面板手势
 
 面板顶部拖动条使用 Pointer Events 和 pointer capture。向下位移超过阈值时关闭，未超过阈值时回弹。面板内容区域仍保持独立滚动。
+
+
+## V0.3.2 多模态与消息可靠性补充
+
+### 多模态消息类型
+
+Provider 的 `ChatTurn.content` 从单一字符串扩展为：
+
+```ts
+string | Array<
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
+>
+```
+
+聊天页只在回复当前图片消息时把该图片的 Data URL 放入请求。历史图片使用文字摘要，避免每轮对话重复上传全部图片。
+
+### 图片能力状态
+
+`ModelSettings` 新增：
+
+- `visionMode`: `auto | enabled | disabled`
+- `visionSupported`
+- `visionTestedSignature`
+- `visionTestedAt`
+
+能力签名由供应商、标准化 API 地址和模型名称组成。切换其中任意一项后，旧检测结果自动失效。
+
+自动模式流程：
+
+1. 首次图片消息按多模态格式发送。
+2. 成功后缓存“支持图片”。
+3. 若接口返回图片内容类型不兼容错误，立即用文字消息重试。
+4. 文字重试成功后缓存“不支持图片”。
+5. 后续图片直接使用自然兜底，避免重复失败。
+
+### 图片处理
+
+`imageService.ts` 负责：
+
+- 文件类型与 15 MB 上限检查
+- 最长边缩放到 1280 像素
+- 大图转 JPEG
+- 逐步降低质量直到接近 900 KB 目标
+- 计算 Data URL 近似字节数
+
+处理结果保存图片宽高、压缩后体积和原始体积，聊天消息保存其中与展示、备份有关的字段。
+
+### 消息状态
+
+用户消息写入时状态为 `pending`。角色回复完成后改为 `read`；请求失败改为 `failed`；主动停止改为 `cancelled`。失败和停止消息可以复用原消息重新请求，不会重复插入用户气泡。
+
+### 图片隐私
+
+第一次打开图片选择器时使用本地一次性确认。确认状态只保存在 `localStorage`，不会进入备份。图片仍由当前配置的第三方模型服务处理，应用不承诺第三方服务的数据保留策略。
+
+### 备份 V4
+
+V4 继续使用 JSON，但导出函数接受 `includeImages`。关闭时保留图片消息、文件名与附言，移除 `imageDataUrl` 和图片体积。恢复后聊天页会显示“图片未包含在这份备份中”。

@@ -98,6 +98,11 @@ export interface Message {
   replyTo?: MessageReplyReference
   imageDataUrl?: string
   imageName?: string
+  imageWidth?: number
+  imageHeight?: number
+  imageBytes?: number
+  visionUsed?: boolean
+  visionFallback?: boolean
 }
 
 export type MemoryStrength = 'light' | 'standard' | 'deep'

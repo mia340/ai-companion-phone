@@ -22,6 +22,7 @@ const selectedBackup =
   ref<CompanionBackup>()
 
 const selectedFileName = ref('')
+const includeImages = ref(true)
 
 const isWorking = ref(false)
 const successMessage = ref('')
@@ -45,7 +46,9 @@ async function exportData() {
   errorMessage.value = ''
 
   try {
-    const backup = await createBackup()
+    const backup = await createBackup({
+      includeImages: includeImages.value
+    })
 
     downloadBackup(backup)
 
@@ -100,6 +103,12 @@ async function selectBackupFile(
   } finally {
     input.value = ''
   }
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 async function importData() {
@@ -169,6 +178,14 @@ async function importData() {
             世界设置、“我的资料”、聊天偏好、角色记忆与关系成长记录。
           </p>
 
+          <label class="image-export-option">
+            <input v-model="includeImages" type="checkbox" />
+            <span>
+              <b>备份中包含聊天图片</b>
+              <small>关闭后备份更小，但恢复时只保留图片消息与附言。</small>
+            </span>
+          </label>
+
           <button
             class="primary-action"
             type="button"
@@ -231,6 +248,16 @@ async function importData() {
           <span>
             <b>{{ summary.messages }}</b>
             条消息
+          </span>
+
+          <span>
+            <b>{{ summary.images }}</b>
+            张图片
+          </span>
+
+          <span>
+            <b>{{ formatBytes(summary.imageBytes) }}</b>
+            图片体积
           </span>
 
           <span>
@@ -464,4 +491,32 @@ p {
 .notice-card p {
   font-size: 13px;
 }
+
+.image-export-option {
+  margin: 14px 0 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  background: #fff1f6;
+}
+
+.image-export-option input {
+  width: 19px;
+  height: 19px;
+  margin-top: 2px;
+}
+
+.image-export-option span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.image-export-option small {
+  color: #92717f;
+  line-height: 1.5;
+}
+
 </style>

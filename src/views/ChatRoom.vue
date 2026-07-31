@@ -17,12 +17,21 @@ import CharacterAvatar from '../components/CharacterAvatar.vue'
 import { db } from '../db/database'
 import {
   MockProvider,
-  type ChatRequest
+  isVisionUnsupportedError,
+  type ChatRequest,
+  type ChatTurn
 } from '../services/ai/provider'
 import { createProvider } from '../services/ai/providerFactory'
 import {
-  getModelSettings
+  getModelSettings,
+  getVisionCapability,
+  saveVisionCapability
 } from '../services/modelSettings'
+import {
+  formatImageSize,
+  prepareChatImage,
+  type PreparedChatImage
+} from '../services/imageService'
 import {
   getChatSettings,
   getConversationState,
@@ -96,6 +105,8 @@ const selectedMessage = ref<Message>()
 const replyTarget = ref<Message>()
 const showScrollButton = ref(false)
 const previewImageUrl = ref('')
+const pendingImage = ref<PreparedChatImage>()
+const isPreparingImage = ref(false)
 const panelDragOffset = ref(0)
 const isPanelDragging = ref(false)
 
@@ -127,6 +138,27 @@ const providerLabel = computed(() => {
   if (settings.provider === 'deepseek') return 'DeepSeek'
   if (settings.provider === 'openai-compatible') return 'OpenAI 兼容接口'
   return '本地模拟'
+})
+
+const canSend = computed(() => {
+  return Boolean(draft.value.trim() || pendingImage.value) && !isSending.value && !isPreparingImage.value
+})
+
+const sendingHint = computed(() => {
+  const latest = [...messages.value].reverse().find(item => item.senderId === 'user')
+  return latest?.type === 'image'
+    ? '正在认真看你发来的图片…'
+    : '正在想该怎么回应你…'
+})
+
+const visionCapabilityLabel = computed(() => {
+  const settings = modelSettings.value
+  if (!settings) return '尚未检测'
+
+  const capability = getVisionCapability(settings)
+  if (capability === 'supported') return '可理解图片'
+  if (capability === 'unsupported') return '图片将使用自然兜底回应'
+  return '首次发送图片时自动检测'
 })
 
 const panelStyle = computed(() => ({
@@ -226,7 +258,10 @@ async function restoreScrollPosition(conversationId: string) {
 }
 
 function messagePreview(message: Message, maxLength = 42) {
-  if (message.type === 'image') return '[图片]'
+  if (message.type === 'image') {
+    const caption = message.content.trim()
+    return caption ? `[图片] ${caption}` : '[图片]'
+  }
   const text = message.content.replace(/\s+/g, ' ').trim()
   return text.length > maxLength
     ? `${text.slice(0, maxLength)}…`
@@ -253,13 +288,41 @@ function createReplyReference(message: Message): MessageReplyReference {
 }
 
 function formatMessageForPrompt(message: Message) {
+  const caption = message.content.trim()
   const base = message.type === 'image'
-    ? '用户发送了一张图片。请自然回应这次分享，不要虚构无法确认的图片细节。'
+    ? caption
+      ? `用户分享了一张图片，并说：“${caption}”。当前无法确认图片细节，请围绕附言和分享行为自然回应，不要猜测图中具体内容，也不要解释技术限制。`
+      : '用户分享了一张图片。当前无法确认图片细节，请自然回应这次分享，不要猜测图中具体内容，也不要解释技术限制。'
     : message.content
 
   if (!message.replyTo) return base
-  return `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。\n${base}`
+  return `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。
+${base}`
 }
+
+function imageMessageContent(message: Message): ChatTurn['content'] {
+  const text = message.content.trim()
+    ? `请看这张图片，并结合用户的话自然回应：“${message.content.trim()}”`
+    : '请认真看这张图片，根据你实际看到的内容自然回应。不要编造看不清或无法确认的细节。'
+
+  return [
+    {
+      type: 'text',
+      text: message.replyTo
+        ? `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。
+${text}`
+        : text
+    },
+    {
+      type: 'image_url',
+      image_url: {
+        url: message.imageDataUrl || '',
+        detail: 'auto'
+      }
+    }
+  ]
+}
+
 
 function autoResizeComposer() {
   void nextTick(() => {
@@ -304,48 +367,37 @@ function endPanelDrag() {
   panelDragOffset.value = 0
 }
 
-function readFileAsDataUrl(file: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('图片读取失败。'))
-    reader.readAsDataURL(file)
-  })
+function hasAcceptedImagePrivacy() {
+  return localStorage.getItem('ai-companion-image-privacy-accepted') === 'yes'
 }
 
-function loadImage(dataUrl: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('无法解析这张图片。'))
-    image.src = dataUrl
-  })
-}
+function confirmImagePrivacy() {
+  if (hasAcceptedImagePrivacy()) return true
 
-async function compressImage(file: File) {
-  if (file.size > 12 * 1024 * 1024) {
-    throw new Error('图片不能超过 12 MB。')
+  const accepted = window.confirm([
+    '图片理解需要把图片发送给你当前配置的模型服务。',
+    '',
+    '请避免上传身份证、银行卡、私密文件等敏感内容。',
+    '',
+    '是否继续选择图片？'
+  ].join('\n'))
+
+  if (accepted) {
+    localStorage.setItem('ai-companion-image-privacy-accepted', 'yes')
   }
 
-  const source = await readFileAsDataUrl(file)
-  const image = await loadImage(source)
-  const maxSide = 1440
-  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight))
-
-  if (scale === 1 && file.size <= 1.8 * 1024 * 1024) return source
-
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
-  const context = canvas.getContext('2d')
-  if (!context) throw new Error('当前浏览器无法处理图片。')
-  context.drawImage(image, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', .84)
+  return accepted
 }
 
 function openImagePicker() {
+  if (!confirmImagePrivacy()) return
   imageInputRef.value?.click()
 }
+
+function removePendingImage() {
+  pendingImage.value = undefined
+}
+
 
 async function loadConversation(conversationId: string) {
   errorMessage.value = ''
@@ -542,6 +594,34 @@ async function updateSummaryIfNeeded() {
   )
 }
 
+async function updateUserMessageState(
+  messageId: string | undefined,
+  status: Message['status'],
+  patch?: Partial<Message>
+) {
+  if (!messageId) return
+
+  await db.messages.update(messageId, {
+    status,
+    errorText: status === 'failed'
+      ? patch?.errorText
+      : undefined,
+    ...patch
+  })
+
+  const index = messages.value.findIndex(item => item.id === messageId)
+  if (index >= 0) {
+    messages.value[index] = {
+      ...messages.value[index],
+      status,
+      errorText: status === 'failed'
+        ? patch?.errorText
+        : undefined,
+      ...patch
+    }
+  }
+}
+
 async function saveAssistantBubbles(options: {
   texts: string[]
   provider: string
@@ -604,6 +684,8 @@ async function saveAssistantBubbles(options: {
 async function requestAssistantReply(options?: {
   musicPrompt?: string
   type?: Message['type']
+  sourceMessageId?: string
+  visualMessageId?: string
 }) {
   if (!conversation.value || !character.value || !chatSettings.value) return
 
@@ -618,7 +700,7 @@ async function requestAssistantReply(options?: {
   const settings = chatSettings.value
 
   try {
-    const currentModelSettings = await getModelSettings()
+    let currentModelSettings = await getModelSettings()
     modelSettings.value = currentModelSettings
     const provider = createProvider(currentModelSettings)
 
@@ -626,24 +708,41 @@ async function requestAssistantReply(options?: {
       ? buildMemoryPrompt(memories.value, conversationState.value?.summary ?? '')
       : ''
 
-    const recentTurns = messages.value
-      .filter(message => message.type !== 'system')
-      .slice(-settings.recentMessageLimit)
-      .map(message => ({
-        role: message.senderId === 'user'
-          ? ('user' as const)
-          : ('assistant' as const),
-        content: formatMessageForPrompt(message)
-      }))
+    const visualMessage = options?.visualMessageId
+      ? messages.value.find(item => item.id === options.visualMessageId)
+      : undefined
 
-    if (options?.musicPrompt) {
-      recentTurns.push({
-        role: 'user',
-        content: options.musicPrompt
-      })
+    const visionCapability = getVisionCapability(currentModelSettings)
+    const mayUseVision = Boolean(
+      visualMessage?.type === 'image' &&
+      visualMessage.imageDataUrl &&
+      visionCapability !== 'unsupported'
+    )
+
+    const buildRecentTurns = (includeVision: boolean): ChatTurn[] => {
+      const turns: ChatTurn[] = messages.value
+        .filter(message => message.type !== 'system')
+        .slice(-settings.recentMessageLimit)
+        .map(message => ({
+          role: message.senderId === 'user'
+            ? ('user' as const)
+            : ('assistant' as const),
+          content: includeVision && message.id === visualMessage?.id
+            ? imageMessageContent(message)
+            : formatMessageForPrompt(message)
+        }))
+
+      if (options?.musicPrompt) {
+        turns.push({
+          role: 'user',
+          content: options.musicPrompt
+        })
+      }
+
+      return turns
     }
 
-    const request: ChatRequest = {
+    const createRequest = (includeVision: boolean): ChatRequest => ({
       model: currentModelSettings.model,
       temperature: currentModelSettings.temperature,
       signal,
@@ -670,18 +769,52 @@ async function requestAssistantReply(options?: {
             settings
           )
         },
-        ...recentTurns
+        ...buildRecentTurns(includeVision)
       ]
-    }
+    })
 
     let response
     let providerId = provider.id
     let usedModel = currentModelSettings.model
     let fallback = false
     let providerNotice = ''
+    let visionUsed = mayUseVision
+    let visionFallback = Boolean(visualMessage) && !mayUseVision
 
     try {
-      response = await provider.chat(request)
+      try {
+        response = await provider.chat(createRequest(mayUseVision))
+
+        if (
+          mayUseVision &&
+          currentModelSettings.visionMode === 'auto'
+        ) {
+          currentModelSettings = await saveVisionCapability(
+            currentModelSettings,
+            true
+          )
+          modelSettings.value = currentModelSettings
+        }
+      } catch (providerError) {
+        if (isAbortError(providerError)) throw providerError
+
+        const canRetryWithoutVision =
+          mayUseVision &&
+          currentModelSettings.visionMode === 'auto' &&
+          isVisionUnsupportedError(providerError)
+
+        if (!canRetryWithoutVision) throw providerError
+
+        visionUsed = false
+        visionFallback = true
+        response = await provider.chat(createRequest(false))
+        currentModelSettings = await saveVisionCapability(
+          currentModelSettings,
+          false
+        )
+        modelSettings.value = currentModelSettings
+        providerNotice = '当前模型不支持图片理解，本次已自动使用自然兜底回应。'
+      }
     } catch (providerError) {
       if (isAbortError(providerError)) throw providerError
 
@@ -694,13 +827,15 @@ async function requestAssistantReply(options?: {
 
       const fallbackProvider = new MockProvider()
       response = await fallbackProvider.chat({
-        ...request,
+        ...createRequest(false),
         model: 'mock',
         signal
       })
       providerId = fallbackProvider.id
       usedModel = 'mock'
       fallback = true
+      visionUsed = false
+      visionFallback = Boolean(visualMessage)
       providerNotice = providerError instanceof Error
         ? `真实接口未响应，已使用本地回复。原因：${providerError.message}`
         : '真实接口未响应，已使用本地回复。'
@@ -724,6 +859,15 @@ async function requestAssistantReply(options?: {
       signal
     })
 
+    await updateUserMessageState(
+      options?.sourceMessageId,
+      'read',
+      {
+        visionUsed: visualMessage ? visionUsed : undefined,
+        visionFallback: visualMessage ? visionFallback : undefined
+      }
+    )
+
     conversationState.value = await patchConversationState(
       activeConversation.id,
       {
@@ -735,7 +879,8 @@ async function requestAssistantReply(options?: {
     await updateSummaryIfNeeded()
   } catch (error) {
     if (isAbortError(error)) {
-      noticeMessage.value = '已停止等待回复。'
+      await updateUserMessageState(options?.sourceMessageId, 'cancelled')
+      noticeMessage.value = '已停止等待回复，可长按消息重新发送。'
       return
     }
 
@@ -743,6 +888,12 @@ async function requestAssistantReply(options?: {
     const technical = error instanceof Error
       ? error.message
       : '未知错误'
+
+    await updateUserMessageState(
+      options?.sourceMessageId,
+      'failed',
+      { errorText: technical }
+    )
 
     errorMessage.value = '对方暂时没有回应。'
     conversationState.value = await patchConversationState(
@@ -760,119 +911,59 @@ async function requestAssistantReply(options?: {
 
 async function send() {
   const text = draft.value.trim()
+  const image = pendingImage.value
 
-  if (!text || !conversation.value || !character.value || isSending.value) return
+  if (
+    (!text && !image) ||
+    !conversation.value ||
+    !character.value ||
+    isSending.value ||
+    isPreparingImage.value
+  ) return
 
   const activeConversation = conversation.value
   const messageId = crypto.randomUUID()
   const now = new Date().toISOString()
+  const replyReference = replyTarget.value
+    ? createReplyReference(replyTarget.value)
+    : undefined
+
+  const message: Message = {
+    id: messageId,
+    worldId: activeConversation.worldId,
+    conversationId: activeConversation.id,
+    senderId: 'user',
+    type: image ? 'image' : 'text',
+    content: text,
+    status: 'pending',
+    createdAt: now,
+    replyTo: replyReference,
+    imageDataUrl: image?.dataUrl,
+    imageName: image?.name,
+    imageWidth: image?.width,
+    imageHeight: image?.height,
+    imageBytes: image?.bytes
+  }
 
   draft.value = ''
-  localStorage.removeItem(draftStorageKey(activeConversation.id))
-
-  await db.transaction(
-    'rw',
-    db.messages,
-    db.conversations,
-    async () => {
-      await db.messages.add({
-        id: messageId,
-        worldId: activeConversation.worldId,
-        conversationId: activeConversation.id,
-        senderId: 'user',
-        type: 'text',
-        content: text,
-        status: 'read',
-        createdAt: now,
-        replyTo: replyTarget.value
-          ? createReplyReference(replyTarget.value)
-          : undefined
-      })
-
-      await db.conversations.update(activeConversation.id, {
-        updatedAt: now
-      })
-    }
-  )
-
+  pendingImage.value = undefined
   replyTarget.value = undefined
+  localStorage.removeItem(draftStorageKey(activeConversation.id))
   autoResizeComposer()
 
-  messages.value = await db.messages
-    .where('conversationId')
-    .equals(activeConversation.id)
-    .sortBy('createdAt')
-
-  await scrollToBottom()
-
-  relationship.value = await recordInteraction({
-    character: character.value,
-    conversationId: activeConversation.id,
-    message: messages.value[messages.value.length - 1]
-  })
-
-  if (chatSettings.value?.memoryEnabled) {
-    await rememberFromMessage({
-      conversationId: activeConversation.id,
-      characterId: character.value.id,
-      sourceMessageId: messageId,
-      text,
-      strength: chatSettings.value.memoryStrength
-    })
-    await refreshMemoryList()
-  }
-
-  await requestAssistantReply()
-}
-
-async function handleImageSelected(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-
-  if (!file || !conversation.value || !character.value || isSending.value) return
-  if (!file.type.startsWith('image/')) {
-    noticeMessage.value = '请选择图片文件。'
-    return
-  }
-
-  const activeConversation = conversation.value
-  const messageId = crypto.randomUUID()
-  const now = new Date().toISOString()
-
   try {
-    noticeMessage.value = '正在整理图片…'
-    const imageDataUrl = await compressImage(file)
-
     await db.transaction(
       'rw',
       db.messages,
       db.conversations,
       async () => {
-        await db.messages.add({
-          id: messageId,
-          worldId: activeConversation.worldId,
-          conversationId: activeConversation.id,
-          senderId: 'user',
-          type: 'image',
-          content: '分享了一张图片',
-          status: 'read',
-          createdAt: now,
-          imageDataUrl,
-          imageName: file.name,
-          replyTo: replyTarget.value
-            ? createReplyReference(replyTarget.value)
-            : undefined
-        })
-
+        await db.messages.add(message)
         await db.conversations.update(activeConversation.id, {
           updatedAt: now
         })
       }
     )
 
-    replyTarget.value = undefined
-    noticeMessage.value = ''
     messages.value = await db.messages
       .where('conversationId')
       .equals(activeConversation.id)
@@ -883,14 +974,63 @@ async function handleImageSelected(event: Event) {
     relationship.value = await recordInteraction({
       character: character.value,
       conversationId: activeConversation.id,
-      message: messages.value[messages.value.length - 1]
+      message
     })
 
-    await requestAssistantReply()
+    if (chatSettings.value?.memoryEnabled && text) {
+      await rememberFromMessage({
+        conversationId: activeConversation.id,
+        characterId: character.value.id,
+        sourceMessageId: messageId,
+        text,
+        strength: chatSettings.value.memoryStrength
+      })
+      await refreshMemoryList()
+    }
+
+    await requestAssistantReply({
+      sourceMessageId: messageId,
+      visualMessageId: image ? messageId : undefined
+    })
   } catch (error) {
+    await updateUserMessageState(
+      messageId,
+      'failed',
+      {
+        errorText: error instanceof Error
+          ? error.message
+          : '消息发送失败。'
+      }
+    )
     noticeMessage.value = error instanceof Error
       ? error.message
-      : '图片发送失败。'
+      : '消息发送失败。'
+  }
+}
+
+async function handleImageSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+
+  if (!file || isSending.value || isPreparingImage.value) return
+
+  isPreparingImage.value = true
+  noticeMessage.value = '正在整理图片…'
+
+  try {
+    pendingImage.value = await prepareChatImage(file)
+    noticeMessage.value = ''
+    await nextTick()
+    composerRef.value?.focus()
+    autoResizeComposer()
+  } catch (error) {
+    pendingImage.value = undefined
+    noticeMessage.value = error instanceof Error
+      ? error.message
+      : '图片读取失败。'
+  } finally {
+    isPreparingImage.value = false
   }
 }
 
@@ -1067,12 +1207,57 @@ async function deleteSelectedMessage() {
   activePanel.value = null
 }
 
+function sourceMessageBefore(message: Message) {
+  const index = messages.value.findIndex(item => item.id === message.id)
+  if (index < 0) return undefined
+
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = messages.value[cursor]
+    if (candidate.senderId === 'user') return candidate
+  }
+
+  return undefined
+}
+
 async function regenerateSelectedMessage() {
   const message = selectedMessage.value
   if (!message || message.senderId === 'user' || isSending.value) return
 
+  const source = sourceMessageBefore(message)
   await deleteSelectedMessage()
-  await requestAssistantReply()
+  await requestAssistantReply({
+    sourceMessageId: source?.id,
+    visualMessageId: source?.type === 'image' ? source.id : undefined
+  })
+}
+
+async function retrySelectedMessage() {
+  const message = selectedMessage.value
+  if (
+    !message ||
+    message.senderId !== 'user' ||
+    isSending.value
+  ) return
+
+  await updateUserMessageState(message.id, 'pending')
+  activePanel.value = null
+  await requestAssistantReply({
+    sourceMessageId: message.id,
+    visualMessageId: message.type === 'image' ? message.id : undefined
+  })
+}
+
+function downloadSelectedImage() {
+  const message = selectedMessage.value
+  if (!message?.imageDataUrl) return
+
+  const link = document.createElement('a')
+  link.href = message.imageDataUrl
+  link.download = message.imageName || `chat-image-${message.id}.jpg`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  activePanel.value = null
 }
 
 function openMusicPanel() {
@@ -1387,13 +1572,21 @@ onUnmounted(() => {
                   <b>{{ message.replyTo.senderName }}</b>
                   <span>{{ message.replyTo.preview }}</span>
                 </span>
-                <img
-                  v-if="message.type === 'image' && message.imageDataUrl"
-                  :src="message.imageDataUrl"
-                  :alt="message.imageName || '聊天图片'"
-                  class="message-image"
-                  @click.stop="previewImageUrl = message.imageDataUrl || ''"
-                />
+                <template v-if="message.type === 'image' && message.imageDataUrl">
+                  <img
+                    :src="message.imageDataUrl"
+                    :alt="message.imageName || '聊天图片'"
+                    class="message-image"
+                    @click.stop="previewImageUrl = message.imageDataUrl || ''"
+                  />
+                  <span v-if="message.content" class="image-caption">
+                    {{ message.content }}
+                  </span>
+                </template>
+                <span v-else-if="message.type === 'image'" class="missing-image">
+                  图片未包含在这份备份中
+                  <small v-if="message.content">{{ message.content }}</small>
+                </span>
                 <template v-else>
                   <span v-if="message.type === 'music'" class="music-message-mark">♫</span>
                   {{ message.content }}
@@ -1415,14 +1608,37 @@ onUnmounted(() => {
                   <b>{{ message.replyTo.senderName }}</b>
                   <span>{{ message.replyTo.preview }}</span>
                 </span>
-                <img
-                  v-if="message.type === 'image' && message.imageDataUrl"
-                  :src="message.imageDataUrl"
-                  :alt="message.imageName || '聊天图片'"
-                  class="message-image"
-                  @click.stop="previewImageUrl = message.imageDataUrl || ''"
-                />
+                <template v-if="message.type === 'image' && message.imageDataUrl">
+                  <img
+                    :src="message.imageDataUrl"
+                    :alt="message.imageName || '聊天图片'"
+                    class="message-image"
+                    @click.stop="previewImageUrl = message.imageDataUrl || ''"
+                  />
+                  <span v-if="message.content" class="image-caption image-caption--mine">
+                    {{ message.content }}
+                  </span>
+                </template>
+                <span v-else-if="message.type === 'image'" class="missing-image missing-image--mine">
+                  图片未包含在这份备份中
+                  <small v-if="message.content">{{ message.content }}</small>
+                </span>
                 <template v-else>{{ message.content }}</template>
+              </button>
+
+              <button
+                v-if="message.status === 'pending' || message.status === 'failed' || message.status === 'cancelled'"
+                type="button"
+                :class="['message-delivery-state', `message-delivery-state--${message.status}`]"
+                @click="openMessageMenu(message)"
+              >
+                {{
+                  message.status === 'pending'
+                    ? '发送中'
+                    : message.status === 'cancelled'
+                      ? '已停止'
+                      : '发送失败'
+                }}
               </button>
 
               <CharacterAvatar
@@ -1445,6 +1661,7 @@ onUnmounted(() => {
             :size="38"
           />
           <div class="typing-bubble" aria-label="对方正在输入">
+            <span>{{ sendingHint }}</span>
             <i></i><i></i><i></i>
           </div>
         </div>
@@ -1467,6 +1684,15 @@ onUnmounted(() => {
         ↓
       </button>
 
+      <div v-if="pendingImage" class="pending-image-bar">
+        <img :src="pendingImage.dataUrl" :alt="pendingImage.name" />
+        <div>
+          <b>准备发送图片</b>
+          <span>{{ pendingImage.name }} · {{ formatImageSize(pendingImage.bytes) }}</span>
+        </div>
+        <button type="button" aria-label="移除图片" @click="removePendingImage">×</button>
+      </div>
+
       <div v-if="replyTarget" class="reply-preview-bar">
         <div>
           <b>回复 {{ messageSenderName(replyTarget) }}</b>
@@ -1486,6 +1712,7 @@ onUnmounted(() => {
         <button
           type="button"
           class="composer-side-button"
+          :disabled="isSending || isPreparingImage"
           @click="openImagePicker"
         >
           ＋
@@ -1496,7 +1723,7 @@ onUnmounted(() => {
           v-model="draft"
           :disabled="isSending"
           rows="1"
-          placeholder="输入消息..."
+          :placeholder="pendingImage ? '为图片添加一句话…' : '输入消息…'"
           @input="autoResizeComposer"
           @focus="handleComposerFocus"
           @keydown="handleComposerKeydown"
@@ -1515,7 +1742,7 @@ onUnmounted(() => {
           v-else
           class="send-button"
           type="submit"
-          :disabled="!draft.trim()"
+          :disabled="!canSend"
         >
           发送
         </button>
@@ -1788,6 +2015,7 @@ onUnmounted(() => {
               <small>当前服务</small>
               <strong>{{ providerLabel }}</strong>
               <span>{{ modelSettings?.model || '未设置模型' }}</span>
+              <span class="vision-capability">图片理解：{{ visionCapabilityLabel }}</span>
             </div>
 
             <label v-if="chatSettings" class="setting-switch">
@@ -1831,6 +2059,21 @@ onUnmounted(() => {
           </div>
           <button type="button" @click="replyToSelectedMessage">回复</button>
           <button v-if="selectedMessage?.type !== 'image'" type="button" @click="copySelectedMessage">复制</button>
+          <button
+            v-if="selectedMessage?.type === 'image' && selectedMessage.imageDataUrl"
+            type="button"
+            @click="downloadSelectedImage"
+          >
+            保存图片
+          </button>
+          <button
+            v-if="selectedMessage?.senderId === 'user' && (selectedMessage.status === 'failed' || selectedMessage.status === 'cancelled')"
+            type="button"
+            :disabled="isSending"
+            @click="retrySelectedMessage"
+          >
+            重新发送
+          </button>
           <button
             v-if="selectedMessage?.senderId !== 'user'"
             type="button"
@@ -2692,6 +2935,138 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, .14);
   color: #fff;
   font-size: 25px;
+}
+
+
+/* V0.3.2：图片理解、发送预览与消息可靠性 */
+.typing-bubble {
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: min(260px, 72vw);
+}
+
+.typing-bubble span {
+  width: 100%;
+  color: #8a6d79;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.bubble--image {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  line-height: 1.5;
+}
+
+.image-caption {
+  display: block;
+  padding: 8px 9px 7px;
+  color: #644a55;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.image-caption--mine {
+  color: #fff;
+}
+
+.pending-image-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(0, 0, 0, .045);
+  background: rgba(255, 255, 255, .94);
+}
+
+.pending-image-bar img {
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+.pending-image-bar > div {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 3px;
+}
+
+.pending-image-bar b {
+  color: #6f4d5b;
+  font-size: 13px;
+}
+
+.pending-image-bar span {
+  overflow: hidden;
+  color: #987785;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-image-bar > button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: #f4e9ed;
+  color: #785d69;
+  font-size: 19px;
+}
+
+.message-delivery-state {
+  align-self: flex-end;
+  margin: 0 -2px 2px 0;
+  padding: 3px 4px;
+  border: 0;
+  background: transparent;
+  color: #9b7d89;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.message-delivery-state--failed,
+.message-delivery-state--cancelled {
+  color: #c84f63;
+  font-weight: 700;
+}
+
+.composer-side-button:disabled {
+  opacity: .45;
+}
+
+.vision-capability {
+  margin-top: 4px;
+  color: #a45c7b;
+  font-size: 12px;
+}
+
+
+.missing-image {
+  min-width: 180px;
+  display: grid;
+  gap: 5px;
+  padding: 18px 14px;
+  color: #8c6c79;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.missing-image small {
+  color: inherit;
+  opacity: .8;
+}
+
+.missing-image--mine {
+  color: #fff;
 }
 
 @media (max-width: 460px) {

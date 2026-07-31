@@ -18,7 +18,7 @@ const sections = [
   {
     icon: '🤖',
     title: 'API 与模型',
-    description: '供应商、API 地址、模型和生成参数',
+    description: '供应商、图片理解、模型和生成参数',
     path: '/settings/models'
   },
   {
@@ -35,7 +35,7 @@ const sections = [
   {
     icon: 'ℹ️',
     title: '关于',
-    description: '角色由 AI 驱动；当前为 V0.3.1 原型'
+    description: '角色由 AI 驱动；当前为 V0.3.2 原型'
   }
 ]
 

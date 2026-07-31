@@ -15,6 +15,9 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   maxTokens: 600,
   fallbackToMock: true,
   availableModels: ['mock'],
+  visionMode: 'auto',
+  visionSupported: false,
+  visionTestedSignature: 'mock||mock',
   updatedAt: new Date(0).toISOString()
 }
 
@@ -72,6 +75,60 @@ function normalizeModelList(
   )]
 }
 
+export function modelVisionSignature(
+  settings: Pick<ModelSettings, 'provider' | 'baseUrl' | 'model'>
+) {
+  return [
+    settings.provider,
+    normalizeApiBaseUrl(settings.baseUrl).toLowerCase(),
+    settings.model.trim().toLowerCase()
+  ].join('|')
+}
+
+export function getVisionCapability(
+  settings: ModelSettings
+): 'supported' | 'unsupported' | 'unknown' {
+  if (
+    settings.provider === 'mock' ||
+    settings.visionMode === 'disabled'
+  ) {
+    return 'unsupported'
+  }
+
+  if (settings.visionMode === 'enabled') {
+    return 'supported'
+  }
+
+  const signature = modelVisionSignature(settings)
+
+  if (
+    settings.visionTestedSignature === signature &&
+    typeof settings.visionSupported === 'boolean'
+  ) {
+    return settings.visionSupported
+      ? 'supported'
+      : 'unsupported'
+  }
+
+  return 'unknown'
+}
+
+export async function saveVisionCapability(
+  settings: ModelSettings,
+  supported: boolean
+): Promise<ModelSettings> {
+  const next: ModelSettings = {
+    ...settings,
+    visionSupported: supported,
+    visionTestedSignature: modelVisionSignature(settings),
+    visionTestedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+
+  await db.modelSettings.put(next)
+  return next
+}
+
 export async function getModelSettings():
 Promise<ModelSettings> {
   const saved = await db.modelSettings.get('default')
@@ -109,30 +166,51 @@ Promise<ModelSettings> {
     ...defaults.models
   ])
 
-  return {
+  const normalized: ModelSettings = {
     ...DEFAULT_MODEL_SETTINGS,
     ...saved,
     model,
-    availableModels
+    availableModels,
+    visionMode: saved.visionMode ?? 'auto'
   }
+
+  if (normalized.provider === 'mock') {
+    normalized.visionSupported = false
+    normalized.visionTestedSignature = modelVisionSignature(normalized)
+  }
+
+  return normalized
 }
 
 export async function saveModelSettings(
   settings: ModelSettings
 ): Promise<void> {
+  const existing = await db.modelSettings.get('default')
+  const normalizedBaseUrl = normalizeApiBaseUrl(settings.baseUrl)
+  const normalizedModel = settings.model.trim()
   const availableModels = normalizeModelList([
     ...(settings.availableModels ?? []),
-    ...(settings.model ? [settings.model] : [])
+    ...(normalizedModel ? [normalizedModel] : [])
   ])
+
+  const nextSignature = modelVisionSignature({
+    provider: settings.provider,
+    baseUrl: normalizedBaseUrl,
+    model: normalizedModel
+  })
+
+  const previousSignature = existing
+    ? modelVisionSignature(existing)
+    : ''
+
+  const capabilityChanged = nextSignature !== previousSignature
 
   await db.modelSettings.put({
     ...settings,
     id: 'default',
-    baseUrl: normalizeApiBaseUrl(
-      settings.baseUrl
-    ),
+    baseUrl: normalizedBaseUrl,
     apiKey: settings.apiKey.trim(),
-    model: settings.model.trim(),
+    model: normalizedModel,
     temperature: Math.min(
       2,
       Math.max(0, settings.temperature)
@@ -142,6 +220,20 @@ export async function saveModelSettings(
       Math.max(64, Math.round(settings.maxTokens))
     ),
     availableModels,
+    visionMode: settings.visionMode ?? 'auto',
+    visionSupported: settings.provider === 'mock'
+      ? false
+      : capabilityChanged
+        ? undefined
+        : settings.visionSupported,
+    visionTestedSignature: settings.provider === 'mock'
+      ? nextSignature
+      : capabilityChanged
+        ? undefined
+        : settings.visionTestedSignature,
+    visionTestedAt: capabilityChanged
+      ? undefined
+      : settings.visionTestedAt,
     updatedAt: new Date().toISOString()
   })
 }
