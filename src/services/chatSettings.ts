@@ -23,6 +23,9 @@ export function createDefaultChatSettings(
     autoFallback: true,
     proactiveEnabled: true,
     proactiveIntervalHours: 12,
+    autoReadAloud: false,
+    voiceName: '',
+    voiceRate: 1,
     updatedAt: new Date().toISOString()
   }
 }
@@ -50,6 +53,7 @@ export async function saveChatSettings(
     id: value.conversationId,
     proactiveEnabled: value.proactiveEnabled ?? true,
     proactiveIntervalHours: Math.min(168, Math.max(1, Math.round(value.proactiveIntervalHours ?? 12))),
+    voiceRate: Math.min(1.4, Math.max(0.7, Number(value.voiceRate ?? 1))),
     recentMessageLimit: Math.min(
       60,
       Math.max(6, Math.round(value.recentMessageLimit))

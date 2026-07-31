@@ -19,11 +19,16 @@ const props = defineProps<{
   showTime: boolean
   timeLabel: string
   streaming?: boolean
+  speechAvailable?: boolean
+  speechState?: 'idle' | 'playing' | 'paused'
 }>()
 
 const emit = defineEmits<{
   openMenu: [message: Message]
   openImage: [url: string]
+  toggleSpeech: [message: Message]
+  stopSpeech: []
+  retryMessage: [message: Message]
 }>()
 
 const longPressTimer = ref<number>()
@@ -141,6 +146,31 @@ onBeforeUnmount(cancelLongPress)
           </template>
         </button>
 
+        <div
+          v-if="speechAvailable && message.type !== 'image' && message.content && !streaming"
+          class="speech-controls"
+        >
+          <button
+            type="button"
+            @click.stop="emit('toggleSpeech', message)"
+          >
+            {{
+              speechState === 'playing'
+                ? '暂停'
+                : speechState === 'paused'
+                  ? '继续'
+                  : '朗读'
+            }}
+          </button>
+          <button
+            v-if="speechState === 'playing' || speechState === 'paused'"
+            type="button"
+            @click.stop="emit('stopSpeech')"
+          >
+            停止
+          </button>
+        </div>
+
         <small
           v-if="message.status === 'cancelled' || message.status === 'failed'"
           :class="[
@@ -208,20 +238,24 @@ onBeforeUnmount(cancelLongPress)
       </button>
 
       <button
-        v-if="message.status === 'pending' || message.status === 'failed' || message.status === 'cancelled'"
         type="button"
         :class="[
           'message-delivery-state',
           `message-delivery-state--${message.status}`
         ]"
-        @click="openMenu"
+        :title="message.status === 'failed' || message.status === 'cancelled' ? '点击重试' : undefined"
+        @click="message.status === 'failed' || message.status === 'cancelled' ? emit('retryMessage', message) : openMenu()"
       >
         {{
           message.status === 'pending'
             ? '发送中'
-            : message.status === 'cancelled'
-              ? '已停止'
-              : '发送失败'
+            : message.status === 'failed'
+              ? '发送失败 · 重试'
+              : message.status === 'cancelled'
+                ? '已停止 · 重试'
+                : message.status === 'read'
+                  ? '已读'
+                  : '已发送'
         }}
       </button>
 
@@ -398,6 +432,22 @@ onBeforeUnmount(cancelLongPress)
 .message-delivery-state--cancelled {
   color: #c84f63;
   font-weight: 700;
+}
+
+.speech-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 4px;
+}
+
+.speech-controls button {
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255,255,255,.72);
+  color: #9a687c;
+  font-size: 11px;
 }
 
 .assistant-message-state {

@@ -2,6 +2,7 @@
 import {
   computed,
   nextTick,
+  onMounted,
   onUnmounted,
   ref,
   watch
@@ -36,6 +37,14 @@ import {
   prepareChatImage,
   type PreparedChatImage
 } from '../services/imageService'
+import {
+  createSpeechRecognition,
+  isSpeechPlaybackSupported,
+  isSpeechRecognitionSupported,
+  requestMicrophoneAccess,
+  selectSpeechVoice,
+  type SpeechRecognitionLike
+} from '../services/speechService'
 import {
   getChatSettings,
   getConversationState,
@@ -112,6 +121,14 @@ const showScrollButton = ref(false)
 const previewImageUrl = ref('')
 const pendingImage = ref<PreparedChatImage>()
 const isPreparingImage = ref(false)
+const voiceInputAvailable = ref(isSpeechRecognitionSupported())
+const speechPlaybackAvailable = ref(isSpeechPlaybackSupported())
+const isRecording = ref(false)
+const isRecognizingSpeech = ref(false)
+const recordingSeconds = ref(0)
+const speakingMessageId = ref('')
+const isSpeechPaused = ref(false)
+const speechVoices = ref<SpeechSynthesisVoice[]>([])
 const panelDragOffset = ref(0)
 const isPanelDragging = ref(false)
 
@@ -130,6 +147,11 @@ let streamScrollFrame: number | undefined
 let localAudioObjectUrl = ''
 let lastMusicSaveSecond = -1
 let panelDragStartY = 0
+let speechRecognition: SpeechRecognitionLike | undefined
+let recordingTimer: number | undefined
+let recognitionFinalText = ''
+let recognitionInterimText = ''
+let cancelRecognitionResult = false
 
 const title = computed(() => {
   return character.value?.name || conversation.value?.title || '聊天'
@@ -389,6 +411,231 @@ function confirmImagePrivacy() {
   }
 
   return accepted
+}
+
+function refreshSpeechVoices() {
+  if (!speechPlaybackAvailable.value) {
+    speechVoices.value = []
+    return
+  }
+
+  speechVoices.value = window.speechSynthesis
+    .getVoices()
+    .slice()
+    .sort((left, right) => {
+      const leftChinese = /^zh[-_]/i.test(left.lang) ? 0 : 1
+      const rightChinese = /^zh[-_]/i.test(right.lang) ? 0 : 1
+      return leftChinese - rightChinese || left.name.localeCompare(right.name)
+    })
+}
+
+function hasAcceptedMicrophonePrivacy() {
+  return localStorage.getItem('ai-companion-microphone-privacy-accepted') === 'yes'
+}
+
+function confirmMicrophonePrivacy() {
+  if (hasAcceptedMicrophonePrivacy()) return true
+
+  const accepted = window.confirm([
+    '语音输入会使用设备麦克风，并由浏览器完成语音识别。',
+    '',
+    '请不要在公共场所录入敏感信息。',
+    '',
+    '是否继续？'
+  ].join('\n'))
+
+  if (accepted) {
+    localStorage.setItem('ai-companion-microphone-privacy-accepted', 'yes')
+  }
+
+  return accepted
+}
+
+function clearRecordingTimer() {
+  if (recordingTimer !== undefined) {
+    window.clearInterval(recordingTimer)
+    recordingTimer = undefined
+  }
+}
+
+function resetRecognitionState() {
+  clearRecordingTimer()
+  speechRecognition = undefined
+  isRecording.value = false
+  isRecognizingSpeech.value = false
+  recordingSeconds.value = 0
+  recognitionFinalText = ''
+  recognitionInterimText = ''
+  cancelRecognitionResult = false
+}
+
+function appendRecognizedText(text: string) {
+  const normalized = text.trim()
+  if (!normalized) return
+
+  const separator = draft.value && !/\s$/.test(draft.value) ? ' ' : ''
+  draft.value = `${draft.value}${separator}${normalized}`
+  void nextTick(() => {
+    chatComposerRef.value?.focus()
+    chatComposerRef.value?.resize()
+  })
+}
+
+async function startVoiceRecording() {
+  if (!voiceInputAvailable.value || isRecording.value || isRecognizingSpeech.value) return
+  if (!confirmMicrophonePrivacy()) return
+
+  recognitionFinalText = ''
+  recognitionInterimText = ''
+  cancelRecognitionResult = false
+
+  try {
+    await requestMicrophoneAccess()
+
+    speechRecognition = createSpeechRecognition({
+      onTranscript: (interimText, finalText) => {
+        recognitionInterimText = interimText
+        if (finalText) recognitionFinalText += finalText
+      },
+      onError: message => {
+        cancelRecognitionResult = true
+        noticeMessage.value = `${message} 可以点击麦克风重试。`
+      },
+      onEnd: () => {
+        const text = `${recognitionFinalText}${recognitionInterimText}`.trim()
+        const shouldAppend = !cancelRecognitionResult && Boolean(text)
+        const shouldShowRetry = !cancelRecognitionResult && !text
+
+        clearRecordingTimer()
+        speechRecognition = undefined
+        isRecording.value = false
+        isRecognizingSpeech.value = false
+        recordingSeconds.value = 0
+
+        if (shouldAppend) appendRecognizedText(text)
+        else if (shouldShowRetry) noticeMessage.value = '没有识别到内容，可以点击麦克风重试。'
+
+        recognitionFinalText = ''
+        recognitionInterimText = ''
+        cancelRecognitionResult = false
+      }
+    })
+
+    speechRecognition.start()
+    isRecording.value = true
+    isRecognizingSpeech.value = false
+    recordingSeconds.value = 0
+    noticeMessage.value = ''
+    recordingTimer = window.setInterval(() => {
+      recordingSeconds.value += 1
+    }, 1000)
+  } catch (error) {
+    resetRecognitionState()
+    noticeMessage.value = error instanceof Error
+      ? `${error.message} 可以点击麦克风重试。`
+      : '无法开始语音输入，可以点击麦克风重试。'
+  }
+}
+
+function stopVoiceRecording() {
+  if (!speechRecognition || !isRecording.value) return
+  isRecording.value = false
+  isRecognizingSpeech.value = true
+  clearRecordingTimer()
+  speechRecognition.stop()
+}
+
+function cancelVoiceRecording() {
+  cancelRecognitionResult = true
+  clearRecordingTimer()
+  isRecording.value = false
+  isRecognizingSpeech.value = false
+  recordingSeconds.value = 0
+  speechRecognition?.abort()
+}
+
+function speechRateForCurrentRole() {
+  const base = chatSettings.value?.voiceRate ?? 1
+  const mood = `${character.value?.mood ?? ''}${relationship.value?.emotion ?? ''}`
+  let adjustment = 0
+
+  if (/温柔|安静|疲惫|难过|低落|沉稳/.test(mood + (character.value?.speakingStyle ?? ''))) {
+    adjustment -= 0.06
+  }
+  if (/活泼|开心|兴奋|轻快/.test(mood + (character.value?.speakingStyle ?? ''))) {
+    adjustment += 0.05
+  }
+  if (relationship.value && ['亲近', '依赖', '特别关系'].includes(relationship.value.stage)) {
+    adjustment -= 0.02
+  }
+
+  return Math.min(1.4, Math.max(0.7, base + adjustment))
+}
+
+function prepareSpeechText(text: string) {
+  if (!relationship.value || !['亲近', '依赖', '特别关系'].includes(relationship.value.stage)) {
+    return text
+  }
+
+  return text.replace(/([。！？!?])/g, '$1 ')
+}
+
+function stopSpeechPlayback() {
+  if (!speechPlaybackAvailable.value) return
+  window.speechSynthesis.cancel()
+  speakingMessageId.value = ''
+  isSpeechPaused.value = false
+}
+
+function speakText(text: string, messageId = '') {
+  if (!speechPlaybackAvailable.value || !text.trim()) return
+
+  stopSpeechPlayback()
+  const utterance = new SpeechSynthesisUtterance(prepareSpeechText(text))
+  const voice = selectSpeechVoice(
+    speechVoices.value,
+    chatSettings.value?.voiceName ?? ''
+  )
+
+  if (voice) utterance.voice = voice
+  utterance.lang = voice?.lang || 'zh-CN'
+  utterance.rate = speechRateForCurrentRole()
+  utterance.pitch = 1
+  utterance.onend = () => {
+    speakingMessageId.value = ''
+    isSpeechPaused.value = false
+  }
+  utterance.onerror = () => {
+    speakingMessageId.value = ''
+    isSpeechPaused.value = false
+    noticeMessage.value = '语音播放没有完成，可以再次点击朗读。'
+  }
+
+  speakingMessageId.value = messageId
+  isSpeechPaused.value = false
+  window.speechSynthesis.speak(utterance)
+}
+
+function toggleMessageSpeech(message: Message) {
+  if (!speechPlaybackAvailable.value || message.senderId === 'user') return
+
+  if (speakingMessageId.value === message.id) {
+    if (isSpeechPaused.value) {
+      window.speechSynthesis.resume()
+      isSpeechPaused.value = false
+    } else {
+      window.speechSynthesis.pause()
+      isSpeechPaused.value = true
+    }
+    return
+  }
+
+  speakText(message.content, message.id)
+}
+
+function speechStateForMessage(messageId: string): 'idle' | 'playing' | 'paused' {
+  if (speakingMessageId.value !== messageId) return 'idle'
+  return isSpeechPaused.value ? 'paused' : 'playing'
 }
 
 function openImagePicker() {
@@ -1291,6 +1538,13 @@ async function requestAssistantReply(options?: {
     )
 
     await updateSummaryIfNeeded()
+
+    if (settings.autoReadAloud && speechPlaybackAvailable.value) {
+      const latestAssistant = [...messages.value]
+        .reverse()
+        .find(message => message.senderId !== 'user' && message.status === 'delivered')
+      speakText(response.text, latestAssistant?.id ?? '')
+    }
   } catch (error) {
     if (isAbortError(error)) {
       const preserved = await preserveInterruptedStream(
@@ -1407,6 +1661,8 @@ async function send() {
         })
       }
     )
+
+    await updateUserMessageState(messageId, 'delivered')
 
     messages.value = await db.messages
       .where('conversationId')
@@ -1652,13 +1908,8 @@ async function regenerateSelectedMessage() {
   })
 }
 
-async function retrySelectedMessage() {
-  const message = selectedMessage.value
-  if (
-    !message ||
-    message.senderId !== 'user' ||
-    isSending.value
-  ) return
+async function retryMessage(message: Message) {
+  if (message.senderId !== 'user' || isSending.value) return
 
   await updateUserMessageState(message.id, 'pending')
   activePanel.value = null
@@ -1666,6 +1917,12 @@ async function retrySelectedMessage() {
     sourceMessageId: message.id,
     visualMessageId: message.type === 'image' ? message.id : undefined
   })
+}
+
+async function retrySelectedMessage() {
+  const message = selectedMessage.value
+  if (!message) return
+  await retryMessage(message)
 }
 
 function downloadSelectedImage() {
@@ -1843,6 +2100,8 @@ watch(
   value => {
     if (value) {
       abortController?.abort()
+      stopSpeechPlayback()
+      cancelVoiceRecording()
       void loadConversation(String(value))
     }
   },
@@ -1861,10 +2120,23 @@ watch(activePanel, () => {
   isPanelDragging.value = false
 })
 
+onMounted(() => {
+  refreshSpeechVoices()
+  if (speechPlaybackAvailable.value) {
+    window.speechSynthesis.addEventListener('voiceschanged', refreshSpeechVoices)
+  }
+})
+
 onUnmounted(() => {
   rememberScrollPosition()
   abortController?.abort()
   clearStreamTimers()
+  clearRecordingTimer()
+  speechRecognition?.abort()
+  stopSpeechPlayback()
+  if (speechPlaybackAvailable.value) {
+    window.speechSynthesis.removeEventListener('voiceschanged', refreshSpeechVoices)
+  }
   if (localAudioObjectUrl) URL.revokeObjectURL(localAudioObjectUrl)
 })
 </script>
@@ -1954,8 +2226,13 @@ onUnmounted(() => {
           :show-time="shouldShowTime(index)"
           :time-label="formatMessageTime(message.createdAt)"
           :streaming="message.id === streamingMessageId"
+          :speech-available="speechPlaybackAvailable"
+          :speech-state="speechStateForMessage(message.id)"
           @open-menu="openMessageMenu"
           @open-image="previewImageUrl = $event"
+          @toggle-speech="toggleMessageSpeech"
+          @stop-speech="stopSpeechPlayback"
+          @retry-message="retryMessage"
         />
 
         <div
@@ -2001,6 +2278,10 @@ onUnmounted(() => {
         :is-sending="isSending"
         :is-preparing-image="isPreparingImage"
         :can-send="canSend"
+        :voice-input-available="voiceInputAvailable"
+        :is-recording="isRecording"
+        :is-recognizing="isRecognizingSpeech"
+        :recording-seconds="recordingSeconds"
         @submit="send"
         @request-image="openImagePicker"
         @image-selected="handleImageSelected"
@@ -2008,6 +2289,9 @@ onUnmounted(() => {
         @cancel-reply="cancelReply"
         @stop="stopGeneration"
         @focus="handleComposerFocus"
+        @start-recording="startVoiceRecording"
+        @stop-recording="stopVoiceRecording"
+        @cancel-recording="cancelVoiceRecording"
       />
 
       <div
@@ -2211,6 +2495,39 @@ onUnmounted(() => {
               <span><b>自然发送间隔</b><small>连续气泡之间保留短暂停顿</small></span>
               <input v-model="chatSettings.naturalDelay" type="checkbox" @change="persistChatSettings" />
             </label>
+
+            <template v-if="speechPlaybackAvailable">
+              <label class="setting-switch">
+                <span><b>自动朗读回复</b><small>收到新回复后自动播放角色声音</small></span>
+                <input v-model="chatSettings.autoReadAloud" type="checkbox" @change="persistChatSettings" />
+              </label>
+
+              <label class="setting-control">
+                <span><b>角色声音</b><small>每个聊天角色会独立保存</small></span>
+                <select v-model="chatSettings.voiceName" @change="persistChatSettings">
+                  <option value="">自动选择</option>
+                  <option
+                    v-for="voice in speechVoices"
+                    :key="`${voice.name}-${voice.lang}`"
+                    :value="voice.name"
+                  >
+                    {{ voice.name }} · {{ voice.lang }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="setting-control voice-rate-control">
+                <span><b>角色语速</b><small>当前 {{ chatSettings.voiceRate.toFixed(2) }} 倍，情绪会做轻微调整</small></span>
+                <input
+                  v-model.number="chatSettings.voiceRate"
+                  type="range"
+                  min="0.7"
+                  max="1.4"
+                  step="0.05"
+                  @change="persistChatSettings"
+                />
+              </label>
+            </template>
 
             <label class="setting-control">
               <span><b>心理活动</b><small>点击聊天顶部头像后可查看</small></span>

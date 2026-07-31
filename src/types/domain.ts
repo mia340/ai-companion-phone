@@ -129,6 +129,9 @@ export interface ChatSettings {
   autoFallback: boolean
   proactiveEnabled: boolean
   proactiveIntervalHours: number
+  autoReadAloud: boolean
+  voiceName: string
+  voiceRate: number
   updatedAt: string
 }
 

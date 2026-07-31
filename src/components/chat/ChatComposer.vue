@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   nextTick,
+  onBeforeUnmount,
   ref,
   watch
 } from 'vue'
@@ -18,6 +19,10 @@ const props = defineProps<{
   isSending: boolean
   isPreparingImage: boolean
   canSend: boolean
+  voiceInputAvailable?: boolean
+  isRecording?: boolean
+  isRecognizing?: boolean
+  recordingSeconds?: number
 }>()
 
 const emit = defineEmits<{
@@ -29,10 +34,15 @@ const emit = defineEmits<{
   cancelReply: []
   stop: []
   focus: []
+  startRecording: []
+  stopRecording: []
+  cancelRecording: []
 }>()
 
 const textareaRef = ref<HTMLTextAreaElement>()
 const imageInputRef = ref<HTMLInputElement>()
+let micPressTimer: number | undefined
+let longPressRecording = false
 
 function resize() {
   void nextTick(() => {
@@ -81,6 +91,53 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
+function clearMicPressTimer() {
+  if (micPressTimer !== undefined) {
+    window.clearTimeout(micPressTimer)
+    micPressTimer = undefined
+  }
+}
+
+function handleMicPointerDown() {
+  if (props.isRecording || props.isRecognizing) return
+
+  longPressRecording = false
+  clearMicPressTimer()
+  micPressTimer = window.setTimeout(() => {
+    micPressTimer = undefined
+    longPressRecording = true
+    emit('startRecording')
+  }, 260)
+}
+
+function handleMicPointerUp() {
+  clearMicPressTimer()
+
+  if (longPressRecording) {
+    longPressRecording = false
+    emit('stopRecording')
+    return
+  }
+
+  if (props.isRecognizing) return
+  if (props.isRecording) emit('stopRecording')
+  else emit('startRecording')
+}
+
+function handleMicPointerCancel() {
+  clearMicPressTimer()
+  if (longPressRecording) {
+    longPressRecording = false
+    emit('cancelRecording')
+  }
+}
+
+function formatRecordingTime(seconds = 0) {
+  const safe = Math.max(0, Math.floor(seconds))
+  const minutes = Math.floor(safe / 60)
+  return `${minutes}:${String(safe % 60).padStart(2, '0')}`
+}
+
 watch(
   () => props.modelValue,
   resize
@@ -88,10 +145,10 @@ watch(
 
 watch(
   () => props.pendingImage,
-  () => {
-    resize()
-  }
+  resize
 )
+
+onBeforeUnmount(clearMicPressTimer)
 
 defineExpose({
   focus,
@@ -137,6 +194,29 @@ defineExpose({
     >×</button>
   </div>
 
+  <div
+    v-if="isRecording || isRecognizing"
+    class="recording-bar"
+  >
+    <span class="recording-dot" aria-hidden="true"></span>
+    <div>
+      <b>{{ isRecognizing ? '正在整理语音…' : '正在聆听' }}</b>
+      <small>{{ isRecognizing ? '稍后会填入输入框' : formatRecordingTime(recordingSeconds) }}</small>
+    </div>
+    <button
+      v-if="isRecording"
+      type="button"
+      @click="emit('cancelRecording')"
+    >取消</button>
+  </div>
+
+  <div
+    v-if="isSending && modelValue.trim()"
+    class="next-message-hint"
+  >
+    已保留为下一条消息，当前回复结束后即可发送
+  </div>
+
   <form
     class="composer"
     @submit.prevent="emit('submit')"
@@ -159,6 +239,21 @@ defineExpose({
       ＋
     </button>
 
+    <button
+      v-if="voiceInputAvailable"
+      type="button"
+      :class="['mic-button', { 'mic-button--active': isRecording }]"
+      :disabled="isPreparingImage || isRecognizing"
+      :aria-label="isRecording ? '结束录音' : '语音输入'"
+      @click.prevent
+      @pointerdown.prevent="handleMicPointerDown"
+      @pointerup.prevent="handleMicPointerUp"
+      @pointerleave="handleMicPointerCancel"
+      @pointercancel="handleMicPointerCancel"
+    >
+      {{ isRecording ? '■' : '🎙' }}
+    </button>
+
     <textarea
       ref="textareaRef"
       :value="modelValue"
@@ -168,7 +263,7 @@ defineExpose({
       autocomplete="off"
       autocapitalize="sentences"
       aria-label="消息输入框"
-      :placeholder="pendingImage ? '为图片添加一句话…' : '输入消息…'"
+      :placeholder="pendingImage ? '为图片添加一句话…' : isSending ? '可以先输入下一条消息…' : '输入消息…'"
       @input="handleInput"
       @focus="emit('focus')"
       @keydown="handleKeydown"
@@ -196,14 +291,21 @@ defineExpose({
 
 <style scoped>
 .pending-image-bar,
-.reply-preview-bar {
+.reply-preview-bar,
+.recording-bar,
+.next-message-hint {
   flex: 0 0 auto;
+  border-top: 1px solid rgba(0, 0, 0, .045);
+  background: rgba(255, 255, 255, .94);
+}
+
+.pending-image-bar,
+.reply-preview-bar,
+.recording-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 12px 7px;
-  border-top: 1px solid rgba(0, 0, 0, .045);
-  background: rgba(255, 255, 255, .94);
 }
 
 .pending-image-bar img {
@@ -215,24 +317,28 @@ defineExpose({
 }
 
 .pending-image-bar > div,
-.reply-preview-bar > div {
+.reply-preview-bar > div,
+.recording-bar > div {
   min-width: 0;
   flex: 1;
 }
 
-.pending-image-bar > div {
+.pending-image-bar > div,
+.recording-bar > div {
   display: grid;
   gap: 3px;
 }
 
 .pending-image-bar b,
-.reply-preview-bar b {
+.reply-preview-bar b,
+.recording-bar b {
   color: #ba5e86;
   font-size: 12px;
 }
 
 .pending-image-bar span,
-.reply-preview-bar span {
+.reply-preview-bar span,
+.recording-bar small {
   overflow: hidden;
   color: #8c717c;
   font-size: 12px;
@@ -258,6 +364,30 @@ defineExpose({
   gap: 2px;
   padding-left: 9px;
   border-left: 3px solid #da729f;
+}
+
+.recording-bar > button {
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 12px;
+  background: #f3e7ec;
+  color: #8b5f70;
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #df5e79;
+  animation: recording-pulse 1s ease-in-out infinite;
+}
+
+.next-message-hint {
+  padding: 6px 14px;
+  color: #9a7383;
+  font-size: 11px;
+  text-align: center;
 }
 
 .composer {
@@ -295,6 +425,7 @@ defineExpose({
 .image-input { display: none; }
 
 .composer-side-button,
+.mic-button,
 .send-button,
 .stop-button {
   flex: 0 0 auto;
@@ -304,11 +435,18 @@ defineExpose({
   cursor: pointer;
 }
 
-.composer-side-button {
+.composer-side-button,
+.mic-button {
   width: 42px;
   background: rgba(232,138,176,.16);
   color: #cf6793;
-  font-size: 25px;
+}
+
+.composer-side-button { font-size: 25px; }
+.mic-button { font-size: 18px; }
+.mic-button--active {
+  background: #df6f88;
+  color: #fff;
 }
 
 .send-button,
@@ -322,11 +460,23 @@ defineExpose({
 
 .stop-button { background: #826a75; }
 .send-button:disabled,
-.composer-side-button:disabled { opacity: .45; }
+.composer-side-button:disabled,
+.mic-button:disabled { opacity: .45; }
+
+@keyframes recording-pulse {
+  0%, 100% { transform: scale(.8); opacity: .55; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
 
 @media (max-width: 460px) {
   .composer {
+    gap: 6px;
     padding-bottom: max(14px, calc(env(safe-area-inset-bottom) + 7px));
+  }
+
+  .composer-side-button,
+  .mic-button {
+    width: 38px;
   }
 }
 </style>
