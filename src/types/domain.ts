@@ -122,6 +122,7 @@ export interface ChatSettings {
   recentMessageLimit: number
   replyLength: ReplyLength
   multiBubble: boolean
+  streamResponse: boolean
   showTyping: boolean
   naturalDelay: boolean
   innerThoughtVisibility: InnerThoughtVisibility

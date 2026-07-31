@@ -13,13 +13,18 @@ import {
 
 import PhoneFrame from '../components/PhoneFrame.vue'
 import CharacterAvatar from '../components/CharacterAvatar.vue'
+import ChatMessageItem from '../components/chat/ChatMessageItem.vue'
+import ChatComposer from '../components/chat/ChatComposer.vue'
 
 import { db } from '../db/database'
 import {
   MockProvider,
   isVisionUnsupportedError,
   type ChatRequest,
-  type ChatTurn
+  type ChatResponse,
+  type ChatStreamChunk,
+  type ChatTurn,
+  type ModelProvider
 } from '../services/ai/provider'
 import { createProvider } from '../services/ai/providerFactory'
 import {
@@ -28,7 +33,6 @@ import {
   saveVisionCapability
 } from '../services/modelSettings'
 import {
-  formatImageSize,
   prepareChatImage,
   type PreparedChatImage
 } from '../services/imageService'
@@ -95,6 +99,7 @@ const relationship = ref<CharacterRelationship>()
 
 const draft = ref('')
 const isSending = ref(false)
+const streamingMessageId = ref('')
 const isLoadingThought = ref(false)
 const errorMessage = ref('')
 const noticeMessage = ref('')
@@ -110,12 +115,18 @@ const isPreparingImage = ref(false)
 const panelDragOffset = ref(0)
 const isPanelDragging = ref(false)
 
+interface ChatComposerHandle {
+  focus: () => void
+  resize: () => void
+  openImagePicker: () => void
+}
+
 const messageListRef = ref<HTMLElement>()
-const composerRef = ref<HTMLTextAreaElement>()
-const imageInputRef = ref<HTMLInputElement>()
+const chatComposerRef = ref<ChatComposerHandle>()
 const audioRef = ref<HTMLAudioElement>()
 let abortController: AbortController | undefined
-let longPressTimer: number | undefined
+let streamPersistTimer: number | undefined
+let streamScrollFrame: number | undefined
 let localAudioObjectUrl = ''
 let lastMusicSaveSecond = -1
 let panelDragStartY = 0
@@ -324,14 +335,6 @@ ${text}`
 }
 
 
-function autoResizeComposer() {
-  void nextTick(() => {
-    const element = composerRef.value
-    if (!element) return
-    element.style.height = 'auto'
-    element.style.height = `${Math.min(element.scrollHeight, 112)}px`
-  })
-}
 
 function handleComposerFocus() {
   window.setTimeout(() => {
@@ -340,7 +343,6 @@ function handleComposerFocus() {
 }
 
 function openMessageMenu(message: Message) {
-  cancelLongPress()
   selectedMessage.value = message
   activePanel.value = 'message'
   if ('vibrate' in navigator) navigator.vibrate?.(12)
@@ -391,11 +393,63 @@ function confirmImagePrivacy() {
 
 function openImagePicker() {
   if (!confirmImagePrivacy()) return
-  imageInputRef.value?.click()
+  chatComposerRef.value?.openImagePicker()
 }
 
 function removePendingImage() {
   pendingImage.value = undefined
+}
+
+async function recoverInterruptedMessages(
+  rows: Message[]
+) {
+  const emptyAssistantIds: string[] = []
+  const recovered: Message[] = []
+  const updates: Message[] = []
+
+  for (const message of rows) {
+    if (message.status !== 'pending') {
+      recovered.push(message)
+      continue
+    }
+
+    if (
+      message.senderId !== 'user' &&
+      !message.content.trim()
+    ) {
+      emptyAssistantIds.push(message.id)
+      continue
+    }
+
+    const next: Message = {
+      ...message,
+      status: 'cancelled',
+      errorText: undefined
+    }
+
+    recovered.push(next)
+    updates.push(next)
+  }
+
+  if (emptyAssistantIds.length || updates.length) {
+    await db.transaction(
+      'rw',
+      db.messages,
+      async () => {
+        if (emptyAssistantIds.length) {
+          await db.messages.bulkDelete(
+            emptyAssistantIds
+          )
+        }
+
+        if (updates.length) {
+          await db.messages.bulkPut(updates)
+        }
+      }
+    )
+  }
+
+  return recovered
 }
 
 
@@ -438,8 +492,11 @@ async function loadConversation(conversationId: string) {
       getModelSettings()
     ])
 
+    const recoveredMessageRows =
+      await recoverInterruptedMessages(messageRows)
+
     conversation.value = conversationRow
-    messages.value = messageRows
+    messages.value = recoveredMessageRows
     character.value = characterRow
     userProfile.value = profileRow
     chatSettings.value = settingsRow
@@ -470,19 +527,19 @@ async function loadConversation(conversationId: string) {
         character: characterRow,
         conversationId,
         worldId: conversationRow.worldId,
-        messages: messageRows,
+        messages: recoveredMessageRows,
         enabled: settingsRow.proactiveEnabled ?? true,
         intervalHours: settingsRow.proactiveIntervalHours ?? 12
       })
       if (proactive) {
-        messages.value = [...messageRows, proactive]
+        messages.value = [...recoveredMessageRows, proactive]
         relationship.value = await getRelationship(characterRow.id)
       }
     }
 
     await restoreScrollPosition(conversationId)
     await nextTick()
-    autoResizeComposer()
+    chatComposerRef.value?.resize()
     updateScrollButton()
     applyAudioState()
   } catch (error) {
@@ -622,6 +679,301 @@ async function updateUserMessageState(
   }
 }
 
+
+interface StreamingReplySession {
+  messageId?: string
+  text: string
+  provider: string
+  model: string
+  fallback: boolean
+  type: Message['type']
+  conversation: Conversation
+}
+
+function clearStreamTimers() {
+  if (streamPersistTimer !== undefined) {
+    window.clearTimeout(streamPersistTimer)
+    streamPersistTimer = undefined
+  }
+
+  if (streamScrollFrame !== undefined) {
+    window.cancelAnimationFrame(streamScrollFrame)
+    streamScrollFrame = undefined
+  }
+}
+
+function scheduleStreamScroll() {
+  if (showScrollButton.value || streamScrollFrame !== undefined) return
+
+  streamScrollFrame = window.requestAnimationFrame(() => {
+    streamScrollFrame = undefined
+    void scrollToBottom('auto')
+  })
+}
+
+async function ensureStreamingMessage(
+  session: StreamingReplySession
+) {
+  if (session.messageId) return
+
+  const now = new Date().toISOString()
+  const message: Message = {
+    id: crypto.randomUUID(),
+    worldId: session.conversation.worldId,
+    conversationId: session.conversation.id,
+    senderId: session.conversation.memberIds[0],
+    type: session.type,
+    content: session.text,
+    status: 'pending',
+    createdAt: now,
+    provider: session.provider,
+    model: session.model,
+    fallback: session.fallback,
+    replyGroupId: crypto.randomUUID()
+  }
+
+  await db.transaction(
+    'rw',
+    db.messages,
+    db.conversations,
+    async () => {
+      await db.messages.add(message)
+      await db.conversations.update(
+        session.conversation.id,
+        { updatedAt: now }
+      )
+    }
+  )
+
+  session.messageId = message.id
+  streamingMessageId.value = message.id
+  messages.value = [...messages.value, message]
+  scheduleStreamScroll()
+}
+
+function scheduleStreamPersistence(
+  session: StreamingReplySession
+) {
+  if (!session.messageId) return
+
+  if (streamPersistTimer !== undefined) {
+    window.clearTimeout(streamPersistTimer)
+  }
+
+  streamPersistTimer = window.setTimeout(() => {
+    streamPersistTimer = undefined
+
+    if (!session.messageId) return
+
+    void db.messages.update(
+      session.messageId,
+      {
+        content: session.text,
+        provider: session.provider,
+        model: session.model,
+        fallback: session.fallback
+      }
+    )
+  }, 140)
+}
+
+async function appendStreamChunk(
+  session: StreamingReplySession,
+  chunk: ChatStreamChunk
+) {
+  session.text = chunk.text
+  if (!session.text) return
+
+  await ensureStreamingMessage(session)
+
+  const index = messages.value.findIndex(
+    item => item.id === session.messageId
+  )
+
+  if (index >= 0) {
+    messages.value[index] = {
+      ...messages.value[index],
+      content: session.text,
+      provider: session.provider,
+      model: session.model,
+      fallback: session.fallback,
+      status: 'pending'
+    }
+  }
+
+  scheduleStreamPersistence(session)
+  scheduleStreamScroll()
+}
+
+async function flushStreamingMessage(
+  session: StreamingReplySession
+) {
+  if (streamPersistTimer !== undefined) {
+    window.clearTimeout(streamPersistTimer)
+    streamPersistTimer = undefined
+  }
+
+  if (!session.messageId) return
+
+  await db.messages.update(
+    session.messageId,
+    {
+      content: session.text,
+      provider: session.provider,
+      model: session.model,
+      fallback: session.fallback
+    }
+  )
+}
+
+async function finishStreamingMessage(
+  session: StreamingReplySession,
+  finalText: string,
+  multiBubble: boolean
+) {
+  session.text = finalText.trim()
+
+  if (!session.text) {
+    throw new Error('模型没有返回有效回复。')
+  }
+
+  if (!session.messageId) {
+    await saveAssistantBubbles({
+      texts: splitReplyText(session.text, multiBubble),
+      provider: session.provider,
+      model: session.model,
+      fallback: session.fallback,
+      type: session.type
+    })
+    return
+  }
+
+  await flushStreamingMessage(session)
+
+  const bubbles = splitReplyText(
+    session.text,
+    multiBubble
+  )
+
+  if (bubbles.length <= 1) {
+    await db.messages.update(
+      session.messageId,
+      {
+        content: session.text,
+        status: 'delivered',
+        provider: session.provider,
+        model: session.model,
+        fallback: session.fallback,
+        errorText: undefined
+      }
+    )
+  } else {
+    const source = messages.value.find(
+      item => item.id === session.messageId
+    )
+    const groupId =
+      source?.replyGroupId ?? crypto.randomUUID()
+    const baseTime = source?.createdAt
+      ? new Date(source.createdAt).getTime()
+      : Date.now()
+
+    await db.transaction(
+      'rw',
+      db.messages,
+      db.conversations,
+      async () => {
+        await db.messages.delete(session.messageId!)
+
+        await db.messages.bulkAdd(
+          bubbles.map((content, index): Message => ({
+            id: crypto.randomUUID(),
+            worldId: session.conversation.worldId,
+            conversationId: session.conversation.id,
+            senderId: session.conversation.memberIds[0],
+            type: session.type,
+            content,
+            status: 'delivered',
+            createdAt: new Date(baseTime + index).toISOString(),
+            provider: session.provider,
+            model: session.model,
+            fallback: session.fallback,
+            replyGroupId: groupId
+          }))
+        )
+
+        await db.conversations.update(
+          session.conversation.id,
+          { updatedAt: new Date().toISOString() }
+        )
+      }
+    )
+  }
+
+  messages.value = await db.messages
+    .where('conversationId')
+    .equals(session.conversation.id)
+    .sortBy('createdAt')
+
+  streamingMessageId.value = ''
+  session.messageId = undefined
+  clearStreamTimers()
+  await scrollToBottom('auto')
+}
+
+async function preserveInterruptedStream(
+  session: StreamingReplySession,
+  status: 'cancelled' | 'failed',
+  errorText?: string
+) {
+  if (!session.messageId || !session.text.trim()) {
+    if (session.messageId) {
+      await db.messages.delete(session.messageId)
+      messages.value = messages.value.filter(
+        item => item.id !== session.messageId
+      )
+    }
+
+    streamingMessageId.value = ''
+    session.messageId = undefined
+    clearStreamTimers()
+    return false
+  }
+
+  await flushStreamingMessage(session)
+  await db.messages.update(
+    session.messageId,
+    {
+      content: session.text.trim(),
+      status,
+      errorText,
+      provider: session.provider,
+      model: session.model,
+      fallback: session.fallback
+    }
+  )
+
+  const index = messages.value.findIndex(
+    item => item.id === session.messageId
+  )
+
+  if (index >= 0) {
+    messages.value[index] = {
+      ...messages.value[index],
+      content: session.text.trim(),
+      status,
+      errorText,
+      provider: session.provider,
+      model: session.model,
+      fallback: session.fallback
+    }
+  }
+
+  streamingMessageId.value = ''
+  session.messageId = undefined
+  clearStreamTimers()
+  return true
+}
+
 async function saveAssistantBubbles(options: {
   texts: string[]
   provider: string
@@ -698,6 +1050,18 @@ async function requestAssistantReply(options?: {
   const activeConversation = conversation.value
   const activeCharacter = character.value
   const settings = chatSettings.value
+  const streamSession: StreamingReplySession = {
+    text: '',
+    provider: '',
+    model: '',
+    fallback: false,
+    type: options?.type ?? 'text',
+    conversation: activeConversation
+  }
+
+  let visualMessage: Message | undefined
+  let visionUsed = false
+  let visionFallback = false
 
   try {
     let currentModelSettings = await getModelSettings()
@@ -708,7 +1072,7 @@ async function requestAssistantReply(options?: {
       ? buildMemoryPrompt(memories.value, conversationState.value?.summary ?? '')
       : ''
 
-    const visualMessage = options?.visualMessageId
+    visualMessage = options?.visualMessageId
       ? messages.value.find(item => item.id === options.visualMessageId)
       : undefined
 
@@ -718,6 +1082,9 @@ async function requestAssistantReply(options?: {
       visualMessage.imageDataUrl &&
       visionCapability !== 'unsupported'
     )
+
+    visionUsed = mayUseVision
+    visionFallback = Boolean(visualMessage) && !mayUseVision
 
     const buildRecentTurns = (includeVision: boolean): ChatTurn[] => {
       const turns: ChatTurn[] = messages.value
@@ -773,17 +1140,39 @@ async function requestAssistantReply(options?: {
       ]
     })
 
-    let response
+    let response: ChatResponse
     let providerId = provider.id
     let usedModel = currentModelSettings.model
     let fallback = false
     let providerNotice = ''
-    let visionUsed = mayUseVision
-    let visionFallback = Boolean(visualMessage) && !mayUseVision
+
+    const runProvider = async (
+      activeProvider: ModelProvider,
+      request: ChatRequest
+    ) => {
+      streamSession.provider = activeProvider.id
+      streamSession.model = request.model
+      streamSession.fallback = fallback
+
+      if (!settings.streamResponse) {
+        return activeProvider.chat(request)
+      }
+
+      return activeProvider.chatStream(
+        request,
+        {
+          onDelta: chunk =>
+            appendStreamChunk(streamSession, chunk)
+        }
+      )
+    }
 
     try {
       try {
-        response = await provider.chat(createRequest(mayUseVision))
+        response = await runProvider(
+          provider,
+          createRequest(mayUseVision)
+        )
 
         if (
           mayUseVision &&
@@ -799,6 +1188,7 @@ async function requestAssistantReply(options?: {
         if (isAbortError(providerError)) throw providerError
 
         const canRetryWithoutVision =
+          !streamSession.text &&
           mayUseVision &&
           currentModelSettings.visionMode === 'auto' &&
           isVisionUnsupportedError(providerError)
@@ -807,7 +1197,10 @@ async function requestAssistantReply(options?: {
 
         visionUsed = false
         visionFallback = true
-        response = await provider.chat(createRequest(false))
+        response = await runProvider(
+          provider,
+          createRequest(false)
+        )
         currentModelSettings = await saveVisionCapability(
           currentModelSettings,
           false
@@ -819,6 +1212,7 @@ async function requestAssistantReply(options?: {
       if (isAbortError(providerError)) throw providerError
 
       const mayFallback =
+        !streamSession.text &&
         provider.id !== 'mock' &&
         settings.autoFallback &&
         currentModelSettings.fallbackToMock
@@ -826,38 +1220,58 @@ async function requestAssistantReply(options?: {
       if (!mayFallback) throw providerError
 
       const fallbackProvider = new MockProvider()
-      response = await fallbackProvider.chat({
-        ...createRequest(false),
-        model: 'mock',
-        signal
-      })
       providerId = fallbackProvider.id
       usedModel = 'mock'
       fallback = true
       visionUsed = false
       visionFallback = Boolean(visualMessage)
+
+      response = await runProvider(
+        fallbackProvider,
+        {
+          ...createRequest(false),
+          model: 'mock',
+          signal
+        }
+      )
+
       providerNotice = providerError instanceof Error
         ? `真实接口未响应，已使用本地回复。原因：${providerError.message}`
         : '真实接口未响应，已使用本地回复。'
     }
 
-    if (settings.naturalDelay) {
-      await wait(
-        240 + Math.min(900, response.text.length * 9),
-        signal
+    if (settings.streamResponse) {
+      streamSession.provider = providerId
+      streamSession.model = usedModel
+      streamSession.fallback = fallback
+
+      await finishStreamingMessage(
+        streamSession,
+        response.text,
+        settings.multiBubble
       )
+    } else {
+      if (settings.naturalDelay) {
+        await wait(
+          240 + Math.min(900, response.text.length * 9),
+          signal
+        )
+      }
+
+      const bubbles = splitReplyText(
+        response.text,
+        settings.multiBubble
+      )
+
+      await saveAssistantBubbles({
+        texts: bubbles,
+        provider: providerId,
+        model: usedModel,
+        fallback,
+        type: options?.type,
+        signal
+      })
     }
-
-    const bubbles = splitReplyText(response.text, settings.multiBubble)
-
-    await saveAssistantBubbles({
-      texts: bubbles,
-      provider: providerId,
-      model: usedModel,
-      fallback,
-      type: options?.type,
-      signal
-    })
 
     await updateUserMessageState(
       options?.sourceMessageId,
@@ -879,8 +1293,23 @@ async function requestAssistantReply(options?: {
     await updateSummaryIfNeeded()
   } catch (error) {
     if (isAbortError(error)) {
-      await updateUserMessageState(options?.sourceMessageId, 'cancelled')
-      noticeMessage.value = '已停止等待回复，可长按消息重新发送。'
+      const preserved = await preserveInterruptedStream(
+        streamSession,
+        'cancelled'
+      )
+
+      await updateUserMessageState(
+        options?.sourceMessageId,
+        preserved ? 'read' : 'cancelled',
+        {
+          visionUsed: visualMessage ? visionUsed : undefined,
+          visionFallback: visualMessage ? visionFallback : undefined
+        }
+      )
+
+      noticeMessage.value = preserved
+        ? '已停止生成，已经出现的内容已保留。'
+        : '已停止等待回复，可长按消息重新发送。'
       return
     }
 
@@ -889,13 +1318,26 @@ async function requestAssistantReply(options?: {
       ? error.message
       : '未知错误'
 
-    await updateUserMessageState(
-      options?.sourceMessageId,
+    const preserved = await preserveInterruptedStream(
+      streamSession,
       'failed',
-      { errorText: technical }
+      technical
     )
 
-    errorMessage.value = '对方暂时没有回应。'
+    await updateUserMessageState(
+      options?.sourceMessageId,
+      preserved ? 'read' : 'failed',
+      {
+        errorText: preserved ? undefined : technical,
+        visionUsed: visualMessage ? visionUsed : undefined,
+        visionFallback: visualMessage ? visionFallback : undefined
+      }
+    )
+
+    errorMessage.value = preserved
+      ? '回复在生成途中中断，已保留现有内容。'
+      : '对方暂时没有回应。'
+
     conversationState.value = await patchConversationState(
       activeConversation.id,
       {
@@ -905,6 +1347,8 @@ async function requestAssistantReply(options?: {
     )
   } finally {
     isSending.value = false
+    streamingMessageId.value = ''
+    clearStreamTimers()
     abortController = undefined
   }
 }
@@ -949,7 +1393,7 @@ async function send() {
   pendingImage.value = undefined
   replyTarget.value = undefined
   localStorage.removeItem(draftStorageKey(activeConversation.id))
-  autoResizeComposer()
+  chatComposerRef.value?.resize()
 
   try {
     await db.transaction(
@@ -1008,12 +1452,8 @@ async function send() {
   }
 }
 
-async function handleImageSelected(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-
-  if (!file || isSending.value || isPreparingImage.value) return
+async function handleImageSelected(file: File) {
+  if (isSending.value || isPreparingImage.value) return
 
   isPreparingImage.value = true
   noticeMessage.value = '正在整理图片…'
@@ -1022,8 +1462,8 @@ async function handleImageSelected(event: Event) {
     pendingImage.value = await prepareChatImage(file)
     noticeMessage.value = ''
     await nextTick()
-    composerRef.value?.focus()
-    autoResizeComposer()
+    chatComposerRef.value?.focus()
+    chatComposerRef.value?.resize()
   } catch (error) {
     pendingImage.value = undefined
     noticeMessage.value = error instanceof Error
@@ -1038,12 +1478,6 @@ function stopGeneration() {
   abortController?.abort()
 }
 
-function handleComposerKeydown(event: KeyboardEvent) {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault()
-    void send()
-  }
-}
 
 async function openThoughtPanel() {
   activePanel.value = 'thought'
@@ -1157,19 +1591,6 @@ async function clearConversationMessages() {
   activePanel.value = null
 }
 
-function startLongPress(message: Message) {
-  cancelLongPress()
-  longPressTimer = window.setTimeout(() => {
-    openMessageMenu(message)
-  }, 480)
-}
-
-function cancelLongPress() {
-  if (longPressTimer !== undefined) {
-    window.clearTimeout(longPressTimer)
-    longPressTimer = undefined
-  }
-}
 
 async function copySelectedMessage() {
   if (!selectedMessage.value) return
@@ -1182,7 +1603,7 @@ function replyToSelectedMessage() {
   if (!selectedMessage.value) return
   replyTarget.value = selectedMessage.value
   activePanel.value = null
-  void nextTick(() => composerRef.value?.focus())
+  void nextTick(() => chatComposerRef.value?.focus())
 }
 
 function cancelReply() {
@@ -1429,7 +1850,6 @@ watch(
 )
 
 watch(draft, value => {
-  autoResizeComposer()
   if (!conversation.value) return
   const key = draftStorageKey(conversation.value.id)
   if (value) localStorage.setItem(key, value)
@@ -1444,7 +1864,7 @@ watch(activePanel, () => {
 onUnmounted(() => {
   rememberScrollPosition()
   abortController?.abort()
-  cancelLongPress()
+  clearStreamTimers()
   if (localAudioObjectUrl) URL.revokeObjectURL(localAudioObjectUrl)
 })
 </script>
@@ -1525,133 +1945,21 @@ onUnmounted(() => {
         class="message-list"
         @scroll="handleMessageScroll"
       >
-        <template
+        <ChatMessageItem
           v-for="(message, index) in messages"
           :key="message.id"
-        >
-          <div
-            v-if="shouldShowTime(index)"
-            class="message-time"
-          >
-            {{ formatMessageTime(message.createdAt) }}
-          </div>
-
-          <div
-            :class="[
-              'message-row',
-              message.senderId === 'user'
-                ? 'message-row--mine'
-                : 'message-row--theirs'
-            ]"
-          >
-            <template v-if="message.senderId !== 'user'">
-              <CharacterAvatar
-                v-if="character"
-                :avatar="character.avatar"
-                :name="character.name"
-                :size="38"
-              />
-
-              <button
-                :class="[
-                  'bubble',
-                  'bubble--theirs',
-                  {
-                    'bubble--music': message.type === 'music',
-                    'bubble--image': message.type === 'image'
-                  }
-                ]"
-                type="button"
-                @pointerdown="startLongPress(message)"
-                @pointerup="cancelLongPress"
-                @pointerleave="cancelLongPress"
-                @pointercancel="cancelLongPress"
-                @contextmenu.prevent="openMessageMenu(message)"
-              >
-                <span v-if="message.replyTo" class="message-reply-quote">
-                  <b>{{ message.replyTo.senderName }}</b>
-                  <span>{{ message.replyTo.preview }}</span>
-                </span>
-                <template v-if="message.type === 'image' && message.imageDataUrl">
-                  <img
-                    :src="message.imageDataUrl"
-                    :alt="message.imageName || '聊天图片'"
-                    class="message-image"
-                    @click.stop="previewImageUrl = message.imageDataUrl || ''"
-                  />
-                  <span v-if="message.content" class="image-caption">
-                    {{ message.content }}
-                  </span>
-                </template>
-                <span v-else-if="message.type === 'image'" class="missing-image">
-                  图片未包含在这份备份中
-                  <small v-if="message.content">{{ message.content }}</small>
-                </span>
-                <template v-else>
-                  <span v-if="message.type === 'music'" class="music-message-mark">♫</span>
-                  {{ message.content }}
-                </template>
-              </button>
-            </template>
-
-            <template v-else>
-              <button
-                :class="['bubble', 'bubble--mine', { 'bubble--image': message.type === 'image' }]"
-                type="button"
-                @pointerdown="startLongPress(message)"
-                @pointerup="cancelLongPress"
-                @pointerleave="cancelLongPress"
-                @pointercancel="cancelLongPress"
-                @contextmenu.prevent="openMessageMenu(message)"
-              >
-                <span v-if="message.replyTo" class="message-reply-quote message-reply-quote--mine">
-                  <b>{{ message.replyTo.senderName }}</b>
-                  <span>{{ message.replyTo.preview }}</span>
-                </span>
-                <template v-if="message.type === 'image' && message.imageDataUrl">
-                  <img
-                    :src="message.imageDataUrl"
-                    :alt="message.imageName || '聊天图片'"
-                    class="message-image"
-                    @click.stop="previewImageUrl = message.imageDataUrl || ''"
-                  />
-                  <span v-if="message.content" class="image-caption image-caption--mine">
-                    {{ message.content }}
-                  </span>
-                </template>
-                <span v-else-if="message.type === 'image'" class="missing-image missing-image--mine">
-                  图片未包含在这份备份中
-                  <small v-if="message.content">{{ message.content }}</small>
-                </span>
-                <template v-else>{{ message.content }}</template>
-              </button>
-
-              <button
-                v-if="message.status === 'pending' || message.status === 'failed' || message.status === 'cancelled'"
-                type="button"
-                :class="['message-delivery-state', `message-delivery-state--${message.status}`]"
-                @click="openMessageMenu(message)"
-              >
-                {{
-                  message.status === 'pending'
-                    ? '发送中'
-                    : message.status === 'cancelled'
-                      ? '已停止'
-                      : '发送失败'
-                }}
-              </button>
-
-              <CharacterAvatar
-                :avatar="userProfile?.avatar || '🧑'"
-                :name="userProfile?.name || '我'"
-                :size="38"
-              />
-            </template>
-          </div>
-        </template>
+          :message="message"
+          :character="character"
+          :user-profile="userProfile"
+          :show-time="shouldShowTime(index)"
+          :time-label="formatMessageTime(message.createdAt)"
+          :streaming="message.id === streamingMessageId"
+          @open-menu="openMessageMenu"
+          @open-image="previewImageUrl = $event"
+        />
 
         <div
-          v-if="isSending && chatSettings?.showTyping"
+          v-if="isSending && chatSettings?.showTyping && !streamingMessageId"
           class="message-row message-row--theirs"
         >
           <CharacterAvatar
@@ -1684,69 +1992,23 @@ onUnmounted(() => {
         ↓
       </button>
 
-      <div v-if="pendingImage" class="pending-image-bar">
-        <img :src="pendingImage.dataUrl" :alt="pendingImage.name" />
-        <div>
-          <b>准备发送图片</b>
-          <span>{{ pendingImage.name }} · {{ formatImageSize(pendingImage.bytes) }}</span>
-        </div>
-        <button type="button" aria-label="移除图片" @click="removePendingImage">×</button>
-      </div>
-
-      <div v-if="replyTarget" class="reply-preview-bar">
-        <div>
-          <b>回复 {{ messageSenderName(replyTarget) }}</b>
-          <span>{{ messagePreview(replyTarget, 56) }}</span>
-        </div>
-        <button type="button" aria-label="取消回复" @click="cancelReply">×</button>
-      </div>
-
-      <form class="composer" @submit.prevent="send">
-        <input
-          ref="imageInputRef"
-          class="image-input"
-          type="file"
-          accept="image/*"
-          @change="handleImageSelected"
-        />
-        <button
-          type="button"
-          class="composer-side-button"
-          :disabled="isSending || isPreparingImage"
-          @click="openImagePicker"
-        >
-          ＋
-        </button>
-
-        <textarea
-          ref="composerRef"
-          v-model="draft"
-          :disabled="isSending"
-          rows="1"
-          :placeholder="pendingImage ? '为图片添加一句话…' : '输入消息…'"
-          @input="autoResizeComposer"
-          @focus="handleComposerFocus"
-          @keydown="handleComposerKeydown"
-        ></textarea>
-
-        <button
-          v-if="isSending"
-          class="stop-button"
-          type="button"
-          @click="stopGeneration"
-        >
-          停止
-        </button>
-
-        <button
-          v-else
-          class="send-button"
-          type="submit"
-          :disabled="!canSend"
-        >
-          发送
-        </button>
-      </form>
+      <ChatComposer
+        ref="chatComposerRef"
+        v-model="draft"
+        :pending-image="pendingImage"
+        :reply-sender="replyTarget ? messageSenderName(replyTarget) : undefined"
+        :reply-preview="replyTarget ? messagePreview(replyTarget, 56) : undefined"
+        :is-sending="isSending"
+        :is-preparing-image="isPreparingImage"
+        :can-send="canSend"
+        @submit="send"
+        @request-image="openImagePicker"
+        @image-selected="handleImageSelected"
+        @remove-image="removePendingImage"
+        @cancel-reply="cancelReply"
+        @stop="stopGeneration"
+        @focus="handleComposerFocus"
+      />
 
       <div
         v-if="activePanel"
@@ -1936,7 +2198,12 @@ onUnmounted(() => {
             </label>
 
             <label class="setting-switch">
-              <span><b>显示正在输入</b><small>等待回复时显示输入动画</small></span>
+              <span><b>边想边回复</b><small>让文字在生成过程中逐步出现</small></span>
+              <input v-model="chatSettings.streamResponse" type="checkbox" @change="persistChatSettings" />
+            </label>
+
+            <label class="setting-switch">
+              <span><b>显示正在输入</b><small>等待第一段回复时显示输入动画</small></span>
               <input v-model="chatSettings.showTyping" type="checkbox" @change="persistChatSettings" />
             </label>
 

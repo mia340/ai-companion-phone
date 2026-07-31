@@ -16,6 +16,7 @@ export function createDefaultChatSettings(
     recentMessageLimit: 20,
     replyLength: 'natural',
     multiBubble: true,
+    streamResponse: true,
     showTyping: true,
     naturalDelay: true,
     innerThoughtVisibility: 'thoughts',
@@ -30,8 +31,15 @@ export async function getChatSettings(
   conversationId: string
 ): Promise<ChatSettings> {
   const row = await db.chatSettings.get(conversationId)
+  const defaults = createDefaultChatSettings(conversationId)
 
-  return row ?? createDefaultChatSettings(conversationId)
+  return row
+    ? {
+      ...defaults,
+      ...row,
+      streamResponse: row.streamResponse ?? true
+    }
+    : defaults
 }
 
 export async function saveChatSettings(

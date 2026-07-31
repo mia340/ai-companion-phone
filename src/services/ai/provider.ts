@@ -47,6 +47,17 @@ export interface ChatResponse {
   raw?: unknown
 }
 
+export interface ChatStreamChunk {
+  delta: string
+  text: string
+}
+
+export interface ChatStreamHandlers {
+  onDelta?: (
+    chunk: ChatStreamChunk
+  ) => void | Promise<void>
+}
+
 export interface ProviderModel {
   id: string
   name?: string
@@ -58,6 +69,10 @@ export interface ModelProvider {
   name: string
   chat(
     request: ChatRequest
+  ): Promise<ChatResponse>
+  chatStream(
+    request: ChatRequest,
+    handlers?: ChatStreamHandlers
   ): Promise<ChatResponse>
   listModels(): Promise<ProviderModel[]>
   testConnection(): Promise<boolean>
@@ -835,6 +850,34 @@ function createMockReply(
   )
 }
 
+function abortableDelay(
+  milliseconds: number,
+  signal?: AbortSignal
+) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('请求已取消', 'AbortError'))
+      return
+    }
+
+    const onAbort = () => {
+      window.clearTimeout(timer)
+      reject(new DOMException('请求已取消', 'AbortError'))
+    }
+
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, milliseconds)
+
+    signal?.addEventListener(
+      'abort',
+      onAbort,
+      { once: true }
+    )
+  })
+}
+
 export class MockProvider
 implements ModelProvider {
   id = 'mock'
@@ -847,18 +890,7 @@ implements ModelProvider {
       throw new DOMException('请求已取消', 'AbortError')
     }
 
-    await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(resolve, 320)
-
-      request.signal?.addEventListener(
-        'abort',
-        () => {
-          window.clearTimeout(timer)
-          reject(new DOMException('请求已取消', 'AbortError'))
-        },
-        { once: true }
-      )
-    })
+    await abortableDelay(320, request.signal)
 
     const text = createMockReply(request)
 
@@ -866,6 +898,54 @@ implements ModelProvider {
       text,
       raw: {
         provider: this.id,
+        character:
+          request.character?.characterName
+      }
+    }
+  }
+
+  async chatStream(
+    request: ChatRequest,
+    handlers?: ChatStreamHandlers
+  ): Promise<ChatResponse> {
+    if (request.signal?.aborted) {
+      throw new DOMException('请求已取消', 'AbortError')
+    }
+
+    const text = createMockReply(request)
+    let streamed = ''
+
+    await abortableDelay(180, request.signal)
+
+    for (let index = 0; index < text.length;) {
+      if (request.signal?.aborted) {
+        throw new DOMException('请求已取消', 'AbortError')
+      }
+
+      const size = /[，。！？!?\n]/.test(text[index] ?? '')
+        ? 1
+        : 1 + ((index + text.length) % 3)
+
+      const delta = text.slice(index, index + size)
+      index += delta.length
+      streamed += delta
+
+      await handlers?.onDelta?.({
+        delta,
+        text: streamed
+      })
+
+      await abortableDelay(
+        /[，。！？!?\n]/.test(delta) ? 82 : 28,
+        request.signal
+      )
+    }
+
+    return {
+      text,
+      raw: {
+        provider: this.id,
+        streamed: true,
         character:
           request.character?.characterName
       }
@@ -1173,6 +1253,206 @@ function extractAssistantText(
     .trim()
 }
 
+function extractStreamingText(value: unknown) {
+  if (typeof value === 'string') return value
+
+  if (!Array.isArray(value)) return ''
+
+  return value
+    .map(part => {
+      if (
+        typeof part === 'object' &&
+        part !== null &&
+        typeof (part as Record<string, unknown>).text === 'string'
+      ) {
+        return (part as Record<string, unknown>).text as string
+      }
+
+      return ''
+    })
+    .join('')
+}
+
+function parseJsonSafely(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return undefined
+  }
+}
+
+function extractStreamDelta(payload: unknown) {
+  if (
+    typeof payload !== 'object' ||
+    payload === null
+  ) {
+    return ''
+  }
+
+  const choices = (
+    payload as Record<string, unknown>
+  ).choices
+
+  if (!Array.isArray(choices)) return ''
+
+  const first = choices[0]
+
+  if (
+    typeof first !== 'object' ||
+    first === null
+  ) {
+    return ''
+  }
+
+  const choice = first as Record<string, unknown>
+  const delta = choice.delta
+
+  if (
+    typeof delta === 'object' &&
+    delta !== null
+  ) {
+    const content = (
+      delta as Record<string, unknown>
+    ).content
+
+    const text = extractStreamingText(content)
+    if (text) return text
+  }
+
+  if (typeof choice.text === 'string') {
+    return choice.text
+  }
+
+  const message = choice.message
+
+  if (
+    typeof message === 'object' &&
+    message !== null
+  ) {
+    return extractStreamingText(
+      (message as Record<string, unknown>).content
+    )
+  }
+
+  return ''
+}
+
+async function emitStreamText(
+  handlers: ChatStreamHandlers | undefined,
+  delta: string,
+  fullText: string
+) {
+  if (!delta) return
+
+  await handlers?.onDelta?.({
+    delta,
+    text: fullText
+  })
+}
+
+async function readEventStream(
+  response: Response,
+  handlers?: ChatStreamHandlers
+): Promise<ChatResponse> {
+  if (!response.body) {
+    throw new Error('当前浏览器无法读取流式回复。')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let rawText = ''
+  let text = ''
+  let eventCount = 0
+
+  const consumeBlock = async (block: string) => {
+    const dataLines = block
+      .split(/\r?\n/)
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).trim())
+
+    for (const dataLine of dataLines) {
+      if (!dataLine || dataLine === '[DONE]') continue
+
+      const payload = parseJsonSafely(dataLine)
+      if (payload === undefined) continue
+
+      eventCount += 1
+      const delta = extractStreamDelta(payload)
+
+      if (delta) {
+        text += delta
+        await emitStreamText(
+          handlers,
+          delta,
+          text
+        )
+      }
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+
+    if (done) break
+
+    const decoded = decoder.decode(value, {
+      stream: true
+    })
+    buffer += decoded
+    rawText += decoded
+
+    while (true) {
+      const boundary = buffer.match(/\r?\n\r?\n/)
+      if (!boundary || boundary.index === undefined) break
+
+      const block = buffer.slice(0, boundary.index)
+      buffer = buffer.slice(
+        boundary.index + boundary[0].length
+      )
+
+      await consumeBlock(block)
+    }
+  }
+
+  const tail = decoder.decode()
+  buffer += tail
+  rawText += tail
+
+  if (buffer.trim()) {
+    await consumeBlock(buffer)
+  }
+
+  if (!text) {
+    const fallbackData = parseJsonSafely(rawText.trim())
+
+    if (fallbackData !== undefined) {
+      const fallbackText = extractStreamDelta(fallbackData)
+
+      if (fallbackText) {
+        text = fallbackText
+        await emitStreamText(
+          handlers,
+          fallbackText,
+          fallbackText
+        )
+      }
+    }
+  }
+
+  if (!text) {
+    throw new Error('模型没有返回有效的流式回复。')
+  }
+
+  return {
+    text: text.trim(),
+    raw: {
+      streamed: true,
+      eventCount
+    }
+  }
+}
+
 const VISION_TEST_IMAGE =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zq2sAAAAASUVORK5CYII='
 
@@ -1289,6 +1569,102 @@ implements ModelProvider {
       text,
       raw: data
     }
+  }
+
+  async chatStream(
+    request: ChatRequest,
+    handlers?: ChatStreamHandlers
+  ): Promise<ChatResponse> {
+    this.validateConfig()
+
+    let response: Response
+
+    try {
+      response = await fetch(
+        buildEndpoint(
+          this.baseUrl,
+          'chat/completions'
+        ),
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'text/event-stream, application/json',
+            'Content-Type': 'application/json',
+            Authorization:
+              `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            model:
+              request.model || this.model,
+            messages: request.messages,
+            temperature:
+              request.temperature ?? 0.8,
+            max_tokens: this.maxTokens,
+            stream: true
+          }),
+          signal: request.signal
+        }
+      )
+    } catch (error) {
+      if (
+        error instanceof DOMException &&
+        error.name === 'AbortError'
+      ) {
+        throw error
+      }
+
+      throw new Error(
+        error instanceof Error
+          ? `网络连接失败：${error.message}`
+          : '网络连接失败，请检查 API 地址。'
+      )
+    }
+
+    if (!response.ok) {
+      const raw = await response.text()
+      const data = parseJsonSafely(raw)
+      const providerMessage =
+        extractErrorMessage(data) ||
+        raw.trim().slice(0, 500)
+
+      throw createHttpError(
+        response.status,
+        providerMessage
+      )
+    }
+
+    const contentType =
+      response.headers.get('content-type')?.toLowerCase() ?? ''
+
+    if (contentType.includes('application/json')) {
+      const data = await readJsonResponse(
+        response
+      ) as OpenAIChatCompletionResponse
+
+      const text = extractAssistantText(
+        data.choices?.[0]?.message?.content
+      )
+
+      if (!text) {
+        throw new Error('模型没有返回有效回复。')
+      }
+
+      await emitStreamText(
+        handlers,
+        text,
+        text
+      )
+
+      return {
+        text,
+        raw: data
+      }
+    }
+
+    return readEventStream(
+      response,
+      handlers
+    )
   }
 
   async listModels(): Promise<ProviderModel[]> {

@@ -1391,3 +1391,72 @@ string | Array<
 ### 备份 V4
 
 V4 继续使用 JSON，但导出函数接受 `includeImages`。关闭时保留图片消息、文件名与附言，移除 `imageDataUrl` 和图片体积。恢复后聊天页会显示“图片未包含在这份备份中”。
+
+
+## V0.3.3 流式回复架构
+
+### Provider 增量接口
+
+`ModelProvider` 在普通 `chat()` 之外新增：
+
+```ts
+chatStream(
+  request: ChatRequest,
+  handlers?: {
+    onDelta?: (chunk: {
+      delta: string
+      text: string
+    }) => void | Promise<void>
+  }
+): Promise<ChatResponse>
+```
+
+`delta` 是当前新增片段，`text` 是截至当前的完整文本。聊天页不直接解析供应商协议，只消费统一增量事件。
+
+### OpenAI 兼容 SSE
+
+`OpenAICompatibleProvider` 发送 `stream: true`，并处理：
+
+- `Content-Type: text/event-stream`
+- `data: { ... }` 事件
+- `data: [DONE]`
+- `choices[0].delta.content`
+- 兼容文本数组内容
+
+若兼容接口忽略流式参数并返回 `application/json`，Provider 会提取完整消息并以一次增量事件交给界面，因此不会破坏原有接口兼容性。
+
+### 临时消息生命周期
+
+ChatRoom 仅在收到第一段有效文字后创建临时角色消息：
+
+1. 第一段到达：写入 `pending` 角色消息。
+2. 后续片段：更新 Vue 响应式消息。
+3. 每约 140 毫秒：节流同步到 Dexie。
+4. 生成完成：标记 `delivered`，必要时按多气泡规则拆分。
+5. 用户停止：保留现有文字并标记 `cancelled`。
+6. 中途失败：保留现有文字并标记 `failed`。
+
+没有收到任何文字就失败时，仍沿用用户消息的失败与重试流程。
+
+### 滚动策略
+
+增量更新期间使用 `requestAnimationFrame` 合并滚动请求。只有用户仍处于最新消息附近时才自动跟随；用户主动上滑后，界面保留当前位置并显示“回到最新消息”按钮。
+
+### 异常恢复
+
+重新加载会话时会检查遗留的 `pending` 消息：
+
+- 有内容的用户或角色消息恢复为 `cancelled`。
+- 没有内容的临时角色消息直接清理。
+
+这样浏览器刷新或意外关闭后不会永久显示“发送中”。
+
+### 聊天组件边界
+
+V0.3.3 新增：
+
+- `ChatMessageItem.vue`：消息行、头像、图片、引用、状态与流式光标。
+- `ChatComposer.vue`：输入框、图片选择、图片预览、引用预览和发送控制。
+
+`ChatRoom.vue` 继续作为会话编排层，负责 Provider、记忆、关系、音乐和底部面板。后续版本可以继续拆分设置面板与音乐面板，而不改变消息组件接口。
+

@@ -1,3 +1,31 @@
+# 更新日志
+
+## V0.3.3 - 流式陪伴与聊天架构升级
+
+### 新增
+
+- OpenAI 兼容 SSE 流式回复
+- 图片理解流式输出
+- 本地模拟回复逐步显示
+- 聊天设置新增“边想边回复”
+- 流式气泡输入光标
+
+### 可靠性
+
+- 停止生成后保留已经出现的文字
+- 流式中断后保留部分回复并显示状态
+- 页面刷新后恢复遗留的 pending 消息
+- 非 SSE 接口自动按普通 JSON 处理
+- 视觉降级和本地兜底继续适用于流式请求
+
+### 架构
+
+- 新增 `ModelProvider.chatStream()` 增量接口
+- 新增 OpenAI SSE 解析与增量回调
+- 流式内容节流写入 IndexedDB
+- 使用 `requestAnimationFrame` 控制自动滚动
+- 拆分 `ChatMessageItem.vue` 与 `ChatComposer.vue`
+
 # AI Companion Phone 更新记录
 
 ## V0.3.2 — 2026-07-30
