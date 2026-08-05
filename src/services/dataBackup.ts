@@ -1,5 +1,6 @@
 import { db } from '../db/database'
 import { estimateDataUrlBytes } from './imageService'
+import { getMessageImages } from './messageImageService'
 
 import type {
   Character,
@@ -98,7 +99,8 @@ export async function createBackup(options?: {
     : messages.map(message => ({
       ...message,
       imageDataUrl: undefined,
-      imageBytes: undefined
+      imageBytes: undefined,
+      images: message.images?.map(image => ({ ...image, dataUrl: undefined, bytes: undefined }))
     }))
 
   return {
@@ -135,11 +137,14 @@ export function getBackupSummary(
     memories: backup.data.memories.length,
     relationships: backup.data.relationships.length,
     relationshipEvents: backup.data.relationshipEvents.length,
-    images: backup.data.messages.filter(message => Boolean(message.imageDataUrl)).length,
-    imageBytes: backup.data.messages.reduce((total, message) => {
-      if (!message.imageDataUrl) return total
-      return total + (message.imageBytes || estimateDataUrlBytes(message.imageDataUrl))
-    }, 0)
+    images: backup.data.messages.reduce(
+      (total, message) => total + getMessageImages(message).filter(image => Boolean(image.dataUrl)).length,
+      0
+    ),
+    imageBytes: backup.data.messages.reduce((total, message) => total + getMessageImages(message).reduce((sum, image) => {
+      if (!image.dataUrl) return sum
+      return sum + (image.bytes || estimateDataUrlBytes(image.dataUrl))
+    }, 0), 0)
   }
 }
 

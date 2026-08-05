@@ -1,5 +1,59 @@
 # 更新日志
 
+## V0.3.6 - 聊天逻辑解耦与多图陪伴升级
+
+### 多图与相机
+
+- 一条消息最多发送 6 张图片
+- 相册多选和移动端相机拍摄入口
+- 发送前缩略图列表、逐张移除、清空和总体积提示
+- 多图作为同一轮视觉输入发送给兼容模型
+- 多图网格气泡、轮播预览和批量保存
+- 旧单图消息自动兼容
+
+### 架构
+
+- 新增 `useChatScroll.ts`
+- 新增 `useChatSpeech.ts`
+- 新增 `useBottomPanel.ts`
+- 新增 `ChatThoughtPanel.vue`
+- 新增 `ChatMusicPanel.vue`
+- 语音、滚动和底部面板拖动逻辑从 `ChatRoom.vue` 移出
+
+### 数据与验证
+
+- `Message.images` 以可选字段扩展，不升级 Dexie 索引版本
+- 备份图片统计与排除图片导出适配多图
+- `vue-tsc -b` 严格类型检查通过
+- 27 个 Vue 单文件组件解析与模板编译通过
+- 当前容器缺少 Rollup Linux 可选模块，最终 Vite 打包需在 Windows 复核
+
+---
+
+## V0.3.5 - 聊天页面组件化与语音设置优化
+
+### 架构
+
+- 新增 `ChatHeader.vue`
+- 新增 `ChatMessageList.vue`
+- 新增 `ChatSettingsPanel.vue`
+- 新增 `ChatActionSheet.vue`
+- 新增 `ChatImagePreview.vue`
+- `ChatRoom.vue` 继续保留会话编排和请求生命周期，减少模板职责
+
+### 语音体验
+
+- 设置面板新增当前角色声音试听
+- 试听沿用角色音色、语速、情绪和关系阶段的节奏调整
+
+### 兼容与验证
+
+- 保留流式回复、停止生成、图片理解、引用、重试、记忆、关系和音乐功能
+- TypeScript 严格类型检查通过
+- 当前容器因 Rollup Linux 可选模块缺失未完成最终 Vite 打包，需在 Windows 执行 `npm run build` 复核
+
+---
+
 ## V0.3.3 - 流式陪伴与聊天架构升级
 
 ### 新增

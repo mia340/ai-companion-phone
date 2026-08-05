@@ -1,21 +1,19 @@
 <script setup lang="ts">
-import {
-  computed,
-  nextTick,
-  onMounted,
-  onUnmounted,
-  ref,
-  watch
-} from 'vue'
-import {
-  useRoute,
-  useRouter
-} from 'vue-router'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import PhoneFrame from '../components/PhoneFrame.vue'
-import CharacterAvatar from '../components/CharacterAvatar.vue'
-import ChatMessageItem from '../components/chat/ChatMessageItem.vue'
 import ChatComposer from '../components/chat/ChatComposer.vue'
+import ChatHeader from '../components/chat/ChatHeader.vue'
+import ChatMessageList from '../components/chat/ChatMessageList.vue'
+import ChatSettingsPanel from '../components/chat/ChatSettingsPanel.vue'
+import ChatActionSheet from '../components/chat/ChatActionSheet.vue'
+import ChatImagePreview from '../components/chat/ChatImagePreview.vue'
+import ChatThoughtPanel from '../components/chat/ChatThoughtPanel.vue'
+import ChatMusicPanel from '../components/chat/ChatMusicPanel.vue'
+import { useBottomPanel } from '../composables/useBottomPanel'
+import { useChatScroll, type ChatMessageListHandle } from '../composables/useChatScroll'
+import { useChatSpeech } from '../composables/useChatSpeech'
 
 import { db } from '../db/database'
 import {
@@ -28,23 +26,9 @@ import {
   type ModelProvider
 } from '../services/ai/provider'
 import { createProvider } from '../services/ai/providerFactory'
-import {
-  getModelSettings,
-  getVisionCapability,
-  saveVisionCapability
-} from '../services/modelSettings'
-import {
-  prepareChatImage,
-  type PreparedChatImage
-} from '../services/imageService'
-import {
-  createSpeechRecognition,
-  isSpeechPlaybackSupported,
-  isSpeechRecognitionSupported,
-  requestMicrophoneAccess,
-  selectSpeechVoice,
-  type SpeechRecognitionLike
-} from '../services/speechService'
+import { getModelSettings, getVisionCapability, saveVisionCapability } from '../services/modelSettings'
+import { MAX_CHAT_IMAGES, prepareChatImages, type PreparedChatImage } from '../services/imageService'
+import { getMessageImages, getMessageImageUrls } from '../services/messageImageService'
 import {
   getChatSettings,
   getConversationState,
@@ -62,9 +46,7 @@ import {
   rememberFromMessage,
   removeMemory
 } from '../services/memoryService'
-import {
-  generateVisibleCharacterState
-} from '../services/characterStateService'
+import { generateVisibleCharacterState } from '../services/characterStateService'
 import {
   getRelationship,
   maybeCreateProactiveMessage,
@@ -72,10 +54,7 @@ import {
   recordMusicMoment,
   relationshipPrompt
 } from '../services/relationshipService'
-import {
-  getOrCreateUserProfile
-} from '../services/userProfile'
-
+import { getOrCreateUserProfile } from '../services/userProfile'
 import type {
   Character,
   CharacterMemory,
@@ -88,13 +67,10 @@ import type {
   MusicState,
   UserProfile
 } from '../types/domain'
-import type {
-  ModelSettings
-} from '../types/modelSettings'
+import type { ModelSettings } from '../types/modelSettings'
 
 const route = useRoute()
 const router = useRouter()
-
 const conversation = ref<Conversation>()
 const character = ref<Character>()
 const userProfile = ref<UserProfile>()
@@ -105,7 +81,6 @@ const conversationState = ref<ConversationState>()
 const musicState = ref<MusicState>()
 const modelSettings = ref<ModelSettings>()
 const relationship = ref<CharacterRelationship>()
-
 const draft = ref('')
 const isSending = ref(false)
 const streamingMessageId = ref('')
@@ -117,54 +92,35 @@ const settingsTab = ref<'chat' | 'memory' | 'advanced'>('chat')
 const activePanel = ref<'thought' | 'music' | 'settings' | 'message' | null>(null)
 const selectedMessage = ref<Message>()
 const replyTarget = ref<Message>()
-const showScrollButton = ref(false)
-const previewImageUrl = ref('')
-const pendingImage = ref<PreparedChatImage>()
+const previewImages = ref<string[]>([])
+const previewImageIndex = ref(0)
+const pendingImages = ref<PreparedChatImage[]>([])
 const isPreparingImage = ref(false)
-const voiceInputAvailable = ref(isSpeechRecognitionSupported())
-const speechPlaybackAvailable = ref(isSpeechPlaybackSupported())
-const isRecording = ref(false)
-const isRecognizingSpeech = ref(false)
-const recordingSeconds = ref(0)
-const speakingMessageId = ref('')
-const isSpeechPaused = ref(false)
-const speechVoices = ref<SpeechSynthesisVoice[]>([])
-const panelDragOffset = ref(0)
-const isPanelDragging = ref(false)
 
 interface ChatComposerHandle {
   focus: () => void
   resize: () => void
   openImagePicker: () => void
+  openCameraPicker: () => void
 }
-
-const messageListRef = ref<HTMLElement>()
+interface ChatMusicPanelHandle {
+  getAudioElement: () => HTMLAudioElement | undefined
+}
+const messageListRef = ref<ChatMessageListHandle>()
 const chatComposerRef = ref<ChatComposerHandle>()
-const audioRef = ref<HTMLAudioElement>()
+const musicPanelRef = ref<ChatMusicPanelHandle>()
 let abortController: AbortController | undefined
 let streamPersistTimer: number | undefined
 let streamScrollFrame: number | undefined
 let localAudioObjectUrl = ''
 let lastMusicSaveSecond = -1
-let panelDragStartY = 0
-let speechRecognition: SpeechRecognitionLike | undefined
-let recordingTimer: number | undefined
-let recognitionFinalText = ''
-let recognitionInterimText = ''
-let cancelRecognitionResult = false
 
-const title = computed(() => {
-  return character.value?.name || conversation.value?.title || '聊天'
-})
-
+const title = computed(() => character.value?.name || conversation.value?.title || '聊天')
 const currentTrackLabel = computed(() => {
   const music = musicState.value
   if (!music?.title) return ''
-  return music.artist
-    ? `${music.title} · ${music.artist}`
-    : music.title
+  return music.artist ? `${music.title} · ${music.artist}` : music.title
 })
-
 const providerLabel = computed(() => {
   const settings = modelSettings.value
   if (!settings) return '尚未读取'
@@ -172,32 +128,57 @@ const providerLabel = computed(() => {
   if (settings.provider === 'openai-compatible') return 'OpenAI 兼容接口'
   return '本地模拟'
 })
-
-const canSend = computed(() => {
-  return Boolean(draft.value.trim() || pendingImage.value) && !isSending.value && !isPreparingImage.value
-})
-
+const canSend = computed(() => Boolean(draft.value.trim() || pendingImages.value.length) && !isSending.value && !isPreparingImage.value)
 const sendingHint = computed(() => {
   const latest = [...messages.value].reverse().find(item => item.senderId === 'user')
-  return latest?.type === 'image'
-    ? '正在认真看你发来的图片…'
-    : '正在想该怎么回应你…'
+  return latest?.type === 'image' ? '正在认真看你发来的图片…' : '正在想该怎么回应你…'
 })
-
 const visionCapabilityLabel = computed(() => {
   const settings = modelSettings.value
   if (!settings) return '尚未检测'
-
   const capability = getVisionCapability(settings)
   if (capability === 'supported') return '可理解图片'
   if (capability === 'unsupported') return '图片将使用自然兜底回应'
   return '首次发送图片时自动检测'
 })
 
-const panelStyle = computed(() => ({
-  transform: `translate3d(0, ${panelDragOffset.value}px, 0)`,
-  transition: isPanelDragging.value ? 'none' : undefined
-}))
+const { panelStyle, beginPanelDrag, movePanelDrag, endPanelDrag } = useBottomPanel(activePanel)
+const {
+  showScrollButton,
+  scrollToBottom,
+  updateScrollButton,
+  handleMessageScroll,
+  rememberScrollPosition,
+  restoreScrollPosition,
+  handleComposerFocus
+} = useChatScroll({ messageListRef, getConversationId: () => conversation.value?.id })
+const {
+  voiceInputAvailable,
+  speechPlaybackAvailable,
+  isRecording,
+  isRecognizingSpeech,
+  recordingSeconds,
+  speechVoices,
+  startVoiceRecording,
+  stopVoiceRecording,
+  cancelVoiceRecording,
+  stopSpeechPlayback,
+  speakText,
+  previewCurrentVoice,
+  toggleMessageSpeech,
+  speechStateForMessage
+} = useChatSpeech({
+  draft,
+  title,
+  chatSettings,
+  character,
+  relationship,
+  noticeMessage,
+  afterDraftUpdated: () => {
+    chatComposerRef.value?.focus()
+    chatComposerRef.value?.resize()
+  }
+})
 
 const memoryCategoryNames: Record<CharacterMemory['category'], string> = {
   profile: '个人信息',
@@ -210,10 +191,6 @@ const memoryCategoryNames: Record<CharacterMemory['category'], string> = {
 
 function draftStorageKey(conversationId: string) {
   return `ai-companion-draft:${conversationId}`
-}
-
-function scrollStorageKey(conversationId: string) {
-  return `ai-companion-scroll:${conversationId}`
 }
 
 function isAbortError(error: unknown) {
@@ -239,55 +216,6 @@ function wait(ms: number, signal?: AbortSignal) {
       { once: true }
     )
   })
-}
-
-async function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
-  await nextTick()
-  const element = messageListRef.value
-  if (!element) return
-
-  element.scrollTo({
-    top: element.scrollHeight,
-    behavior
-  })
-  showScrollButton.value = false
-}
-
-function updateScrollButton() {
-  const element = messageListRef.value
-  if (!element) return
-  const distance = element.scrollHeight - element.scrollTop - element.clientHeight
-  showScrollButton.value = distance > 120
-}
-
-function handleMessageScroll() {
-  rememberScrollPosition()
-  updateScrollButton()
-}
-
-function rememberScrollPosition() {
-  if (!conversation.value || !messageListRef.value) return
-
-  sessionStorage.setItem(
-    scrollStorageKey(conversation.value.id),
-    String(messageListRef.value.scrollTop)
-  )
-}
-
-async function restoreScrollPosition(conversationId: string) {
-  await nextTick()
-  const element = messageListRef.value
-  if (!element) return
-
-  const saved = sessionStorage.getItem(
-    scrollStorageKey(conversationId)
-  )
-
-  if (saved !== null) {
-    element.scrollTop = Number(saved) || 0
-  } else {
-    element.scrollTop = element.scrollHeight
-  }
 }
 
 function messagePreview(message: Message, maxLength = 42) {
@@ -322,73 +250,46 @@ function createReplyReference(message: Message): MessageReplyReference {
 
 function formatMessageForPrompt(message: Message) {
   const caption = message.content.trim()
+  const imageCount = getMessageImages(message).length
+  const imageLabel = imageCount > 1 ? `${imageCount} 张图片` : '一张图片'
   const base = message.type === 'image'
     ? caption
-      ? `用户分享了一张图片，并说：“${caption}”。当前无法确认图片细节，请围绕附言和分享行为自然回应，不要猜测图中具体内容，也不要解释技术限制。`
-      : '用户分享了一张图片。当前无法确认图片细节，请自然回应这次分享，不要猜测图中具体内容，也不要解释技术限制。'
+      ? `用户分享了${imageLabel}，并说：“${caption}”。当前无法确认图片细节，请围绕附言和分享行为自然回应，不要猜测图中具体内容，也不要解释技术限制。`
+      : `用户分享了${imageLabel}。当前无法确认图片细节，请自然回应这次分享，不要猜测图中具体内容，也不要解释技术限制。`
     : message.content
-
   if (!message.replyTo) return base
-  return `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。
-${base}`
+  return `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。\n${base}`
 }
 
 function imageMessageContent(message: Message): ChatTurn['content'] {
+  const images = getMessageImages(message).filter(image => Boolean(image.dataUrl))
+  const countLabel = images.length > 1 ? `这 ${images.length} 张图片` : '这张图片'
   const text = message.content.trim()
-    ? `请看这张图片，并结合用户的话自然回应：“${message.content.trim()}”`
-    : '请认真看这张图片，根据你实际看到的内容自然回应。不要编造看不清或无法确认的细节。'
-
+    ? `请认真查看${countLabel}，并结合用户的话自然回应：“${message.content.trim()}”`
+    : `请认真查看${countLabel}，根据你实际看到的内容自然回应。不要编造看不清或无法确认的细节。`
   return [
     {
       type: 'text',
       text: message.replyTo
-        ? `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。
-${text}`
+        ? `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。\n${text}`
         : text
     },
-    {
-      type: 'image_url',
-      image_url: {
-        url: message.imageDataUrl || '',
-        detail: 'auto'
-      }
-    }
+    ...images.map(image => ({
+      type: 'image_url' as const,
+      image_url: { url: image.dataUrl || '', detail: 'auto' as const }
+    }))
   ]
 }
 
-
-
-function handleComposerFocus() {
-  window.setTimeout(() => {
-    void scrollToBottom('smooth')
-  }, 180)
+function openImagePreview(urls: string[], index: number) {
+  previewImages.value = urls
+  previewImageIndex.value = Math.min(Math.max(0, index), Math.max(0, urls.length - 1))
 }
 
 function openMessageMenu(message: Message) {
   selectedMessage.value = message
   activePanel.value = 'message'
   if ('vibrate' in navigator) navigator.vibrate?.(12)
-}
-
-function beginPanelDrag(event: PointerEvent) {
-  panelDragStartY = event.clientY
-  panelDragOffset.value = 0
-  isPanelDragging.value = true
-  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
-}
-
-function movePanelDrag(event: PointerEvent) {
-  if (!isPanelDragging.value) return
-  panelDragOffset.value = Math.max(0, event.clientY - panelDragStartY)
-}
-
-function endPanelDrag() {
-  if (!isPanelDragging.value) return
-  isPanelDragging.value = false
-  if (panelDragOffset.value > 92) {
-    activePanel.value = null
-  }
-  panelDragOffset.value = 0
 }
 
 function hasAcceptedImagePrivacy() {
@@ -413,238 +314,22 @@ function confirmImagePrivacy() {
   return accepted
 }
 
-function refreshSpeechVoices() {
-  if (!speechPlaybackAvailable.value) {
-    speechVoices.value = []
-    return
-  }
-
-  speechVoices.value = window.speechSynthesis
-    .getVoices()
-    .slice()
-    .sort((left, right) => {
-      const leftChinese = /^zh[-_]/i.test(left.lang) ? 0 : 1
-      const rightChinese = /^zh[-_]/i.test(right.lang) ? 0 : 1
-      return leftChinese - rightChinese || left.name.localeCompare(right.name)
-    })
-}
-
-function hasAcceptedMicrophonePrivacy() {
-  return localStorage.getItem('ai-companion-microphone-privacy-accepted') === 'yes'
-}
-
-function confirmMicrophonePrivacy() {
-  if (hasAcceptedMicrophonePrivacy()) return true
-
-  const accepted = window.confirm([
-    '语音输入会使用设备麦克风，并由浏览器完成语音识别。',
-    '',
-    '请不要在公共场所录入敏感信息。',
-    '',
-    '是否继续？'
-  ].join('\n'))
-
-  if (accepted) {
-    localStorage.setItem('ai-companion-microphone-privacy-accepted', 'yes')
-  }
-
-  return accepted
-}
-
-function clearRecordingTimer() {
-  if (recordingTimer !== undefined) {
-    window.clearInterval(recordingTimer)
-    recordingTimer = undefined
-  }
-}
-
-function resetRecognitionState() {
-  clearRecordingTimer()
-  speechRecognition = undefined
-  isRecording.value = false
-  isRecognizingSpeech.value = false
-  recordingSeconds.value = 0
-  recognitionFinalText = ''
-  recognitionInterimText = ''
-  cancelRecognitionResult = false
-}
-
-function appendRecognizedText(text: string) {
-  const normalized = text.trim()
-  if (!normalized) return
-
-  const separator = draft.value && !/\s$/.test(draft.value) ? ' ' : ''
-  draft.value = `${draft.value}${separator}${normalized}`
-  void nextTick(() => {
-    chatComposerRef.value?.focus()
-    chatComposerRef.value?.resize()
-  })
-}
-
-async function startVoiceRecording() {
-  if (!voiceInputAvailable.value || isRecording.value || isRecognizingSpeech.value) return
-  if (!confirmMicrophonePrivacy()) return
-
-  recognitionFinalText = ''
-  recognitionInterimText = ''
-  cancelRecognitionResult = false
-
-  try {
-    await requestMicrophoneAccess()
-
-    speechRecognition = createSpeechRecognition({
-      onTranscript: (interimText, finalText) => {
-        recognitionInterimText = interimText
-        if (finalText) recognitionFinalText += finalText
-      },
-      onError: message => {
-        cancelRecognitionResult = true
-        noticeMessage.value = `${message} 可以点击麦克风重试。`
-      },
-      onEnd: () => {
-        const text = `${recognitionFinalText}${recognitionInterimText}`.trim()
-        const shouldAppend = !cancelRecognitionResult && Boolean(text)
-        const shouldShowRetry = !cancelRecognitionResult && !text
-
-        clearRecordingTimer()
-        speechRecognition = undefined
-        isRecording.value = false
-        isRecognizingSpeech.value = false
-        recordingSeconds.value = 0
-
-        if (shouldAppend) appendRecognizedText(text)
-        else if (shouldShowRetry) noticeMessage.value = '没有识别到内容，可以点击麦克风重试。'
-
-        recognitionFinalText = ''
-        recognitionInterimText = ''
-        cancelRecognitionResult = false
-      }
-    })
-
-    speechRecognition.start()
-    isRecording.value = true
-    isRecognizingSpeech.value = false
-    recordingSeconds.value = 0
-    noticeMessage.value = ''
-    recordingTimer = window.setInterval(() => {
-      recordingSeconds.value += 1
-    }, 1000)
-  } catch (error) {
-    resetRecognitionState()
-    noticeMessage.value = error instanceof Error
-      ? `${error.message} 可以点击麦克风重试。`
-      : '无法开始语音输入，可以点击麦克风重试。'
-  }
-}
-
-function stopVoiceRecording() {
-  if (!speechRecognition || !isRecording.value) return
-  isRecording.value = false
-  isRecognizingSpeech.value = true
-  clearRecordingTimer()
-  speechRecognition.stop()
-}
-
-function cancelVoiceRecording() {
-  cancelRecognitionResult = true
-  clearRecordingTimer()
-  isRecording.value = false
-  isRecognizingSpeech.value = false
-  recordingSeconds.value = 0
-  speechRecognition?.abort()
-}
-
-function speechRateForCurrentRole() {
-  const base = chatSettings.value?.voiceRate ?? 1
-  const mood = `${character.value?.mood ?? ''}${relationship.value?.emotion ?? ''}`
-  let adjustment = 0
-
-  if (/温柔|安静|疲惫|难过|低落|沉稳/.test(mood + (character.value?.speakingStyle ?? ''))) {
-    adjustment -= 0.06
-  }
-  if (/活泼|开心|兴奋|轻快/.test(mood + (character.value?.speakingStyle ?? ''))) {
-    adjustment += 0.05
-  }
-  if (relationship.value && ['亲近', '依赖', '特别关系'].includes(relationship.value.stage)) {
-    adjustment -= 0.02
-  }
-
-  return Math.min(1.4, Math.max(0.7, base + adjustment))
-}
-
-function prepareSpeechText(text: string) {
-  if (!relationship.value || !['亲近', '依赖', '特别关系'].includes(relationship.value.stage)) {
-    return text
-  }
-
-  return text.replace(/([。！？!?])/g, '$1 ')
-}
-
-function stopSpeechPlayback() {
-  if (!speechPlaybackAvailable.value) return
-  window.speechSynthesis.cancel()
-  speakingMessageId.value = ''
-  isSpeechPaused.value = false
-}
-
-function speakText(text: string, messageId = '') {
-  if (!speechPlaybackAvailable.value || !text.trim()) return
-
-  stopSpeechPlayback()
-  const utterance = new SpeechSynthesisUtterance(prepareSpeechText(text))
-  const voice = selectSpeechVoice(
-    speechVoices.value,
-    chatSettings.value?.voiceName ?? ''
-  )
-
-  if (voice) utterance.voice = voice
-  utterance.lang = voice?.lang || 'zh-CN'
-  utterance.rate = speechRateForCurrentRole()
-  utterance.pitch = 1
-  utterance.onend = () => {
-    speakingMessageId.value = ''
-    isSpeechPaused.value = false
-  }
-  utterance.onerror = () => {
-    speakingMessageId.value = ''
-    isSpeechPaused.value = false
-    noticeMessage.value = '语音播放没有完成，可以再次点击朗读。'
-  }
-
-  speakingMessageId.value = messageId
-  isSpeechPaused.value = false
-  window.speechSynthesis.speak(utterance)
-}
-
-function toggleMessageSpeech(message: Message) {
-  if (!speechPlaybackAvailable.value || message.senderId === 'user') return
-
-  if (speakingMessageId.value === message.id) {
-    if (isSpeechPaused.value) {
-      window.speechSynthesis.resume()
-      isSpeechPaused.value = false
-    } else {
-      window.speechSynthesis.pause()
-      isSpeechPaused.value = true
-    }
-    return
-  }
-
-  speakText(message.content, message.id)
-}
-
-function speechStateForMessage(messageId: string): 'idle' | 'playing' | 'paused' {
-  if (speakingMessageId.value !== messageId) return 'idle'
-  return isSpeechPaused.value ? 'paused' : 'playing'
-}
-
 function openImagePicker() {
   if (!confirmImagePrivacy()) return
   chatComposerRef.value?.openImagePicker()
 }
 
-function removePendingImage() {
-  pendingImage.value = undefined
+function openCameraPicker() {
+  if (!confirmImagePrivacy()) return
+  chatComposerRef.value?.openCameraPicker()
+}
+
+function removePendingImage(index: number) {
+  pendingImages.value.splice(index, 1)
+}
+
+function clearPendingImages() {
+  pendingImages.value = []
 }
 
 async function recoverInterruptedMessages(
@@ -702,6 +387,9 @@ async function recoverInterruptedMessages(
 
 async function loadConversation(conversationId: string) {
   errorMessage.value = ''
+  pendingImages.value = []
+  previewImages.value = []
+  replyTarget.value = undefined
 
   try {
     const conversationRow = await db.conversations.get(conversationId)
@@ -1326,7 +1014,7 @@ async function requestAssistantReply(options?: {
     const visionCapability = getVisionCapability(currentModelSettings)
     const mayUseVision = Boolean(
       visualMessage?.type === 'image' &&
-      visualMessage.imageDataUrl &&
+      getMessageImageUrls(visualMessage).length > 0 &&
       visionCapability !== 'unsupported'
     )
 
@@ -1609,74 +1297,50 @@ async function requestAssistantReply(options?: {
 
 async function send() {
   const text = draft.value.trim()
-  const image = pendingImage.value
-
-  if (
-    (!text && !image) ||
-    !conversation.value ||
-    !character.value ||
-    isSending.value ||
-    isPreparingImage.value
-  ) return
-
+  const images = pendingImages.value.slice()
+  if ((!text && !images.length) || !conversation.value || !character.value || isSending.value || isPreparingImage.value) return
   const activeConversation = conversation.value
   const messageId = crypto.randomUUID()
   const now = new Date().toISOString()
-  const replyReference = replyTarget.value
-    ? createReplyReference(replyTarget.value)
-    : undefined
-
+  const replyReference = replyTarget.value ? createReplyReference(replyTarget.value) : undefined
+  const firstImage = images[0]
   const message: Message = {
     id: messageId,
     worldId: activeConversation.worldId,
     conversationId: activeConversation.id,
     senderId: 'user',
-    type: image ? 'image' : 'text',
+    type: images.length ? 'image' : 'text',
     content: text,
     status: 'pending',
     createdAt: now,
     replyTo: replyReference,
-    imageDataUrl: image?.dataUrl,
-    imageName: image?.name,
-    imageWidth: image?.width,
-    imageHeight: image?.height,
-    imageBytes: image?.bytes
+    images: images.map(image => ({
+      dataUrl: image.dataUrl,
+      name: image.name,
+      width: image.width,
+      height: image.height,
+      bytes: image.bytes
+    })),
+    imageDataUrl: firstImage?.dataUrl,
+    imageName: firstImage?.name,
+    imageWidth: firstImage?.width,
+    imageHeight: firstImage?.height,
+    imageBytes: firstImage?.bytes
   }
-
   draft.value = ''
-  pendingImage.value = undefined
+  pendingImages.value = []
   replyTarget.value = undefined
   localStorage.removeItem(draftStorageKey(activeConversation.id))
   chatComposerRef.value?.resize()
-
   try {
-    await db.transaction(
-      'rw',
-      db.messages,
-      db.conversations,
-      async () => {
-        await db.messages.add(message)
-        await db.conversations.update(activeConversation.id, {
-          updatedAt: now
-        })
-      }
-    )
-
-    await updateUserMessageState(messageId, 'delivered')
-
-    messages.value = await db.messages
-      .where('conversationId')
-      .equals(activeConversation.id)
-      .sortBy('createdAt')
-
-    await scrollToBottom()
-
-    relationship.value = await recordInteraction({
-      character: character.value,
-      conversationId: activeConversation.id,
-      message
+    await db.transaction('rw', db.messages, db.conversations, async () => {
+      await db.messages.add(message)
+      await db.conversations.update(activeConversation.id, { updatedAt: now })
     })
-
+    await updateUserMessageState(messageId, 'delivered')
+    messages.value = await db.messages.where('conversationId').equals(activeConversation.id).sortBy('createdAt')
+    await scrollToBottom()
+    relationship.value = await recordInteraction({ character: character.value, conversationId: activeConversation.id, message })
     if (chatSettings.value?.memoryEnabled && text) {
       await rememberFromMessage({
         conversationId: activeConversation.id,
@@ -1687,44 +1351,36 @@ async function send() {
       })
       await refreshMemoryList()
     }
-
-    await requestAssistantReply({
-      sourceMessageId: messageId,
-      visualMessageId: image ? messageId : undefined
-    })
+    await requestAssistantReply({ sourceMessageId: messageId, visualMessageId: images.length ? messageId : undefined })
   } catch (error) {
-    await updateUserMessageState(
-      messageId,
-      'failed',
-      {
-        errorText: error instanceof Error
-          ? error.message
-          : '消息发送失败。'
-      }
-    )
-    noticeMessage.value = error instanceof Error
-      ? error.message
-      : '消息发送失败。'
+    await updateUserMessageState(messageId, 'failed', {
+      errorText: error instanceof Error ? error.message : '消息发送失败。'
+    })
+    noticeMessage.value = error instanceof Error ? error.message : '消息发送失败。'
   }
 }
 
-async function handleImageSelected(file: File) {
-  if (isSending.value || isPreparingImage.value) return
-
+async function handleImagesSelected(files: File[]) {
+  if (isSending.value || isPreparingImage.value || !files.length) return
+  const remaining = MAX_CHAT_IMAGES - pendingImages.value.length
+  if (remaining <= 0) {
+    noticeMessage.value = `一次最多发送 ${MAX_CHAT_IMAGES} 张图片。`
+    return
+  }
+  const selected = files.slice(0, remaining)
   isPreparingImage.value = true
-  noticeMessage.value = '正在整理图片…'
-
+  noticeMessage.value = `正在整理 ${selected.length} 张图片…`
   try {
-    pendingImage.value = await prepareChatImage(file)
-    noticeMessage.value = ''
+    const prepared = await prepareChatImages(selected, { maxCount: remaining })
+    pendingImages.value.push(...prepared)
+    noticeMessage.value = files.length > remaining
+      ? `已保留前 ${remaining} 张图片，一次最多发送 ${MAX_CHAT_IMAGES} 张。`
+      : ''
     await nextTick()
     chatComposerRef.value?.focus()
     chatComposerRef.value?.resize()
   } catch (error) {
-    pendingImage.value = undefined
-    noticeMessage.value = error instanceof Error
-      ? error.message
-      : '图片读取失败。'
+    noticeMessage.value = error instanceof Error ? error.message : '图片读取失败。'
   } finally {
     isPreparingImage.value = false
   }
@@ -1927,15 +1583,31 @@ async function retrySelectedMessage() {
 
 function downloadSelectedImage() {
   const message = selectedMessage.value
-  if (!message?.imageDataUrl) return
-
-  const link = document.createElement('a')
-  link.href = message.imageDataUrl
-  link.download = message.imageName || `chat-image-${message.id}.jpg`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
+  const images = getMessageImages(message).filter(image => Boolean(image.dataUrl))
+  if (!message || !images.length) return
+  images.forEach((image, index) => {
+    window.setTimeout(() => {
+      const link = document.createElement('a')
+      link.href = image.dataUrl || ''
+      link.download = image.name || `chat-image-${message.id}-${index + 1}.jpg`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    }, index * 160)
+  })
   activePanel.value = null
+}
+
+function patchMusicState(patch: Partial<MusicState>) {
+  if (!musicState.value) return
+  musicState.value = { ...musicState.value, ...patch }
+}
+
+function seekMusic(value: number) {
+  const audio = musicPanelRef.value?.getAudioElement()
+  if (!audio || !musicState.value) return
+  audio.currentTime = value
+  musicState.value.currentTime = value
 }
 
 function openMusicPanel() {
@@ -1945,7 +1617,7 @@ function openMusicPanel() {
 }
 
 function applyAudioState() {
-  const audio = audioRef.value
+  const audio = musicPanelRef.value?.getAudioElement()
   const music = musicState.value
   if (!audio || !music) return
 
@@ -1963,14 +1635,10 @@ function applyAudioState() {
   }
 }
 
-async function handleLocalAudio(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file || !musicState.value) return
-
+async function handleLocalAudio(file: File) {
+  if (!musicState.value) return
   if (localAudioObjectUrl) URL.revokeObjectURL(localAudioObjectUrl)
   localAudioObjectUrl = URL.createObjectURL(file)
-
   musicState.value = {
     ...musicState.value,
     title: musicState.value.title || file.name.replace(/\.[^.]+$/, ''),
@@ -1979,7 +1647,6 @@ async function handleLocalAudio(event: Event) {
     currentTime: 0,
     isPlaying: false
   }
-
   await nextTick()
   applyAudioState()
 }
@@ -1995,7 +1662,7 @@ async function useMusicUrl() {
 }
 
 async function toggleMusic() {
-  const audio = audioRef.value
+  const audio = musicPanelRef.value?.getAudioElement()
   const music = musicState.value
   if (!audio || !music) return
 
@@ -2018,7 +1685,7 @@ async function toggleMusic() {
 }
 
 function handleMusicTimeUpdate() {
-  const audio = audioRef.value
+  const audio = musicPanelRef.value?.getAudioElement()
   const music = musicState.value
   if (!audio || !music) return
 
@@ -2039,7 +1706,7 @@ async function handleMusicPlayState(isPlaying: boolean) {
 }
 
 async function handleMusicMetadata() {
-  const audio = audioRef.value
+  const audio = musicPanelRef.value?.getAudioElement()
   if (!audio || !musicState.value) return
   musicState.value.duration = Number.isFinite(audio.duration) ? audio.duration : 0
   applyAudioState()
@@ -2115,28 +1782,11 @@ watch(draft, value => {
   else localStorage.removeItem(key)
 })
 
-watch(activePanel, () => {
-  panelDragOffset.value = 0
-  isPanelDragging.value = false
-})
-
-onMounted(() => {
-  refreshSpeechVoices()
-  if (speechPlaybackAvailable.value) {
-    window.speechSynthesis.addEventListener('voiceschanged', refreshSpeechVoices)
-  }
-})
-
 onUnmounted(() => {
   rememberScrollPosition()
   abortController?.abort()
   clearStreamTimers()
-  clearRecordingTimer()
-  speechRecognition?.abort()
   stopSpeechPlayback()
-  if (speechPlaybackAvailable.value) {
-    window.speechSynthesis.removeEventListener('voiceschanged', refreshSpeechVoices)
-  }
   if (localAudioObjectUrl) URL.revokeObjectURL(localAudioObjectUrl)
 })
 </script>
@@ -2144,47 +1794,14 @@ onUnmounted(() => {
 <template>
   <PhoneFrame>
     <template #header>
-      <button
-        class="chat-header-back"
-        type="button"
-        aria-label="返回"
-        @click="router.back()"
-      >
-        ‹
-      </button>
-
-      <button
-        class="chat-identity"
-        type="button"
-        @click="openThoughtPanel"
-      >
-        <CharacterAvatar
-          v-if="character"
-          :avatar="character.avatar"
-          :name="character.name"
-          :size="34"
-        />
-        <span>{{ title }}</span>
-      </button>
-
-      <div class="chat-header-actions">
-        <button
-          class="chat-header-button"
-          type="button"
-          aria-label="一起听歌"
-          @click="openMusicPanel"
-        >
-          ♫
-        </button>
-        <button
-          class="chat-header-button chat-header-more"
-          type="button"
-          aria-label="聊天设置"
-          @click="openSettings()"
-        >
-          •••
-        </button>
-      </div>
+      <ChatHeader
+        :title="title"
+        :character="character"
+        @back="router.back()"
+        @open-thought="openThoughtPanel"
+        @open-music="openMusicPanel"
+        @open-settings="openSettings()"
+      />
     </template>
 
     <section class="chat-page">
@@ -2212,52 +1829,27 @@ onUnmounted(() => {
         {{ noticeMessage }}
       </p>
 
-      <div
+      <ChatMessageList
         ref="messageListRef"
-        class="message-list"
+        :messages="messages"
+        :conversation="conversation"
+        :character="character"
+        :user-profile="userProfile"
+        :is-sending="isSending"
+        :show-typing="chatSettings?.showTyping"
+        :streaming-message-id="streamingMessageId"
+        :sending-hint="sendingHint"
+        :speech-available="speechPlaybackAvailable"
+        :should-show-time="shouldShowTime"
+        :format-message-time="formatMessageTime"
+        :speech-state-for-message="speechStateForMessage"
         @scroll="handleMessageScroll"
-      >
-        <ChatMessageItem
-          v-for="(message, index) in messages"
-          :key="message.id"
-          :message="message"
-          :character="character"
-          :user-profile="userProfile"
-          :show-time="shouldShowTime(index)"
-          :time-label="formatMessageTime(message.createdAt)"
-          :streaming="message.id === streamingMessageId"
-          :speech-available="speechPlaybackAvailable"
-          :speech-state="speechStateForMessage(message.id)"
-          @open-menu="openMessageMenu"
-          @open-image="previewImageUrl = $event"
-          @toggle-speech="toggleMessageSpeech"
-          @stop-speech="stopSpeechPlayback"
-          @retry-message="retryMessage"
-        />
-
-        <div
-          v-if="isSending && chatSettings?.showTyping && !streamingMessageId"
-          class="message-row message-row--theirs"
-        >
-          <CharacterAvatar
-            v-if="character"
-            :avatar="character.avatar"
-            :name="character.name"
-            :size="38"
-          />
-          <div class="typing-bubble" aria-label="对方正在输入">
-            <span>{{ sendingHint }}</span>
-            <i></i><i></i><i></i>
-          </div>
-        </div>
-
-        <p
-          v-if="conversation && messages.length === 0 && !isSending"
-          class="empty-chat"
-        >
-          你们还没有聊过天，先说点什么吧。
-        </p>
-      </div>
+        @open-menu="openMessageMenu"
+        @open-images="openImagePreview"
+        @toggle-speech="toggleMessageSpeech"
+        @stop-speech="stopSpeechPlayback"
+        @retry-message="retryMessage"
+      />
 
       <button
         v-if="showScrollButton"
@@ -2272,7 +1864,8 @@ onUnmounted(() => {
       <ChatComposer
         ref="chatComposerRef"
         v-model="draft"
-        :pending-image="pendingImage"
+        :pending-images="pendingImages"
+        :max-images="MAX_CHAT_IMAGES"
         :reply-sender="replyTarget ? messageSenderName(replyTarget) : undefined"
         :reply-preview="replyTarget ? messagePreview(replyTarget, 56) : undefined"
         :is-sending="isSending"
@@ -2284,8 +1877,10 @@ onUnmounted(() => {
         :recording-seconds="recordingSeconds"
         @submit="send"
         @request-image="openImagePicker"
-        @image-selected="handleImageSelected"
+        @request-camera="openCameraPicker"
+        @images-selected="handleImagesSelected"
         @remove-image="removePendingImage"
+        @clear-images="clearPendingImages"
         @cancel-reply="cancelReply"
         @stop="stopGeneration"
         @focus="handleComposerFocus"
@@ -2299,386 +1894,100 @@ onUnmounted(() => {
         class="panel-backdrop"
         @click.self="activePanel = null"
       >
-        <section
+        <ChatThoughtPanel
           v-if="activePanel === 'thought'"
-          class="bottom-panel thought-panel"
-          :style="panelStyle"
-        >
-          <div
-            class="panel-handle"
-            @pointerdown="beginPanelDrag"
-            @pointermove="movePanelDrag"
-            @pointerup="endPanelDrag"
-            @pointercancel="endPanelDrag"
-          ></div>
-          <div class="panel-title-row">
-            <div>
-              <small>此刻的 {{ title }}</small>
-              <h2>心里的小角落</h2>
-            </div>
-            <button type="button" @click="activePanel = null">×</button>
-          </div>
+          :title="title"
+          :character="character"
+          :conversation-state="conversationState"
+          :relationship="relationship"
+          :chat-settings="chatSettings"
+          :is-loading="isLoadingThought"
+          :panel-style="panelStyle"
+          @drag-start="beginPanelDrag"
+          @drag-move="movePanelDrag"
+          @drag-end="endPanelDrag"
+          @refresh="refreshThought"
+          @close="activePanel = null"
+        />
 
-          <template v-if="chatSettings?.innerThoughtVisibility !== 'off'">
-            <div class="thought-person">
-              <CharacterAvatar
-                v-if="character"
-                :avatar="character.avatar"
-                :name="character.name"
-                :size="62"
-              />
-              <div>
-                <strong>{{ conversationState?.innerMood || character?.mood }}</strong>
-                <p>{{ conversationState?.innerActivity || character?.activity }}</p>
-              </div>
-            </div>
-
-            <blockquote>
-              “{{ conversationState?.innerThought || '正在想着你刚才说的话。' }}”
-            </blockquote>
-
-            <div v-if="relationship" class="relationship-glance">
-              <span>你们的关系</span>
-              <strong>{{ relationship.stage }}</strong>
-              <small>{{ relationship.emotionReason }}</small>
-            </div>
-
-            <button
-              class="panel-primary"
-              type="button"
-              :disabled="isLoadingThought"
-              @click="refreshThought"
-            >
-              {{ isLoadingThought ? '正在感受此刻…' : '看看现在有没有变化' }}
-            </button>
-          </template>
-
-          <div v-else class="panel-empty">
-            心理活动目前已关闭，可在聊天设置中重新开启。
-          </div>
-        </section>
-
-        <section
+        <ChatMusicPanel
           v-else-if="activePanel === 'music'"
-          class="bottom-panel music-panel"
-          :style="panelStyle"
-        >
-          <div
-            class="panel-handle"
-            @pointerdown="beginPanelDrag"
-            @pointermove="movePanelDrag"
-            @pointerup="endPanelDrag"
-            @pointercancel="endPanelDrag"
-          ></div>
-          <div class="panel-title-row">
-            <div>
-              <small>共享此刻的声音</small>
-              <h2>一起听歌</h2>
-            </div>
-            <button type="button" @click="activePanel = null">×</button>
-          </div>
+          ref="musicPanelRef"
+          :title="title"
+          :music-state="musicState"
+          :is-sending="isSending"
+          :panel-style="panelStyle"
+          :format-duration="formatDuration"
+          @drag-start="beginPanelDrag"
+          @drag-move="movePanelDrag"
+          @drag-end="endPanelDrag"
+          @patch="patchMusicState"
+          @local-audio="handleLocalAudio"
+          @use-url="useMusicUrl"
+          @toggle="toggleMusic"
+          @time-update="handleMusicTimeUpdate"
+          @play-state="handleMusicPlayState"
+          @metadata="handleMusicMetadata"
+          @seek="seekMusic"
+          @reaction="askMusicReaction"
+          @close="activePanel = null"
+        />
 
-          <div class="music-cover">♫</div>
-
-          <label>
-            歌曲名称
-            <input v-model="musicState!.title" placeholder="例如：晴天" />
-          </label>
-          <label>
-            歌手
-            <input v-model="musicState!.artist" placeholder="可选" />
-          </label>
-          <label>
-            音频地址
-            <input
-              v-model="musicState!.audioUrl"
-              placeholder="https://.../music.mp3"
-              @change="useMusicUrl"
-            />
-          </label>
-
-          <label class="local-file-button">
-            选择本地音频
-            <input type="file" accept="audio/*" @change="handleLocalAudio" />
-          </label>
-
-          <audio
-            ref="audioRef"
-            preload="metadata"
-            @timeupdate="handleMusicTimeUpdate"
-            @loadedmetadata="handleMusicMetadata"
-            @play="handleMusicPlayState(true)"
-            @pause="handleMusicPlayState(false)"
-            @ended="handleMusicPlayState(false)"
-          ></audio>
-
-          <div class="music-progress-row">
-            <span>{{ formatDuration(musicState?.currentTime ?? 0) }}</span>
-            <input
-              v-if="audioRef"
-              :value="musicState?.currentTime ?? 0"
-              type="range"
-              min="0"
-              :max="musicState?.duration || 1"
-              step="0.1"
-              @input="audioRef.currentTime = Number(($event.target as HTMLInputElement).value)"
-            />
-            <span>{{ formatDuration(musicState?.duration ?? 0) }}</span>
-          </div>
-
-          <div class="music-controls">
-            <button type="button" class="music-play" @click="toggleMusic">
-              {{ musicState?.isPlaying ? 'Ⅱ' : '▶' }}
-            </button>
-            <button type="button" class="music-react" :disabled="isSending" @click="askMusicReaction">
-              让 {{ title }} 说说
-            </button>
-          </div>
-
-          <p class="panel-footnote">
-            本地音频只在当前浏览器会话中有效；网络音频地址会随聊天保存。
-          </p>
-        </section>
-
-        <section
+        <ChatSettingsPanel
           v-else-if="activePanel === 'settings'"
-          class="bottom-panel settings-panel"
-          :style="panelStyle"
-        >
-          <div
-            class="panel-handle"
-            @pointerdown="beginPanelDrag"
-            @pointermove="movePanelDrag"
-            @pointerup="endPanelDrag"
-            @pointercancel="endPanelDrag"
-          ></div>
-          <div class="panel-title-row">
-            <div>
-              <small>{{ title }}</small>
-              <h2>聊天设置</h2>
-            </div>
-            <button type="button" @click="activePanel = null">×</button>
-          </div>
+          :title="title"
+          :tab="settingsTab"
+          :chat-settings="chatSettings"
+          :memories="memories"
+          :new-memory-text="newMemoryText"
+          :memory-category-names="memoryCategoryNames"
+          :speech-playback-available="speechPlaybackAvailable"
+          :speech-voices="speechVoices"
+          :provider-label="providerLabel"
+          :vision-capability-label="visionCapabilityLabel"
+          :model-settings="modelSettings"
+          :conversation-state="conversationState"
+          :panel-style="panelStyle"
+          @update:tab="settingsTab = $event"
+          @update:new-memory-text="newMemoryText = $event"
+          @drag-start="beginPanelDrag"
+          @drag-move="movePanelDrag"
+          @drag-end="endPanelDrag"
+          @close="activePanel = null"
+          @persist="persistChatSettings"
+          @preview-voice="previewCurrentVoice"
+          @add-memory="addManualMemory"
+          @delete-memory="deleteMemory"
+          @clear-memories="clearAllMemories"
+          @clear-conversation="clearConversationMessages"
+          @open-model-settings="router.push('/settings/models')"
+        />
 
-          <nav class="settings-tabs">
-            <button :class="{ active: settingsTab === 'chat' }" type="button" @click="settingsTab = 'chat'">聊天</button>
-            <button :class="{ active: settingsTab === 'memory' }" type="button" @click="settingsTab = 'memory'">记忆</button>
-            <button :class="{ active: settingsTab === 'advanced' }" type="button" @click="settingsTab = 'advanced'">高级</button>
-          </nav>
-
-          <div v-if="settingsTab === 'chat' && chatSettings" class="settings-content">
-            <label class="setting-control">
-              <span><b>回复长度</b><small>控制日常聊天的消息长度</small></span>
-              <select v-model="chatSettings.replyLength" @change="persistChatSettings">
-                <option value="short">简短</option>
-                <option value="natural">自然</option>
-                <option value="long">较完整</option>
-              </select>
-            </label>
-
-            <label class="setting-switch">
-              <span><b>连续多条消息</b><small>回复可以自然拆成多个气泡</small></span>
-              <input v-model="chatSettings.multiBubble" type="checkbox" @change="persistChatSettings" />
-            </label>
-
-            <label class="setting-switch">
-              <span><b>边想边回复</b><small>让文字在生成过程中逐步出现</small></span>
-              <input v-model="chatSettings.streamResponse" type="checkbox" @change="persistChatSettings" />
-            </label>
-
-            <label class="setting-switch">
-              <span><b>显示正在输入</b><small>等待第一段回复时显示输入动画</small></span>
-              <input v-model="chatSettings.showTyping" type="checkbox" @change="persistChatSettings" />
-            </label>
-
-            <label class="setting-switch">
-              <span><b>自然发送间隔</b><small>连续气泡之间保留短暂停顿</small></span>
-              <input v-model="chatSettings.naturalDelay" type="checkbox" @change="persistChatSettings" />
-            </label>
-
-            <template v-if="speechPlaybackAvailable">
-              <label class="setting-switch">
-                <span><b>自动朗读回复</b><small>收到新回复后自动播放角色声音</small></span>
-                <input v-model="chatSettings.autoReadAloud" type="checkbox" @change="persistChatSettings" />
-              </label>
-
-              <label class="setting-control">
-                <span><b>角色声音</b><small>每个聊天角色会独立保存</small></span>
-                <select v-model="chatSettings.voiceName" @change="persistChatSettings">
-                  <option value="">自动选择</option>
-                  <option
-                    v-for="voice in speechVoices"
-                    :key="`${voice.name}-${voice.lang}`"
-                    :value="voice.name"
-                  >
-                    {{ voice.name }} · {{ voice.lang }}
-                  </option>
-                </select>
-              </label>
-
-              <label class="setting-control voice-rate-control">
-                <span><b>角色语速</b><small>当前 {{ chatSettings.voiceRate.toFixed(2) }} 倍，情绪会做轻微调整</small></span>
-                <input
-                  v-model.number="chatSettings.voiceRate"
-                  type="range"
-                  min="0.7"
-                  max="1.4"
-                  step="0.05"
-                  @change="persistChatSettings"
-                />
-              </label>
-            </template>
-
-            <label class="setting-control">
-              <span><b>心理活动</b><small>点击聊天顶部头像后可查看</small></span>
-              <select v-model="chatSettings.innerThoughtVisibility" @change="persistChatSettings">
-                <option value="off">关闭</option>
-                <option value="simple">简单状态</option>
-                <option value="thoughts">心情与想法</option>
-                <option value="detailed">详细内心独白</option>
-              </select>
-            </label>
-
-            <label class="setting-switch">
-              <span><b>主动来找你</b><small>久未聊天时，打开应用可能收到一条自然问候</small></span>
-              <input v-model="chatSettings.proactiveEnabled" type="checkbox" @change="persistChatSettings" />
-            </label>
-
-            <label v-if="chatSettings.proactiveEnabled" class="setting-control">
-              <span><b>多久后会想起你</b><small>至少间隔一段时间，不会频繁打扰</small></span>
-              <select v-model.number="chatSettings.proactiveIntervalHours" @change="persistChatSettings">
-                <option :value="6">6 小时</option>
-                <option :value="12">12 小时</option>
-                <option :value="24">1 天</option>
-                <option :value="72">3 天</option>
-              </select>
-            </label>
-
-            <button class="danger-row" type="button" @click="clearConversationMessages">清空聊天记录</button>
-          </div>
-
-          <div v-else-if="settingsTab === 'memory' && chatSettings" class="settings-content">
-            <label class="setting-switch">
-              <span><b>允许记住聊天</b><small>关闭后不再自动提取新记忆</small></span>
-              <input v-model="chatSettings.memoryEnabled" type="checkbox" @change="persistChatSettings" />
-            </label>
-
-            <label class="setting-control">
-              <span><b>记忆强度</b><small>决定哪些信息会被保存</small></span>
-              <select v-model="chatSettings.memoryStrength" @change="persistChatSettings">
-                <option value="light">轻度</option>
-                <option value="standard">标准</option>
-                <option value="deep">深度</option>
-              </select>
-            </label>
-
-            <label class="setting-control">
-              <span><b>最近聊天范围</b><small>每次回复携带的最近消息数</small></span>
-              <input v-model.number="chatSettings.recentMessageLimit" type="number" min="6" max="60" @change="persistChatSettings" />
-            </label>
-
-            <form class="memory-add" @submit.prevent="addManualMemory">
-              <input v-model="newMemoryText" placeholder="手动添加一条记忆" />
-              <button type="submit">添加</button>
-            </form>
-
-            <div v-if="memories.length" class="memory-list">
-              <article v-for="memory in memories" :key="memory.id">
-                <small>{{ memoryCategoryNames[memory.category] }} · 重要度 {{ memory.importance }}</small>
-                <p>{{ memory.content }}</p>
-                <button type="button" @click="deleteMemory(memory.id)">删除</button>
-              </article>
-            </div>
-            <p v-else class="panel-empty">还没有保存任何重要记忆。</p>
-
-            <button class="danger-row" type="button" @click="clearAllMemories">清除全部记忆</button>
-          </div>
-
-          <div v-else class="settings-content advanced-content">
-            <div class="advanced-card">
-              <small>当前服务</small>
-              <strong>{{ providerLabel }}</strong>
-              <span>{{ modelSettings?.model || '未设置模型' }}</span>
-              <span class="vision-capability">图片理解：{{ visionCapabilityLabel }}</span>
-            </div>
-
-            <label v-if="chatSettings" class="setting-switch">
-              <span><b>接口失败时使用本地回复</b><small>聊天页不会显示技术名称</small></span>
-              <input v-model="chatSettings.autoFallback" type="checkbox" @change="persistChatSettings" />
-            </label>
-
-            <div v-if="conversationState?.lastProviderNotice" class="technical-note">
-              {{ conversationState.lastProviderNotice }}
-            </div>
-
-            <div v-if="conversationState?.lastTechnicalError" class="technical-error">
-              <b>最近一次错误</b>
-              <p>{{ conversationState.lastTechnicalError }}</p>
-            </div>
-            <p v-else class="technical-ok">最近没有接口错误。</p>
-
-            <button class="panel-primary" type="button" @click="router.push('/settings/models')">打开 API 与模型设置</button>
-          </div>
-        </section>
-
-        <section
+        <ChatActionSheet
           v-else-if="activePanel === 'message'"
-          class="action-panel"
-          :style="panelStyle"
-        >
-          <div
-            class="panel-handle"
-            @pointerdown="beginPanelDrag"
-            @pointermove="movePanelDrag"
-            @pointerup="endPanelDrag"
-            @pointercancel="endPanelDrag"
-          ></div>
-          <div class="selected-preview">
-            <img
-              v-if="selectedMessage?.type === 'image' && selectedMessage.imageDataUrl"
-              :src="selectedMessage.imageDataUrl"
-              alt="所选图片"
-            />
-            <p>{{ selectedMessage ? messagePreview(selectedMessage, 90) : '' }}</p>
-          </div>
-          <button type="button" @click="replyToSelectedMessage">回复</button>
-          <button v-if="selectedMessage?.type !== 'image'" type="button" @click="copySelectedMessage">复制</button>
-          <button
-            v-if="selectedMessage?.type === 'image' && selectedMessage.imageDataUrl"
-            type="button"
-            @click="downloadSelectedImage"
-          >
-            保存图片
-          </button>
-          <button
-            v-if="selectedMessage?.senderId === 'user' && (selectedMessage.status === 'failed' || selectedMessage.status === 'cancelled')"
-            type="button"
-            :disabled="isSending"
-            @click="retrySelectedMessage"
-          >
-            重新发送
-          </button>
-          <button
-            v-if="selectedMessage?.senderId !== 'user'"
-            type="button"
-            :disabled="isSending"
-            @click="regenerateSelectedMessage"
-          >
-            重新生成
-          </button>
-          <button type="button" class="danger-text" @click="deleteSelectedMessage">删除</button>
-          <button type="button" @click="activePanel = null">取消</button>
-        </section>
+          :message="selectedMessage"
+          :preview="selectedMessage ? messagePreview(selectedMessage, 90) : ''"
+          :is-sending="isSending"
+          :panel-style="panelStyle"
+          @drag-start="beginPanelDrag"
+          @drag-move="movePanelDrag"
+          @drag-end="endPanelDrag"
+          @reply="replyToSelectedMessage"
+          @copy="copySelectedMessage"
+          @download-image="downloadSelectedImage"
+          @retry="retrySelectedMessage"
+          @regenerate="regenerateSelectedMessage"
+          @delete="deleteSelectedMessage"
+          @close="activePanel = null"
+        />
       </div>
 
-      <div
-        v-if="previewImageUrl"
-        class="image-preview-backdrop"
-        @click="previewImageUrl = ''"
-      >
-        <button type="button" aria-label="关闭图片预览">×</button>
-        <img :src="previewImageUrl" alt="聊天图片预览" />
-      </div>
+      <ChatImagePreview
+        :images="previewImages"
+        :current-index="previewImageIndex"
+        @update:current-index="previewImageIndex = $event"
+        @close="previewImages = []"
+      />
     </section>
   </PhoneFrame>
 </template>

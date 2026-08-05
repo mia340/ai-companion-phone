@@ -80,6 +80,14 @@ export interface MessageReplyReference {
   type: 'text' | 'music' | 'image'
 }
 
+export interface MessageImage {
+  dataUrl?: string
+  name?: string
+  width?: number
+  height?: number
+  bytes?: number
+}
+
 export interface Message {
   id: UUID
   worldId: UUID
@@ -101,6 +109,7 @@ export interface Message {
   imageWidth?: number
   imageHeight?: number
   imageBytes?: number
+  images?: MessageImage[]
   visionUsed?: boolean
   visionFallback?: boolean
 }

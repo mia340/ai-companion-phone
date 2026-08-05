@@ -119,3 +119,21 @@ export function formatImageSize(bytes?: number) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
+
+export const MAX_CHAT_IMAGES = 6
+
+export async function prepareChatImages(
+  files: File[],
+  options?: { maxCount?: number }
+): Promise<PreparedChatImage[]> {
+  const maxCount = options?.maxCount ?? MAX_CHAT_IMAGES
+  if (!files.length) return []
+  if (files.length > maxCount) throw new Error(`一次最多选择 ${maxCount} 张图片。`)
+  const results: PreparedChatImage[] = []
+  for (const file of files) results.push(await prepareChatImage(file))
+  return results
+}
+
+export function totalPreparedImageBytes(images: PreparedChatImage[]) {
+  return images.reduce((total, image) => total + image.bytes, 0)
+}

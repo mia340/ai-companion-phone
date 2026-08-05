@@ -1456,7 +1456,31 @@ ChatRoom 仅在收到第一段有效文字后创建临时角色消息：
 V0.3.3 新增：
 
 - `ChatMessageItem.vue`：消息行、头像、图片、引用、状态与流式光标。
-- `ChatComposer.vue`：输入框、图片选择、图片预览、引用预览和发送控制。
+- `ChatComposer.vue`：输入框、图片选择、语音入口、图片预览、引用预览和发送控制。
+- `ChatHeader.vue`：返回、角色状态入口、一起听歌和聊天设置入口。
+- `ChatMessageList.vue`：消息遍历、输入状态、空状态与滚动容器。
+- `ChatSettingsPanel.vue`：聊天、记忆、语音和高级设置。
+- `ChatActionSheet.vue`：消息回复、复制、保存、重试、重新生成和删除。
+- `ChatImagePreview.vue`：聊天图片全屏预览。
 
-`ChatRoom.vue` 继续作为会话编排层，负责 Provider、记忆、关系、音乐和底部面板。后续版本可以继续拆分设置面板与音乐面板，而不改变消息组件接口。
+`ChatRoom.vue` 继续作为会话编排层，负责 Provider、记忆、关系、语音、音乐和请求生命周期。后续版本可继续拆分心理活动、音乐面板与 composables，而不改变消息组件接口。
 
+
+
+---
+
+## V0.3.6 多图消息与聊天逻辑解耦
+
+### 新增组件和 composables
+
+- `ChatThoughtPanel.vue`：角色心理活动、关系阶段和刷新入口。
+- `ChatMusicPanel.vue`：歌曲资料、音频元素、进度和陪听反应。
+- `useChatSpeech.ts`：语音识别、角色音色、语速、暂停和停止。
+- `useChatScroll.ts`：消息滚动、位置恢复和回到最新消息。
+- `useBottomPanel.ts`：底部面板下滑关闭。
+
+### 多图消息兼容策略
+
+`Message.images` 保存多张图片的 Data URL、名称、尺寸和体积。旧版的 `imageDataUrl`、`imageName` 等字段继续保留，读取时由 `messageImageService.ts` 统一转换为图片数组，因此已有单图聊天记录无需迁移。一次消息最多选择 6 张图片，Provider 请求会在同一条用户消息中依次加入多个 `image_url` part。
+
+备份格式版本保持 V4。导出时关闭图片会同时清除旧单图字段和 `images[].dataUrl`；备份摘要按实际图片张数和总体积统计。Dexie 仍为 V5，因为新增字段不需要新索引。
