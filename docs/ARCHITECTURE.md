@@ -1,3 +1,7 @@
+# AI Companion Phone 架构文档
+
+> 当前架构版本：**V0.4.1**。下方早期章节中的“当前版本”是对应开发阶段的历史记录，最新结构以文末 V0.4.1 章节为准。
+
 # AI Companion Phone 架构说明
 
 ## 1. 项目名称
@@ -1484,3 +1488,121 @@ V0.3.3 新增：
 `Message.images` 保存多张图片的 Data URL、名称、尺寸和体积。旧版的 `imageDataUrl`、`imageName` 等字段继续保留，读取时由 `messageImageService.ts` 统一转换为图片数组，因此已有单图聊天记录无需迁移。一次消息最多选择 6 张图片，Provider 请求会在同一条用户消息中依次加入多个 `image_url` part。
 
 备份格式版本保持 V4。导出时关闭图片会同时清除旧单图字段和 `images[].dataUrl`；备份摘要按实际图片张数和总体积统计。Dexie 仍为 V5，因为新增字段不需要新索引。
+
+
+## V0.3.8 图片处理管线
+
+图片选择后不再并发创建多个 Canvas，而是进入串行队列：
+
+```text
+File
+→ 类型与 15 MB 限制检查
+→ ImageBitmap 解码
+→ HTMLImageElement 解码兜底
+→ 按设备内存计算 1080 / 1280 / 1440 最长边
+→ 优先 JPEG，失败后尝试 WebP
+→ 编码失败切换格式
+→ 安全格式保留原图兜底
+→ 释放 ImageBitmap、Object URL 与 Canvas
+```
+
+待发送阶段同时保留 `sourceFile`，因此用户可对单张图片重新处理或改用原图；消息写入 IndexedDB 时只保存处理结果和元数据，不保存临时 `File` 对象。
+
+
+---
+
+## V0.4.0 角色卡与沉浸 Prompt 架构
+
+### 数据层
+
+Dexie V6 新增：
+
+```text
+personas
+lorebookEntries
+```
+
+`Character` 在不改变主键和索引的情况下扩展角色卡 V2 字段；`Message` 通过可选 `alternatives` 和 `activeAlternativeIndex` 保存候选回复。旧记录读取时由服务层补默认值。
+
+### Prompt 编排
+
+`promptComposer.ts` 是唯一的沉浸系统提示词入口：
+
+```text
+characterCardService
+personaService
+relationshipService
+memoryService / conversation summary
+lorebookService
+visual input metadata
+→ promptComposer
+→ Provider
+```
+
+视觉消息保留为 OpenAI 兼容多模态内容，但文字指令只要求内部观察。最终输出受角色卡、关系和自然度规则约束。
+
+### 聊天分支与候选
+
+候选回复保存在原 `Message` 上，不创建重复消息；切换时同步更新 `content`。聊天分支会复制所选消息及之前的历史，并重新映射消息 ID 和引用关系，然后继承聊天设置。
+
+### 兼容策略
+
+- 旧角色缺失 V2 字段时使用自然默认值。
+- 旧聊天设置缺失角色扮演字段时自动补齐。
+- 旧备份不含 Persona 和世界书时按空数组恢复，并在首次使用时创建默认 Persona。
+
+
+---
+
+# V0.4.1 角色互动与调试架构
+
+## 互动输出链路
+
+```text
+Provider 原始输出
+  ↓
+流式可见文本过滤 visibleStreamingText()
+  ↓
+parseCompanionOutput()
+  ├─ text / emoji / voice 动作消息
+  ├─ mood / activity / location / relationshipNote / innerThought
+  └─ 解析警告与动作摘要
+  ↓
+消息节奏调度 saveAssistantActions()
+  ↓
+Dexie messages + conversationStates + characters
+  ↓
+ChatMessageItem / ChatThoughtPanel
+```
+
+模型不输出协议时，解析器把纯文本转换为普通 `text` 动作，确保旧模型和普通 OpenAI 兼容接口继续可用。
+
+## Prompt 调试链路
+
+```text
+角色卡 + Persona + 关系 + 相关记忆 + 世界书 + 历史 + 视觉规则
+  ↓
+composeRoleplaySystemPrompt()
+  ↓
+savePromptDebugTrace()
+  ↓
+Provider
+  ↓
+原始输出 / 可见输出 / 动作摘要 / 自然度警告
+  ↓
+PromptDebugView
+```
+
+调试追踪保存在 `promptDebugTraces` 表，每个聊天最多 20 条，不写入备份。
+
+## 角色资源兼容
+
+`characterCardImportService.ts` 负责 SillyTavern V2 / V3 JSON 主要字段映射。内部仍统一转换成项目自己的 `Character`，避免聊天链路直接依赖外部卡格式。
+
+## 数据版本
+
+```text
+Dexie：V7
+Backup：V6
+新增表：promptDebugTraces
+```

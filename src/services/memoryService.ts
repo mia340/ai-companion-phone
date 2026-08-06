@@ -173,6 +173,38 @@ export async function clearMemories(conversationId: string) {
     .delete()
 }
 
+
+
+function tokenizeForMemory(value: string) {
+  const normalized = value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ')
+  const words = normalized.split(/\s+/).filter(item => item.length > 1)
+  const chars = Array.from(normalized.replace(/\s+/g, '')).filter(Boolean)
+  return new Set([...words, ...chars])
+}
+
+export function selectMemoryHits(
+  memories: CharacterMemory[],
+  query: string,
+  limit = 10
+): CharacterMemory[] {
+  const queryTokens = tokenizeForMemory(query)
+  const scored = memories.map(memory => {
+    const memoryTokens = tokenizeForMemory(memory.content)
+    let overlap = 0
+    for (const token of queryTokens) {
+      if (memoryTokens.has(token)) overlap += token.length > 1 ? 3 : 1
+    }
+    const recency = Math.max(0, 4 - Math.floor((Date.now() - new Date(memory.updatedAt).getTime()) / 86400000 / 30))
+    const categoryBoost = memory.category === 'promise' || memory.category === 'relationship' ? 3 : 0
+    return { memory, score: overlap * 4 + memory.importance * 3 + recency + categoryBoost }
+  })
+
+  return scored
+    .sort((a, b) => b.score - a.score || b.memory.updatedAt.localeCompare(a.memory.updatedAt))
+    .slice(0, Math.max(1, limit))
+    .map(item => item.memory)
+}
+
 export function buildMemoryPrompt(
   memories: CharacterMemory[],
   summary: string

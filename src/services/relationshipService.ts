@@ -135,7 +135,8 @@ export function relationshipPrompt(value: CharacterRelationship) {
     value.stage === '熟悉' ? '可以更自然地提起之前聊过的事情。' : '',
     value.stage === '亲近' ? '可以表达明显关心，称呼和语气更亲密。' : '',
     value.stage === '依赖' ? '可以表现想念、在意与轻微依赖，但不要控制用户。' : '',
-    value.stage === '特别关系' ? '可以用非常亲密、熟悉的方式相处，同时尊重用户边界。' : ''
+    value.stage === '特别关系' ? '可以用非常亲密、熟悉的方式相处，同时尊重用户边界。' : '',
+    ['亲近', '依赖', '特别关系'].includes(value.stage) ? '当语境合适时可以自然表现一点吃醋、想念或嘴硬，但不要控制、施压或要求用户证明感情。' : ''
   ].filter(Boolean).join('\n')
 }
 
@@ -151,33 +152,36 @@ export async function maybeCreateProactiveMessage(options: {
   const relationship = await getRelationship(options.character.id)
   const latest = options.messages.at(-1)
   if (!latest || latest.senderId === options.character.id) return null
+  if (options.character.initiative === 'low' && relationship.stage === '初识') return null
   const now = Date.now()
   const lastInteraction = new Date(latest.createdAt).getTime()
   const lastProactive = relationship.lastProactiveAt ? new Date(relationship.lastProactiveAt).getTime() : 0
-  const threshold = Math.max(1, options.intervalHours) * 60 * 60 * 1000
+  const initiativeFactor = options.character.initiative === 'high' ? .72 : options.character.initiative === 'low' ? 1.35 : 1
+  const threshold = Math.max(1, options.intervalHours) * 60 * 60 * 1000 * initiativeFactor
   if (now - lastInteraction < threshold || now - lastProactive < threshold) return null
-
-  const content = /面试|考试|上班|工作/.test(latest.content)
-    ? `之前你说的那件事，后来还顺利吗？`
-    : relationship.stage === '初识'
-      ? '刚刚忽然想起我们上次聊的话，你今天过得怎么样？'
-      : '有一会儿没见到你了。今天有没有什么想和我说的？'
+  const recentUserMessages = options.messages.filter(item => item.senderId === 'user' && item.content.trim()).slice(-6)
+  const latestUser = recentUserMessages.at(-1)?.content.trim() || ''
+  const unresolved = [...recentUserMessages].reverse().find(item => /(明天|下周|等会|后来|结果|考试|面试|工作|生病|不舒服|睡不着|难过|答应|记得)/.test(item.content))?.content.trim()
+  const styleSource = `${options.character.persona} ${options.character.speakingStyle || ''}`
+  const restrained = /克制|简短|冷静|毒舌|清冷/.test(styleSource)
+  const lively = /活泼|开朗|黏人|话多|元气/.test(styleSource)
+  const warm = /温柔|细腻|关心|治愈/.test(styleSource)
+  let content = ''
+  if (unresolved) {
+    const shortTopic = unresolved.replace(/\s+/g, ' ').slice(0, 28)
+    content = restrained ? '之前那件事，后来怎么样了。' : lively ? `我突然想起来——你之前说的“${shortTopic}”，后来呢？` : warm ? '刚才想起你之前提到的那件事。现在还好吗？' : '你之前说的那件事，后来有结果了吗？'
+  } else if (/晚安|睡了|困/.test(latestUser)) {
+    content = restrained ? '醒了吗。' : lively ? '早——醒了记得来找我。' : '醒来了吗？希望你睡得还不错。'
+  } else if (lively) content = `我刚刚在${options.character.activity || '忙自己的事'}，突然就想来敲你一下。`
+  else if (restrained) content = relationship.stage === '初识' ? '路过。' : '顺便来看看你。'
+  else content = relationship.stage === '初识' ? `刚才在${options.character.activity || '做自己的事'}，想起了我们上次聊的那句话。` : '刚刚有件小事让我想起你，所以就来了。'
   const createdAt = new Date().toISOString()
-  const message: Message = {
-    id: crypto.randomUUID(),
-    worldId: options.worldId,
-    conversationId: options.conversationId,
-    senderId: options.character.id,
-    type: 'text',
-    content,
-    status: 'delivered',
-    createdAt
-  }
+  const message: Message = { id: crypto.randomUUID(), worldId: options.worldId, conversationId: options.conversationId, senderId: options.character.id, type: 'text', content, status: 'delivered', createdAt, protocolVersion: 1 }
   await db.messages.add(message)
   await db.conversations.update(options.conversationId, { updatedAt: createdAt, unread: 0 })
   relationship.lastProactiveAt = createdAt
-  relationship.emotion = '想念'
-  relationship.emotionReason = '有一会儿没有等到你的消息'
+  relationship.emotion = unresolved ? '惦记' : '想念'
+  relationship.emotionReason = unresolved ? '还记得你之前没有说完的事情' : '有一会儿没有等到你的消息'
   await saveRelationship(relationship)
   return message
 }

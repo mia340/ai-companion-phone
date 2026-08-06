@@ -7,6 +7,7 @@ const props = defineProps<{
   message?: Message
   preview: string
   isSending: boolean
+  swipeRepliesEnabled?: boolean
   panelStyle?: CSSProperties
 }>()
 
@@ -18,6 +19,9 @@ const emit = defineEmits<{
   dragEnd: []
   reply: []
   copy: []
+  edit: []
+  continueReply: []
+  branch: []
   downloadImage: []
   retry: []
   regenerate: []
@@ -47,6 +51,16 @@ const emit = defineEmits<{
 
     <button type="button" @click="emit('reply')">回复</button>
     <button v-if="message?.type !== 'image'" type="button" @click="emit('copy')">复制</button>
+    <button type="button" @click="emit('edit')">编辑这条消息</button>
+    <button
+      v-if="message && message.senderId !== 'user'"
+      type="button"
+      :disabled="isSending"
+      @click="emit('continueReply')"
+    >
+      继续生成
+    </button>
+    <button v-if="message" type="button" @click="emit('branch')">从这里创建聊天分支</button>
     <button
       v-if="message?.type === 'image' && images.length"
       type="button"
@@ -68,7 +82,7 @@ const emit = defineEmits<{
       :disabled="isSending"
       @click="emit('regenerate')"
     >
-      重新生成
+      {{ swipeRepliesEnabled ? '换一个回复（保留旧版本）' : '重新生成' }}
     </button>
     <button type="button" class="danger-text" @click="emit('delete')">删除</button>
     <button type="button" @click="emit('close')">取消</button>

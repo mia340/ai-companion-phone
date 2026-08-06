@@ -33,6 +33,7 @@ const emit = defineEmits<{
   toggleSpeech: [message: Message]
   stopSpeech: []
   retryMessage: [message: Message]
+  selectAlternative: [message: Message, offset: number]
 }>()
 
 const listRef = ref<HTMLElement>()
@@ -43,6 +44,10 @@ function getElement() {
 
 function forwardImages(urls: string[], index: number) {
   emit('openImages', urls, index)
+}
+
+function forwardAlternative(message: Message, offset: number) {
+  emit('selectAlternative', message, offset)
 }
 
 defineExpose({ getElement })
@@ -70,6 +75,7 @@ defineExpose({ getElement })
       @toggle-speech="emit('toggleSpeech', $event)"
       @stop-speech="emit('stopSpeech')"
       @retry-message="emit('retryMessage', $event)"
+      @select-alternative="forwardAlternative"
     />
 
     <div

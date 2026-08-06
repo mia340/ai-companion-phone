@@ -4,11 +4,12 @@ import type { CSSProperties } from 'vue'
 import type {
   CharacterMemory,
   ChatSettings,
-  ConversationState
+  ConversationState,
+  UserPersona
 } from '../../types/domain'
 import type { ModelSettings } from '../../types/modelSettings'
 
-export type ChatSettingsTab = 'chat' | 'memory' | 'advanced'
+export type ChatSettingsTab = 'chat' | 'roleplay' | 'memory' | 'advanced'
 
 defineProps<{
   title: string
@@ -23,6 +24,8 @@ defineProps<{
   visionCapabilityLabel: string
   modelSettings?: ModelSettings
   conversationState?: ConversationState
+  personas: UserPersona[]
+  greetings: string[]
   panelStyle?: CSSProperties
 }>()
 
@@ -40,6 +43,11 @@ const emit = defineEmits<{
   clearMemories: []
   clearConversation: []
   openModelSettings: []
+  openPersonas: []
+  openLorebook: []
+  openCharacterCard: []
+  openPromptDebug: []
+  useGreeting: [greeting: string]
 }>()
 </script>
 
@@ -63,6 +71,7 @@ const emit = defineEmits<{
 
     <nav class="settings-tabs">
       <button :class="{ active: tab === 'chat' }" type="button" @click="emit('update:tab', 'chat')">聊天</button>
+      <button :class="{ active: tab === 'roleplay' }" type="button" @click="emit('update:tab', 'roleplay')">角色扮演</button>
       <button :class="{ active: tab === 'memory' }" type="button" @click="emit('update:tab', 'memory')">记忆</button>
       <button :class="{ active: tab === 'advanced' }" type="button" @click="emit('update:tab', 'advanced')">高级</button>
     </nav>
@@ -95,6 +104,11 @@ const emit = defineEmits<{
       <label class="setting-switch">
         <span><b>自然发送间隔</b><small>连续气泡之间保留短暂停顿</small></span>
         <input v-model="chatSettings.naturalDelay" type="checkbox" @change="emit('persist')" />
+      </label>
+
+      <label v-if="chatSettings.naturalDelay" class="setting-control">
+        <span><b>消息发送节奏</b><small>根据角色回复速度和消息长度决定气泡间隔</small></span>
+        <select v-model="chatSettings.messagePacing" @change="emit('persist')"><option value="off">无额外间隔</option><option value="quick">偏快</option><option value="natural">自然</option><option value="slow">偏慢</option></select>
       </label>
 
       <template v-if="speechPlaybackAvailable">
@@ -162,6 +176,57 @@ const emit = defineEmits<{
       <button class="danger-row" type="button" @click="emit('clearConversation')">清空聊天记录</button>
     </div>
 
+    <div v-else-if="tab === 'roleplay' && chatSettings" class="settings-content roleplay-content">
+      <label class="setting-control">
+        <span><b>聊天模式</b><small>决定动作描写、剧情连续性和日常聊天比例</small></span>
+        <select v-model="chatSettings.roleplayMode" @change="emit('persist')">
+          <option value="daily">日常陪伴</option>
+          <option value="immersive">沉浸剧情</option>
+          <option value="deep">深度角色扮演</option>
+        </select>
+      </label>
+
+      <label class="setting-control">
+        <span><b>我的 Persona</b><small>角色在本次聊天中认识的“你”</small></span>
+        <select v-model="chatSettings.personaId" @change="emit('persist')">
+          <option value="">使用默认人设</option>
+          <option v-for="persona in personas" :key="persona.id" :value="persona.id">
+            {{ persona.name }}{{ persona.isDefault ? ' · 默认' : '' }}
+          </option>
+        </select>
+      </label>
+
+      <label class="setting-switch">
+        <span><b>启用世界书</b><small>按关键词注入人物、地点和世界设定</small></span>
+        <input v-model="chatSettings.lorebookEnabled" type="checkbox" @change="emit('persist')" />
+      </label>
+
+      <label class="setting-switch">
+        <span><b>候选回复滑动</b><small>“换一个回复”会保留旧版本，可左右切换</small></span>
+        <input v-model="chatSettings.swipeRepliesEnabled" type="checkbox" @change="emit('persist')" />
+      </label>
+
+      <label class="setting-switch">
+        <span><b>小手机互动协议</b><small>允许角色自然拆成多条消息、表情、语音样式并更新状态</small></span>
+        <input v-model="chatSettings.actionProtocolEnabled" type="checkbox" @change="emit('persist')" />
+      </label>
+
+      <div v-if="greetings.length" class="greeting-picker">
+        <b>角色开场白</b>
+        <small>可以把任一开场作为角色的新消息插入聊天</small>
+        <button v-for="(greeting, index) in greetings" :key="`${index}-${greeting.slice(0, 12)}`" type="button" @click="emit('useGreeting', greeting)">
+          <span>{{ index === 0 ? '默认' : `备用 ${index}` }}</span>
+          {{ greeting }}
+        </button>
+      </div>
+
+      <div class="roleplay-links">
+        <button type="button" @click="emit('openCharacterCard')">编辑当前角色卡 V2</button>
+        <button type="button" @click="emit('openPersonas')">管理用户 Persona</button>
+        <button type="button" @click="emit('openLorebook')">管理世界书 Lorebook</button>
+      </div>
+    </div>
+
     <div v-else-if="tab === 'memory' && chatSettings" class="settings-content">
       <label class="setting-switch">
         <span><b>允许记住聊天</b><small>关闭后不再自动提取新记忆</small></span>
@@ -216,6 +281,11 @@ const emit = defineEmits<{
         <input v-model="chatSettings.autoFallback" type="checkbox" @change="emit('persist')" />
       </label>
 
+      <label v-if="chatSettings" class="setting-switch">
+        <span><b>保存 Prompt 调试记录</b><small>只保存在当前浏览器，最多保留最近 20 次，不随备份导出</small></span>
+        <input v-model="chatSettings.promptDebugEnabled" type="checkbox" @change="emit('persist')" />
+      </label>
+
       <div v-if="conversationState?.lastProviderNotice" class="technical-note">
         {{ conversationState.lastProviderNotice }}
       </div>
@@ -226,6 +296,7 @@ const emit = defineEmits<{
       </div>
       <p v-else class="technical-ok">最近没有接口错误。</p>
 
+      <button class="debug-button" type="button" @click="emit('openPromptDebug')">查看本轮 Prompt、世界书与记忆命中</button>
       <button class="panel-primary" type="button" @click="emit('openModelSettings')">打开 API 与模型设置</button>
     </div>
   </section>
@@ -291,7 +362,7 @@ const emit = defineEmits<{
 
 .settings-tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 6px;
   padding: 5px;
   border-radius: 15px;
@@ -430,6 +501,9 @@ const emit = defineEmits<{
 .technical-error p { margin: 5px 0 0; }
 .technical-ok { background: #edf8f1; color: #547663; }
 
+.greeting-picker{display:grid;gap:7px;padding:12px;border-radius:15px;background:#f8edf1}.greeting-picker small{color:#9a7b88}.greeting-picker button{max-height:76px;overflow:hidden;border:0;border-radius:11px;background:#fff;padding:9px;text-align:left;color:#725461;line-height:1.45}.greeting-picker button span{display:block;color:#c05e86;font-size:10px;font-weight:800}
+.roleplay-links{display:grid;gap:8px}.roleplay-links button{padding:11px;border:0;border-radius:13px;background:#f5e8ee;color:#a05d79;font-weight:700}
+
 .panel-primary {
   width: 100%;
   padding: 12px 14px;
@@ -462,4 +536,5 @@ const emit = defineEmits<{
 .vision-capability {
   margin-top: 3px;
 }
+.debug-button{width:100%;margin:0 0 9px;padding:12px 14px;border:0;border-radius:15px;background:#f2e6ec;color:#955a74;font-weight:800}
 </style>

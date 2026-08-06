@@ -142,6 +142,11 @@ async function openChat() {
   }
 }
 
+function openCard() {
+  if (!character.value) return
+  router.push(`/characters/${character.value.id}/card`)
+}
+
 function openEdit() {
   if (!character.value) return
 
@@ -295,6 +300,14 @@ onMounted(loadCharacter)
             @click="openEdit"
           >
             ✏️ 编辑资料
+          </button>
+
+          <button
+            type="button"
+            class="secondary-action roleplay-action"
+            @click="openCard"
+          >
+            🎭 沉浸角色卡
           </button>
         </section>
 
@@ -559,6 +572,11 @@ onMounted(loadCharacter)
 .secondary-action {
   background: #ffe2ee;
   color: #a85075;
+}
+
+.roleplay-action {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #f2d7e3, #f8e9ef);
 }
 
 .info-card {

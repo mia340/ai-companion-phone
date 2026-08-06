@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import PhoneFrame from '../components/PhoneFrame.vue'
 import { db } from '../db/database'
 import { DEFAULT_WORLD_ID } from '../db/seed'
+import { parseExampleDialogues } from '../services/characterCardService'
 import type { Character } from '../types/domain'
 
 type CharacterGender = NonNullable<Character['gender']>
@@ -40,6 +41,9 @@ const speakingStyle = ref('')
 const background = ref('')
 const likesText = ref('')
 const dislikesText = ref('')
+const scenario = ref('')
+const firstMessage = ref('')
+const exampleDialoguesText = ref('')
 
 // 整段导入
 const importText = ref('')
@@ -507,6 +511,7 @@ async function save() {
       'rw',
       db.characters,
       db.conversations,
+      db.messages,
       async () => {
         await db.characters.add({
           id: characterId,
@@ -540,6 +545,15 @@ async function save() {
           dislikes: parseList(dislikesText.value),
 
           relationship: relationship.value,
+          scenario: scenario.value.trim() || undefined,
+          firstMessage: firstMessage.value.trim() || undefined,
+          alternateGreetings: [],
+          exampleDialogues: parseExampleDialogues(exampleDialoguesText.value),
+          initiative: 'natural',
+          narrationStyle: 'light',
+          emojiFrequency: 'low',
+          questionFrequency: 'natural',
+          cardVersion: 2,
           mood: '期待认识你',
           activity: '刚刚来到这个世界',
 
@@ -561,6 +575,19 @@ async function save() {
           unread: 0,
           updatedAt: now
         })
+
+        if (firstMessage.value.trim()) {
+          await db.messages.add({
+            id: crypto.randomUUID(),
+            worldId: DEFAULT_WORLD_ID,
+            conversationId,
+            senderId: characterId,
+            type: 'text',
+            content: firstMessage.value.trim(),
+            status: 'delivered',
+            createdAt: now
+          })
+        }
       }
     )
 
@@ -850,6 +877,37 @@ async function save() {
           placeholder="使用逗号分隔，例如：争吵、失约"
         />
       </label>
+
+      <h3 class="form-section-title">沉浸起点</h3>
+
+      <label>
+        当前场景
+        <textarea
+          v-model="scenario"
+          rows="4"
+          placeholder="时间、地点、双方处境和故事开始时正在发生的事。"
+        ></textarea>
+      </label>
+
+      <label>
+        第一条消息
+        <textarea
+          v-model="firstMessage"
+          rows="4"
+          placeholder="创建后角色真正会发出的开场白。"
+        ></textarea>
+      </label>
+
+      <label>
+        示例对话
+        <textarea
+          v-model="exampleDialoguesText"
+          rows="8"
+          placeholder="用户：你怎么还没睡？&#10;角色：刚写完一页。你呢，又在逞强？&#10;&#10;---&#10;&#10;用户：我今天有点想你。&#10;角色：……那你现在见到我了。"
+        ></textarea>
+      </label>
+
+      <p class="hint">创建后还可以在“角色详情 → 沉浸角色卡”中补充完整设定、备用开场与世界书。</p>
 
       <p
         v-if="errorMessage"

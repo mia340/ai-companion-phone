@@ -26,6 +26,13 @@ export function createDefaultChatSettings(
     autoReadAloud: false,
     voiceName: '',
     voiceRate: 1,
+    roleplayMode: 'daily',
+    personaId: undefined,
+    lorebookEnabled: true,
+    swipeRepliesEnabled: true,
+    actionProtocolEnabled: true,
+    messagePacing: 'natural',
+    promptDebugEnabled: true,
     updatedAt: new Date().toISOString()
   }
 }
@@ -40,7 +47,13 @@ export async function getChatSettings(
     ? {
       ...defaults,
       ...row,
-      streamResponse: row.streamResponse ?? true
+      streamResponse: row.streamResponse ?? true,
+      roleplayMode: row.roleplayMode ?? 'daily',
+      lorebookEnabled: row.lorebookEnabled ?? true,
+      swipeRepliesEnabled: row.swipeRepliesEnabled ?? true,
+      actionProtocolEnabled: row.actionProtocolEnabled ?? true,
+      messagePacing: row.messagePacing ?? 'natural',
+      promptDebugEnabled: row.promptDebugEnabled ?? true
     }
     : defaults
 }

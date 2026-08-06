@@ -72,7 +72,21 @@ export async function getOrCreateSingleConversation(
     updatedAt: now
   }
 
-  await db.conversations.add(conversation)
+  await db.transaction('rw', db.conversations, db.messages, async () => {
+    await db.conversations.add(conversation)
+    if (character.firstMessage?.trim()) {
+      await db.messages.add({
+        id: crypto.randomUUID(),
+        worldId: character.worldId,
+        conversationId: conversation.id,
+        senderId: character.id,
+        type: 'text',
+        content: character.firstMessage.trim(),
+        status: 'delivered',
+        createdAt: now
+      })
+    }
+  })
 
   return conversation
 }
@@ -277,6 +291,11 @@ export async function deleteCharacterSafely(
             .updatedGroupConversations += 1
         }
       }
+
+      await db.lorebookEntries
+        .where('characterId')
+        .equals(characterId)
+        .delete()
 
       await db.characters.delete(
         characterId

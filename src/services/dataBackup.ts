@@ -11,15 +11,18 @@ import type {
   Conversation,
   ConversationState,
   Message,
+  MessageImage,
   MusicState,
   RelationshipEvent,
   UserProfile,
+  UserPersona,
+  LorebookEntry,
   World
 } from '../types/domain'
 
 export interface CompanionBackup {
   format: 'ai-companion-phone-backup'
-  version: 4
+  version: 6
   exportedAt: string
 
   data: {
@@ -35,6 +38,8 @@ export interface CompanionBackup {
     musicStates: MusicState[]
     relationships: CharacterRelationship[]
     relationshipEvents: RelationshipEvent[]
+    personas: UserPersona[]
+    lorebookEntries: LorebookEntry[]
   }
 }
 
@@ -48,6 +53,8 @@ export interface BackupSummary {
   memories: number
   relationships: number
   relationshipEvents: number
+  personas: number
+  lorebookEntries: number
   images: number
   imageBytes: number
 }
@@ -77,7 +84,9 @@ export async function createBackup(options?: {
     conversationStates,
     musicStates,
     relationships,
-    relationshipEvents
+    relationshipEvents,
+    personas,
+    lorebookEntries
   ] = await Promise.all([
     db.worlds.toArray(),
     db.characters.toArray(),
@@ -90,22 +99,24 @@ export async function createBackup(options?: {
     db.conversationStates.toArray(),
     db.musicStates.toArray(),
     db.relationships.toArray(),
-    db.relationshipEvents.toArray()
+    db.relationshipEvents.toArray(),
+    db.personas.toArray(),
+    db.lorebookEntries.toArray()
   ])
 
   const includeImages = options?.includeImages ?? true
   const exportMessages = includeImages
     ? messages
-    : messages.map(message => ({
+    : messages.map((message: Message) => ({
       ...message,
       imageDataUrl: undefined,
       imageBytes: undefined,
-      images: message.images?.map(image => ({ ...image, dataUrl: undefined, bytes: undefined }))
+      images: message.images?.map((image: MessageImage) => ({ ...image, dataUrl: undefined, bytes: undefined }))
     }))
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 4,
+    version: 6,
     exportedAt: new Date().toISOString(),
     data: {
       worlds,
@@ -119,7 +130,9 @@ export async function createBackup(options?: {
       conversationStates,
       musicStates,
       relationships,
-      relationshipEvents
+      relationshipEvents,
+      personas,
+      lorebookEntries
     }
   }
 }
@@ -137,6 +150,8 @@ export function getBackupSummary(
     memories: backup.data.memories.length,
     relationships: backup.data.relationships.length,
     relationshipEvents: backup.data.relationshipEvents.length,
+    personas: backup.data.personas.length,
+    lorebookEntries: backup.data.lorebookEntries.length,
     images: backup.data.messages.reduce(
       (total, message) => total + getMessageImages(message).filter(image => Boolean(image.dataUrl)).length,
       0
@@ -201,7 +216,7 @@ export async function parseBackupFile(
     throw new Error('这不是 AI Companion Phone 备份文件。')
   }
 
-  if (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4) {
+  if (![1, 2, 3, 4, 5, 6].includes(Number(parsed.version))) {
     throw new Error('当前版本暂不支持此备份版本。')
   }
 
@@ -230,7 +245,7 @@ export async function parseBackupFile(
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 4,
+    version: 6,
     exportedAt:
       typeof parsed.exportedAt === 'string'
         ? parsed.exportedAt
@@ -247,7 +262,9 @@ export async function parseBackupFile(
       conversationStates: optionalArray('conversationStates') as ConversationState[],
       musicStates: optionalArray('musicStates') as MusicState[],
       relationships: optionalArray('relationships') as CharacterRelationship[],
-      relationshipEvents: optionalArray('relationshipEvents') as RelationshipEvent[]
+      relationshipEvents: optionalArray('relationshipEvents') as RelationshipEvent[],
+      personas: optionalArray('personas') as UserPersona[],
+      lorebookEntries: optionalArray('lorebookEntries') as LorebookEntry[]
     }
   }
 }
@@ -272,6 +289,9 @@ export async function restoreBackup(
     await db.musicStates.clear()
     await db.relationships.clear()
     await db.relationshipEvents.clear()
+    await db.personas.clear()
+    await db.lorebookEntries.clear()
+    await db.promptDebugTraces.clear()
 
     if (plainBackup.data.worlds.length) {
       await db.worlds.bulkPut(plainBackup.data.worlds)
@@ -308,6 +328,12 @@ export async function restoreBackup(
     }
     if (plainBackup.data.relationshipEvents.length) {
       await db.relationshipEvents.bulkPut(plainBackup.data.relationshipEvents)
+    }
+    if (plainBackup.data.personas.length) {
+      await db.personas.bulkPut(plainBackup.data.personas)
+    }
+    if (plainBackup.data.lorebookEntries.length) {
+      await db.lorebookEntries.bulkPut(plainBackup.data.lorebookEntries)
     }
   })
 }

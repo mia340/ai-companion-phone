@@ -16,6 +16,18 @@ const sections = [
     description: '系统字体与字号'
   },
   {
+    icon: '🎭',
+    title: '用户人设 Persona',
+    description: '为不同世界和剧情建立自己的身份',
+    path: '/settings/personas'
+  },
+  {
+    icon: '📚',
+    title: '世界书 Lorebook',
+    description: '按关键词触发人物、地点和世界设定',
+    path: '/settings/lorebook'
+  },
+  {
     icon: '🤖',
     title: 'API 与模型',
     description: '供应商、图片理解、模型和生成参数',
@@ -35,7 +47,7 @@ const sections = [
   {
     icon: 'ℹ️',
     title: '关于',
-    description: '角色由 AI 驱动；当前为 V0.3.3 原型'
+    description: '角色由 AI 驱动；当前为 V0.4.1 角色互动原型'
   }
 ]
 

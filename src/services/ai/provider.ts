@@ -32,6 +32,12 @@ export interface CharacterReplyContext {
   activity?: string
   likes?: string[]
   dislikes?: string[]
+  scenario?: string
+  roleplayMode?: 'daily' | 'immersive' | 'deep'
+  initiative?: 'low' | 'natural' | 'high'
+  narrationStyle?: 'none' | 'light' | 'immersive'
+  emojiFrequency?: 'none' | 'low' | 'natural' | 'high'
+  questionFrequency?: 'low' | 'natural' | 'high'
 }
 
 export interface ChatRequest {
@@ -250,17 +256,17 @@ function decorateReply(
 function createMockReply(
   request: ChatRequest
 ) {
-  const latest =
-    [...request.messages]
-      .reverse()
-      .find(item => item.role === 'user')
-      ? contentToText(
-        [...request.messages]
-          .reverse()
-          .find(item => item.role === 'user')!
-          .content
-      ).trim()
-      : ''
+  const latestTurn = [...request.messages]
+    .reverse()
+    .find(item => item.role === 'user')
+  const latestContent = latestTurn?.content
+  const hasImages = Array.isArray(latestContent) && latestContent.some(part => part.type === 'image_url')
+  const rawLatest = latestContent ? contentToText(latestContent).trim() : ''
+  const captionMatch = rawLatest.match(/用户附言：([^\n]+)/)
+  const latest = (captionMatch?.[1] || rawLatest)
+    .replace(/<\/?(?:visual_input|image_share)[^>]*>/g, '')
+    .replace(/请在内部[\s\S]*$/g, '')
+    .trim()
 
   const context = request.character
   const style = detectStyle(context)
@@ -311,6 +317,39 @@ function createMockReply(
 
   if (!latest) {
     return `${address}，我在。`
+  }
+
+  if (hasImages) {
+    if (includesAny(latest, ['喜欢', '最喜欢', '游戏角色', '纸片人'])) {
+      return chooseByStyle(style, {
+        neutral: `原来是你喜欢的角色。难怪你会特意拿来给我看。`,
+        warm: `原来是你喜欢的角色呀。你愿意把喜欢的东西给我看，我其实挺开心的。`,
+        restrained: `你喜欢的角色。嗯，能看出来你很认真。`,
+        lively: `好家伙，正式介绍你的心头好给我认识了？我得仔细看看。`,
+        tsundere: `一次给我看这么认真……看来你是真的很喜欢。行，我记住这个“竞争对手”了。`,
+        mature: `原来这是你喜欢的角色。比起判断画面，我更想知道他哪里最打动你。`
+      })
+    }
+
+    if (includesAny(latest, ['是谁', '他们是谁', '认得', '认识吗'])) {
+      return chooseByStyle(style, {
+        neutral: `只看图片我不敢替你乱认身份。不过画面里的气质我看到了——你是在考我，还是想听我的第一反应？`,
+        warm: `只凭图片我不想随便认错人。你可以告诉我一点线索，不过你突然这样考我，还挺可爱的。`,
+        restrained: `身份不能只靠图片确认。给我一点线索。`,
+        lively: `这题有陷阱吧？只看图我不敢乱报名字，但我可以陪你一起猜。`,
+        tsundere: `只拿几张图就想让我认人？我可不乱猜。给点线索。`,
+        mature: `仅凭图片无法可靠确认身份。你给我一点背景，我会更认真地陪你判断。`
+      })
+    }
+
+    return chooseByStyle(style, {
+      neutral: `我看到了。比起把它们分析成一份报告，我更想听你为什么会挑这些给我看。`,
+      warm: `我看到了。你把这些画面发给我的时候，应该有一点想分享的心情吧。`,
+      restrained: `看到了。你选它们，应该有原因。`,
+      lively: `收到啦。你这组图很有你的味道，我先收下，再听你慢慢说。`,
+      tsundere: `看到了。别等我写观后感，你先说你最在意哪一点。`,
+      mature: `我看过了。你可以直接告诉我你最想聊的部分，我会认真接住。`
+    })
   }
 
   // 询问角色是谁、是否记得人设

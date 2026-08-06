@@ -280,6 +280,16 @@ async function importData() {
             <b>{{ summary.relationshipEvents }}</b>
             个关系事件
           </span>
+
+          <span>
+            <b>{{ summary.personas }}</b>
+            套用户人设
+          </span>
+
+          <span>
+            <b>{{ summary.lorebookEntries }}</b>
+            条世界书设定
+          </span>
         </div>
 
         <p class="export-time">

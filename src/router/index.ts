@@ -11,10 +11,14 @@ import ContactsView from '../views/ContactsView.vue'
 import CharacterCreate from '../views/CharacterCreate.vue'
 import CharacterDetailView from '../views/CharacterDetailView.vue'
 import CharacterEditView from '../views/CharacterEditView.vue'
+import CharacterCardEditorView from '../views/CharacterCardEditorView.vue'
 import UserProfileView from '../views/UserProfileView.vue'
 import DataBackupView from '../views/DataBackupView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import ModelSettingsView from '../views/ModelSettingsView.vue'
+import PersonaManagerView from '../views/PersonaManagerView.vue'
+import LorebookView from '../views/LorebookView.vue'
+import PromptDebugView from '../views/PromptDebugView.vue'
 import PlaceholderApp from '../views/PlaceholderApp.vue'
 
 export const router = createRouter({
@@ -32,6 +36,10 @@ export const router = createRouter({
     {
       path: '/chat',
       component: ChatList
+    },
+    {
+      path: '/chat/:id/debug',
+      component: PromptDebugView
     },
     {
       path: '/chat/:id',
@@ -52,6 +60,10 @@ export const router = createRouter({
       component: CharacterEditView
     },
     {
+      path: '/characters/:id/card',
+      component: CharacterCardEditorView
+    },
+    {
       path: '/characters/:id',
       component: CharacterDetailView
     },
@@ -67,6 +79,14 @@ export const router = createRouter({
     {
       path: '/settings/models',
       component: ModelSettingsView
+    },
+    {
+      path: '/settings/personas',
+      component: PersonaManagerView
+    },
+    {
+      path: '/settings/lorebook',
+      component: LorebookView
     },
     {
       path: '/settings',

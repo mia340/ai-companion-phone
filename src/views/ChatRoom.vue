@@ -27,7 +27,15 @@ import {
 } from '../services/ai/provider'
 import { createProvider } from '../services/ai/providerFactory'
 import { getModelSettings, getVisionCapability, saveVisionCapability } from '../services/modelSettings'
-import { MAX_CHAT_IMAGES, prepareChatImageBatch, type PreparedChatImage } from '../services/imageService'
+import {
+  MAX_CHAT_IMAGES,
+  prepareChatImage,
+  prepareChatImageBatch,
+  prepareOriginalChatImage,
+  type ImageBatchProgress,
+  type ImagePreparationFailure,
+  type PreparedChatImage
+} from '../services/imageService'
 import { getMessageImages, getMessageImageUrls } from '../services/messageImageService'
 import {
   getChatSettings,
@@ -44,7 +52,8 @@ import {
   createLocalSummary,
   listMemories,
   rememberFromMessage,
-  removeMemory
+  removeMemory,
+  selectMemoryHits
 } from '../services/memoryService'
 import { generateVisibleCharacterState } from '../services/characterStateService'
 import {
@@ -55,6 +64,11 @@ import {
   relationshipPrompt
 } from '../services/relationshipService'
 import { getOrCreateUserProfile } from '../services/userProfile'
+import { getPersonaForChat, listPersonas } from '../services/personaService'
+import { buildLorebookPrompt } from '../services/lorebookService'
+import { composeRoleplaySystemPrompt } from '../services/promptComposer'
+import { estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
+import { estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
 import type {
   Character,
   CharacterMemory,
@@ -64,8 +78,10 @@ import type {
   ConversationState,
   Message,
   MessageReplyReference,
+  PromptDebugTrace,
   MusicState,
-  UserProfile
+  UserProfile,
+  UserPersona
 } from '../types/domain'
 import type { ModelSettings } from '../types/modelSettings'
 
@@ -74,6 +90,8 @@ const router = useRouter()
 const conversation = ref<Conversation>()
 const character = ref<Character>()
 const userProfile = ref<UserProfile>()
+const personas = ref<UserPersona[]>([])
+const activePersona = ref<UserPersona>()
 const messages = ref<Message[]>([])
 const memories = ref<CharacterMemory[]>([])
 const chatSettings = ref<ChatSettings>()
@@ -88,14 +106,19 @@ const isLoadingThought = ref(false)
 const errorMessage = ref('')
 const noticeMessage = ref('')
 const newMemoryText = ref('')
-const settingsTab = ref<'chat' | 'memory' | 'advanced'>('chat')
+const settingsTab = ref<'chat' | 'roleplay' | 'memory' | 'advanced'>('chat')
 const activePanel = ref<'thought' | 'music' | 'settings' | 'message' | null>(null)
 const selectedMessage = ref<Message>()
 const replyTarget = ref<Message>()
 const previewImages = ref<string[]>([])
 const previewImageIndex = ref(0)
 const pendingImages = ref<PreparedChatImage[]>([])
+const failedImages = ref<ImagePreparationFailure[]>([])
+const imageProgress = ref<ImageBatchProgress>()
 const isPreparingImage = ref(false)
+type VisionStage = 'idle' | 'sent' | 'checking' | 'analyzing' | 'replying' | 'fallback'
+const visionStage = ref<VisionStage>('idle')
+const visionImageCount = ref(0)
 
 interface ChatComposerHandle {
   focus: () => void
@@ -115,6 +138,25 @@ let localAudioObjectUrl = ''
 let lastMusicSaveSecond = -1
 
 const title = computed(() => character.value?.name || conversation.value?.title || '聊天')
+const displayUserProfile = computed<UserProfile | undefined>(() => {
+  const persona = activePersona.value
+  if (!persona) return userProfile.value
+  return {
+    id: persona.id,
+    name: persona.name,
+    avatar: persona.avatar,
+    identity: persona.identity,
+    bio: persona.personality || persona.background,
+    createdAt: persona.createdAt,
+    updatedAt: persona.updatedAt
+  }
+})
+const availableGreetings = computed(() => {
+  const rows = [character.value?.firstMessage, ...(character.value?.alternateGreetings || [])]
+    .map(item => item?.trim() || '')
+    .filter(Boolean)
+  return Array.from(new Set(rows))
+})
 const currentTrackLabel = computed(() => {
   const music = musicState.value
   if (!music?.title) return ''
@@ -127,8 +169,16 @@ const providerLabel = computed(() => {
   if (settings.provider === 'openai-compatible') return 'OpenAI 兼容接口'
   return '本地模拟'
 })
-const canSend = computed(() => Boolean(draft.value.trim() || pendingImages.value.length) && !isSending.value && !isPreparingImage.value)
+const canSend = computed(() => Boolean(draft.value.trim() || pendingImages.value.length) && !failedImages.value.length && !isSending.value && !isPreparingImage.value)
 const sendingHint = computed(() => {
+  const count = visionImageCount.value
+  if (count > 0) {
+    if (visionStage.value === 'sent') return `${count} 张图片已发送，正在准备交给 AI…`
+    if (visionStage.value === 'checking') return `正在检查模型能否理解这 ${count} 张图片…`
+    if (visionStage.value === 'analyzing') return `AI 正在查看这 ${count} 张图片…`
+    if (visionStage.value === 'replying') return '图片已读取，正在组织回复…'
+    if (visionStage.value === 'fallback') return '当前模型无法读取图片，正在根据文字说明回应…'
+  }
   const latest = [...messages.value].reverse().find(item => item.senderId === 'user')
   return latest?.type === 'image' ? '正在认真看你发来的图片…' : '正在想该怎么回应你…'
 })
@@ -222,6 +272,8 @@ function messagePreview(message: Message, maxLength = 42) {
     const caption = message.content.trim()
     return caption ? `[图片] ${caption}` : '[图片]'
   }
+  if (message.type === 'voice') return `[语音] ${message.content}`
+  if (message.type === 'emoji') return `[表情] ${message.content}`
   const text = message.content.replace(/\s+/g, ' ').trim()
   return text.length > maxLength
     ? `${text.slice(0, maxLength)}…`
@@ -230,7 +282,7 @@ function messagePreview(message: Message, maxLength = 42) {
 
 function messageSenderName(message: Message) {
   return message.senderId === 'user'
-    ? (userProfile.value?.name || '我')
+    ? (activePersona.value?.name || userProfile.value?.name || '我')
     : title.value
 }
 
@@ -247,25 +299,42 @@ function createReplyReference(message: Message): MessageReplyReference {
   }
 }
 
+function chatTurnContentText(content: ChatTurn['content']) {
+  if (typeof content === 'string') return content
+  return content.filter(part => part.type === 'text').map(part => part.text).join('\n')
+}
+
 function formatMessageForPrompt(message: Message) {
   const caption = message.content.trim()
   const imageCount = getMessageImages(message).length
-  const imageLabel = imageCount > 1 ? `${imageCount} 张图片` : '一张图片'
   const base = message.type === 'image'
-    ? caption
-      ? `用户分享了${imageLabel}，并说：“${caption}”。当前无法确认图片细节，请围绕附言和分享行为自然回应，不要猜测图中具体内容，也不要解释技术限制。`
-      : `用户分享了${imageLabel}。当前无法确认图片细节，请自然回应这次分享，不要猜测图中具体内容，也不要解释技术限制。`
-    : message.content
+    ? [
+      `<image_share count="${imageCount || 1}" details="unavailable">`,
+      caption ? `用户附言：${caption}` : '用户没有附言。',
+      '图片细节当前不可用。只回应用户的附言、分享行为和关系语境；不要猜测细节，也不要解释技术原因。',
+      '</image_share>'
+    ].join('\n')
+    : message.type === 'voice'
+      ? `<voice_message>${message.content}</voice_message>`
+      : message.type === 'emoji'
+        ? `<emoji_message>${message.content}</emoji_message>`
+        : /^(?:\/ooc\b|ooc\s*[：:])/i.test(message.content.trim())
+          ? `<director_instruction>${message.content.trim().replace(/^(?:\/ooc\b|ooc\s*[：:])\s*/i, '')}</director_instruction>`
+          : message.content
   if (!message.replyTo) return base
   return `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。\n${base}`
 }
 
 function imageMessageContent(message: Message): ChatTurn['content'] {
   const images = getMessageImages(message).filter(image => Boolean(image.dataUrl))
-  const countLabel = images.length > 1 ? `这 ${images.length} 张图片` : '这张图片'
-  const text = message.content.trim()
-    ? `请认真查看${countLabel}，并结合用户的话自然回应：“${message.content.trim()}”`
-    : `请认真查看${countLabel}，根据你实际看到的内容自然回应。不要编造看不清或无法确认的细节。`
+  const caption = message.content.trim()
+  const text = [
+    `<visual_input count="${images.length}">`,
+    caption ? `用户附言：${caption}` : '用户没有附言。',
+    '请在内部按顺序观察图片。最终只输出角色会自然发出的消息，不要先汇报图片数量、文件名、构图或分析过程。',
+    '</visual_input>'
+  ].join('\n')
+
   return [
     {
       type: 'text',
@@ -291,9 +360,11 @@ function previewPendingImages(index: number) {
 
 function downloadPreviewImage(url: string, index: number) {
   if (!url) return
+  const mime = /^data:image\/([^;,]+)/i.exec(url)?.[1]?.toLowerCase() || 'jpeg'
+  const extension = mime === 'jpeg' ? 'jpg' : mime.replace(/[^a-z0-9]/g, '') || 'jpg'
   const link = document.createElement('a')
   link.href = url
-  link.download = `chat-image-${Date.now()}-${index + 1}.jpg`
+  link.download = `chat-image-${Date.now()}-${index + 1}.${extension}`
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -332,8 +403,74 @@ function removePendingImage(index: number) {
   pendingImages.value.splice(index, 1)
 }
 
+function movePendingImage(index: number, offset: number) {
+  const target = index + offset
+  if (index < 0 || target < 0 || index >= pendingImages.value.length || target >= pendingImages.value.length) return
+  const [image] = pendingImages.value.splice(index, 1)
+  pendingImages.value.splice(target, 0, image)
+}
+
+async function useOriginalPendingImage(index: number) {
+  const current = pendingImages.value[index]
+  if (!current?.sourceFile || isPreparingImage.value) return
+  isPreparingImage.value = true
+  imageProgress.value = {
+    completed: 0,
+    total: 1,
+    currentName: current.name,
+    status: 'processing'
+  }
+  try {
+    const original = await prepareOriginalChatImage(current.sourceFile, current.attempts)
+    pendingImages.value.splice(index, 1, original)
+    noticeMessage.value = `${current.name} 已切换为原图。`
+  } catch (error) {
+    noticeMessage.value = error instanceof Error ? error.message : '原图读取失败。'
+  } finally {
+    isPreparingImage.value = false
+    imageProgress.value = undefined
+  }
+}
+
+function removeFailedImage(id: string) {
+  failedImages.value = failedImages.value.filter(item => item.id !== id)
+}
+
+async function retryFailedImage(id: string, forceOriginal = false) {
+  const failure = failedImages.value.find(item => item.id === id)
+  if (!failure || isPreparingImage.value) return
+
+  isPreparingImage.value = true
+  imageProgress.value = {
+    completed: 0,
+    total: 1,
+    currentName: failure.name,
+    status: 'processing'
+  }
+
+  try {
+    const prepared = forceOriginal
+      ? await prepareOriginalChatImage(failure.file, failure.attempts)
+      : await prepareChatImage(failure.file, { allowOriginalFallback: true })
+    failedImages.value = failedImages.value.filter(item => item.id !== id)
+    pendingImages.value.push(prepared)
+    noticeMessage.value = `${failure.name} 已重新处理成功。`
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : '图片处理失败。'
+    failedImages.value = failedImages.value.map(item => item.id === id
+      ? { ...item, reason }
+      : item)
+    noticeMessage.value = `${failure.name} 仍无法处理：${reason}`
+  } finally {
+    isPreparingImage.value = false
+    imageProgress.value = undefined
+  }
+}
+
 function clearPendingImages() {
   pendingImages.value = []
+  failedImages.value = []
+  imageProgress.value = undefined
 }
 
 async function recoverInterruptedMessages(
@@ -392,6 +529,8 @@ async function recoverInterruptedMessages(
 async function loadConversation(conversationId: string) {
   errorMessage.value = ''
   pendingImages.value = []
+  failedImages.value = []
+  imageProgress.value = undefined
   previewImages.value = []
   replyTarget.value = undefined
 
@@ -414,7 +553,8 @@ async function loadConversation(conversationId: string) {
       stateRow,
       musicRow,
       memoryRows,
-      modelRow
+      modelRow,
+      personaRows
     ] = await Promise.all([
       db.messages
         .where('conversationId')
@@ -428,7 +568,8 @@ async function loadConversation(conversationId: string) {
       getConversationState(conversationId),
       getMusicState(conversationId),
       listMemories(conversationId),
-      getModelSettings()
+      getModelSettings(),
+      listPersonas()
     ])
 
     const recoveredMessageRows =
@@ -443,6 +584,8 @@ async function loadConversation(conversationId: string) {
     musicState.value = musicRow
     memories.value = memoryRows
     modelSettings.value = modelRow
+    personas.value = personaRows
+    activePersona.value = await getPersonaForChat(settingsRow)
     relationship.value = characterRow
       ? await getRelationship(characterRow.id)
       : undefined
@@ -487,45 +630,6 @@ async function loadConversation(conversationId: string) {
       ? `聊天加载失败：${error.message}`
       : '聊天加载失败。'
   }
-}
-
-function buildSystemPrompt(
-  activeCharacter: Character,
-  activeProfile: UserProfile | undefined,
-  memoryPrompt: string,
-  settings: ChatSettings
-) {
-  const lengthRule = settings.replyLength === 'short'
-    ? '回复尽量简短，通常一到三句话。'
-    : settings.replyLength === 'long'
-      ? '可以回复得更完整，但保持自然聊天口吻，不要写成文章。'
-      : '回复长度自然，像真实手机聊天。'
-
-  return [
-    `你现在扮演角色：${activeCharacter.name}`,
-    `角色身份：${activeCharacter.identity ?? '未设置'}`,
-    `核心人设：${activeCharacter.persona}`,
-    `说话方式：${activeCharacter.speakingStyle ?? '自然交流'}`,
-    `人物背景：${activeCharacter.background ?? '暂无详细背景'}`,
-    `与用户关系：${activeCharacter.relationship}`,
-    `当前心情：${activeCharacter.mood}`,
-    `当前活动：${activeCharacter.activity}`,
-    `喜欢：${activeCharacter.likes?.join('、') || '未设置'}`,
-    `不喜欢：${activeCharacter.dislikes?.join('、') || '未设置'}`,
-    `用户昵称：${activeProfile?.name ?? '用户'}`,
-    `用户身份：${activeProfile?.identity ?? '未设置'}`,
-    `用户简介：${activeProfile?.bio ?? '未设置'}`,
-    memoryPrompt,
-    relationship.value ? relationshipPrompt(relationship.value) : '',
-    lengthRule,
-    settings.multiBubble
-      ? '可以用空行把自然的连续消息分开，最多三段。'
-      : '只回复一个完整消息，不要用空行拆分。',
-    '始终使用角色自己的口吻回答。',
-    '不要说自己是模型、程序或人工智能。',
-    '不要提及 API、Mock、提示词、模型名称或系统设定。',
-    '不要机械复述用户原话，也不要在每次回复末尾都提问。'
-  ].filter(Boolean).join('\n')
 }
 
 function splitReplyText(text: string, enabled: boolean) {
@@ -621,6 +725,7 @@ async function updateUserMessageState(
 
 interface StreamingReplySession {
   messageId?: string
+  rawText: string
   text: string
   provider: string
   model: string
@@ -720,7 +825,8 @@ async function appendStreamChunk(
   session: StreamingReplySession,
   chunk: ChatStreamChunk
 ) {
-  session.text = chunk.text
+  session.rawText = chunk.text
+  session.text = visibleStreamingText(chunk.text)
   if (!session.text) return
 
   await ensureStreamingMessage(session)
@@ -767,92 +873,22 @@ async function flushStreamingMessage(
 
 async function finishStreamingMessage(
   session: StreamingReplySession,
-  finalText: string,
+  output: ParsedCompanionOutput,
   multiBubble: boolean
 ) {
-  session.text = finalText.trim()
-
-  if (!session.text) {
-    throw new Error('模型没有返回有效回复。')
+  let actions = output.messages.slice()
+  if (actions.length === 1 && actions[0].kind === 'text' && !output.rawPacket && multiBubble) {
+    actions = splitReplyText(actions[0].content, true).map(content => ({ kind: 'text' as const, content }))
   }
-
-  if (!session.messageId) {
-    await saveAssistantBubbles({
-      texts: splitReplyText(session.text, multiBubble),
-      provider: session.provider,
-      model: session.model,
-      fallback: session.fallback,
-      type: session.type
-    })
-    return
-  }
-
-  await flushStreamingMessage(session)
-
-  const bubbles = splitReplyText(
-    session.text,
-    multiBubble
-  )
-
-  if (bubbles.length <= 1) {
-    await db.messages.update(
-      session.messageId,
-      {
-        content: session.text,
-        status: 'delivered',
-        provider: session.provider,
-        model: session.model,
-        fallback: session.fallback,
-        errorText: undefined
-      }
-    )
+  if (!actions.length) throw new Error('模型没有返回有效回复。')
+  session.text = actions.map(item => item.content).join('\n\n')
+  const canReuse = Boolean(session.messageId) && actions.length === 1 && actions[0].kind === 'text' && session.type !== 'voice' && session.type !== 'emoji'
+  if (canReuse && session.messageId) {
+    await db.messages.update(session.messageId, { content: actions[0].content, status: 'delivered', provider: session.provider, model: session.model, fallback: session.fallback, errorText: undefined, protocolVersion: output.rawPacket ? 1 : undefined })
   } else {
-    const source = messages.value.find(
-      item => item.id === session.messageId
-    )
-    const groupId =
-      source?.replyGroupId ?? crypto.randomUUID()
-    const baseTime = source?.createdAt
-      ? new Date(source.createdAt).getTime()
-      : Date.now()
-
-    await db.transaction(
-      'rw',
-      db.messages,
-      db.conversations,
-      async () => {
-        await db.messages.delete(session.messageId!)
-
-        await db.messages.bulkAdd(
-          bubbles.map((content, index): Message => ({
-            id: crypto.randomUUID(),
-            worldId: session.conversation.worldId,
-            conversationId: session.conversation.id,
-            senderId: session.conversation.memberIds[0],
-            type: session.type,
-            content,
-            status: 'delivered',
-            createdAt: new Date(baseTime + index).toISOString(),
-            provider: session.provider,
-            model: session.model,
-            fallback: session.fallback,
-            replyGroupId: groupId
-          }))
-        )
-
-        await db.conversations.update(
-          session.conversation.id,
-          { updatedAt: new Date().toISOString() }
-        )
-      }
-    )
+    await saveAssistantActions({ actions, provider: session.provider, model: session.model, fallback: session.fallback, type: session.type, replaceMessageId: session.messageId })
   }
-
-  messages.value = await db.messages
-    .where('conversationId')
-    .equals(session.conversation.id)
-    .sortBy('createdAt')
-
+  messages.value = await db.messages.where('conversationId').equals(session.conversation.id).sortBy('createdAt')
   streamingMessageId.value = ''
   session.messageId = undefined
   clearStreamTimers()
@@ -913,63 +949,42 @@ async function preserveInterruptedStream(
   return true
 }
 
-async function saveAssistantBubbles(options: {
-  texts: string[]
-  provider: string
-  model: string
-  fallback: boolean
-  type?: Message['type']
-  signal?: AbortSignal
-}) {
-  if (!conversation.value) return
-
+function actionMessageType(action: CompanionActionMessage, baseType?: Message['type']): Message['type'] {
+  if (action.kind === 'emoji') return 'emoji'
+  if (action.kind === 'voice') return 'voice'
+  return baseType === 'music' ? 'music' : 'text'
+}
+function messagePacingDelay(action: CompanionActionMessage, index: number) {
+  if (index === 0 || !chatSettings.value?.naturalDelay) return 0
+  const pacing = chatSettings.value.messagePacing ?? 'natural'
+  if (pacing === 'off') return 0
+  const speedFactor = character.value?.replySpeed === 'slow' ? 1.35 : character.value?.replySpeed === 'instant' ? .65 : 1
+  const base = pacing === 'quick' ? 260 : pacing === 'slow' ? 760 : 430
+  const perCharacter = action.kind === 'emoji' ? 0 : pacing === 'slow' ? 17 : 11
+  return Math.round((base + Math.min(1400, action.content.length * perCharacter)) * speedFactor)
+}
+async function saveAssistantActions(options: { actions: CompanionActionMessage[]; provider: string; model: string; fallback: boolean; type?: Message['type']; signal?: AbortSignal; replaceMessageId?: string }) {
+  if (!conversation.value || !options.actions.length) return
   const activeConversation = conversation.value
   const groupId = crypto.randomUUID()
-
-  for (let index = 0; index < options.texts.length; index += 1) {
-    if (options.signal?.aborted) {
-      throw new DOMException('请求已取消', 'AbortError')
-    }
-
-    if (index > 0 && chatSettings.value?.naturalDelay) {
-      await wait(420 + Math.min(900, options.texts[index].length * 12), options.signal)
-    }
-
-    const now = new Date().toISOString()
-
-    await db.transaction(
-      'rw',
-      db.messages,
-      db.conversations,
-      async () => {
-        await db.messages.add({
-          id: crypto.randomUUID(),
-          worldId: activeConversation.worldId,
-          conversationId: activeConversation.id,
-          senderId: activeConversation.memberIds[0],
-          type: options.type ?? 'text',
-          content: options.texts[index],
-          status: 'delivered',
-          createdAt: now,
-          provider: options.provider,
-          model: options.model,
-          fallback: options.fallback,
-          replyGroupId: groupId
-        })
-
-        await db.conversations.update(activeConversation.id, {
-          updatedAt: now
-        })
-      }
-    )
-
-    messages.value = await db.messages
-      .where('conversationId')
-      .equals(activeConversation.id)
-      .sortBy('createdAt')
-
+  if (options.replaceMessageId) await db.messages.delete(options.replaceMessageId)
+  for (let index = 0; index < options.actions.length; index += 1) {
+    if (options.signal?.aborted) throw new DOMException('请求已取消', 'AbortError')
+    const action = options.actions[index]
+    const delay = messagePacingDelay(action, index)
+    if (delay > 0) await wait(delay, options.signal)
+    const now = new Date(Date.now() + index).toISOString()
+    const type = actionMessageType(action, options.type)
+    await db.transaction('rw', db.messages, db.conversations, async () => {
+      await db.messages.add({ id: crypto.randomUUID(), worldId: activeConversation.worldId, conversationId: activeConversation.id, senderId: activeConversation.memberIds[0], type, content: action.content, status: 'delivered', createdAt: now, provider: options.provider, model: options.model, fallback: options.fallback, replyGroupId: groupId, voiceDurationSeconds: type === 'voice' ? estimateVoiceDuration(action.content) : undefined, protocolVersion: 1 })
+      await db.conversations.update(activeConversation.id, { updatedAt: now })
+    })
+    messages.value = await db.messages.where('conversationId').equals(activeConversation.id).sortBy('createdAt')
     await scrollToBottom()
   }
+}
+function includeVisionCount(request: ChatRequest) {
+  return request.messages.reduce((total, turn) => typeof turn.content === 'string' ? total : total + turn.content.filter(part => part.type === 'image_url').length, 0)
 }
 
 async function requestAssistantReply(options?: {
@@ -977,6 +992,7 @@ async function requestAssistantReply(options?: {
   type?: Message['type']
   sourceMessageId?: string
   visualMessageId?: string
+  alternativeTargetId?: string
 }) {
   if (!conversation.value || !character.value || !chatSettings.value) return
 
@@ -990,6 +1006,7 @@ async function requestAssistantReply(options?: {
   const activeCharacter = character.value
   const settings = chatSettings.value
   const streamSession: StreamingReplySession = {
+    rawText: '',
     text: '',
     provider: '',
     model: '',
@@ -997,6 +1014,7 @@ async function requestAssistantReply(options?: {
     type: options?.type ?? 'text',
     conversation: activeConversation
   }
+  const useStreaming = settings.streamResponse && !options?.alternativeTargetId
 
   let visualMessage: Message | undefined
   let visionUsed = false
@@ -1007,13 +1025,31 @@ async function requestAssistantReply(options?: {
     modelSettings.value = currentModelSettings
     const provider = createProvider(currentModelSettings)
 
-    const memoryPrompt = settings.memoryEnabled
-      ? buildMemoryPrompt(memories.value, conversationState.value?.summary ?? '')
-      : ''
+    const persona = activePersona.value ?? await getPersonaForChat(settings)
+    activePersona.value = persona
+    const latestUserText = [...messages.value].reverse().find(item => item.senderId === 'user')?.content ?? ''
+    const memoryHits = settings.memoryEnabled
+      ? selectMemoryHits(memories.value, [latestUserText, options?.musicPrompt || ''].filter(Boolean).join('\n'), settings.memoryStrength === 'deep' ? 14 : settings.memoryStrength === 'light' ? 6 : 10)
+      : []
+    const memoryPrompt = settings.memoryEnabled ? buildMemoryPrompt(memoryHits, conversationState.value?.summary ?? '') : ''
+
+    const lorebook = settings.lorebookEnabled
+      ? await buildLorebookPrompt({
+        worldId: activeConversation.worldId,
+        characterId: activeCharacter.id,
+        messages: messages.value,
+        latestText: [latestUserText, options?.musicPrompt || ''].filter(Boolean).join('\n')
+      })
+      : { prompt: '', activated: [] }
 
     visualMessage = options?.visualMessageId
       ? messages.value.find(item => item.id === options.visualMessageId)
       : undefined
+
+    if (visualMessage) {
+      visionImageCount.value = getMessageImageUrls(visualMessage).length
+      visionStage.value = 'checking'
+    }
 
     const visionCapability = getVisionCapability(currentModelSettings)
     const mayUseVision = Boolean(
@@ -1024,9 +1060,19 @@ async function requestAssistantReply(options?: {
 
     visionUsed = mayUseVision
     visionFallback = Boolean(visualMessage) && !mayUseVision
+    if (visualMessage && !mayUseVision) {
+      visionStage.value = 'fallback'
+      noticeMessage.value = '当前模型已标记为不支持图片理解，将根据图片说明继续回应。'
+    }
 
     const buildRecentTurns = (includeVision: boolean): ChatTurn[] => {
-      const turns: ChatTurn[] = messages.value
+      const alternativeIndex = options?.alternativeTargetId
+        ? messages.value.findIndex(item => item.id === options.alternativeTargetId)
+        : -1
+      const promptMessages = alternativeIndex >= 0
+        ? messages.value.slice(0, alternativeIndex)
+        : messages.value
+      const turns: ChatTurn[] = promptMessages
         .filter(message => message.type !== 'system')
         .slice(-settings.recentMessageLimit)
         .map(message => ({
@@ -1054,7 +1100,7 @@ async function requestAssistantReply(options?: {
       signal,
       character: {
         characterName: activeCharacter.name,
-        userName: userProfile.value?.name,
+        userName: persona.name,
         identity: activeCharacter.identity,
         persona: activeCharacter.persona,
         speakingStyle: activeCharacter.speakingStyle,
@@ -1063,23 +1109,40 @@ async function requestAssistantReply(options?: {
         mood: activeCharacter.mood,
         activity: activeCharacter.activity,
         likes: activeCharacter.likes,
-        dislikes: activeCharacter.dislikes
+        dislikes: activeCharacter.dislikes,
+        scenario: activeCharacter.scenario,
+        roleplayMode: settings.roleplayMode,
+        initiative: activeCharacter.initiative,
+        narrationStyle: activeCharacter.narrationStyle,
+        emojiFrequency: activeCharacter.emojiFrequency,
+        questionFrequency: activeCharacter.questionFrequency
       },
       messages: [
         {
           role: 'system',
-          content: buildSystemPrompt(
-            activeCharacter,
-            userProfile.value,
+          content: composeRoleplaySystemPrompt({
+            character: activeCharacter,
+            persona,
+            settings,
             memoryPrompt,
-            settings
-          )
+            relationshipPrompt: relationship.value
+              ? relationshipPrompt(relationship.value)
+              : '',
+            lorebookPrompt: lorebook.prompt,
+            currentSummary: conversationState.value?.summary || '',
+            hasImages: includeVision && Boolean(visualMessage),
+            imageCount: includeVision && visualMessage
+              ? getMessageImageUrls(visualMessage).length
+              : 0,
+            isAlternativeReply: Boolean(options?.alternativeTargetId)
+          })
         },
         ...buildRecentTurns(includeVision)
       ]
     })
 
     let response: ChatResponse
+    let debugTrace: PromptDebugTrace | undefined
     let providerId = provider.id
     let usedModel = currentModelSettings.model
     let fallback = false
@@ -1089,19 +1152,30 @@ async function requestAssistantReply(options?: {
       activeProvider: ModelProvider,
       request: ChatRequest
     ) => {
+      if (!debugTrace && settings.promptDebugEnabled) {
+        const systemPrompt = chatTurnContentText(request.messages[0]?.content || '')
+        const recentMessages = request.messages.slice(1).map(turn => ({ role: turn.role, content: chatTurnContentText(turn.content) }))
+        debugTrace = await savePromptDebugTrace({ conversationId: activeConversation.id, characterId: activeCharacter.id, provider: activeProvider.id, model: request.model, roleplayMode: settings.roleplayMode, personaName: persona.name, systemPrompt, recentMessages, activatedLorebook: lorebook.activated.map(item => ({ id: item.id, title: item.title })), memoryHits: memoryHits.map(item => ({ id: item.id, content: item.content, importance: item.importance })), imageCount: includeVisionCount(request), estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages), protocolEnabled: settings.actionProtocolEnabled })
+      }
       streamSession.provider = activeProvider.id
       streamSession.model = request.model
       streamSession.fallback = fallback
 
-      if (!settings.streamResponse) {
-        return activeProvider.chat(request)
+      if (visualMessage && visionUsed) visionStage.value = 'analyzing'
+
+      if (!useStreaming) {
+        const result = await activeProvider.chat(request)
+        if (visualMessage) visionStage.value = 'replying'
+        return result
       }
 
       return activeProvider.chatStream(
         request,
         {
-          onDelta: chunk =>
-            appendStreamChunk(streamSession, chunk)
+          onDelta: chunk => {
+            if (visualMessage) visionStage.value = 'replying'
+            return appendStreamChunk(streamSession, chunk)
+          }
         }
       )
     }
@@ -1145,7 +1219,9 @@ async function requestAssistantReply(options?: {
           false
         )
         modelSettings.value = currentModelSettings
+        visionStage.value = 'fallback'
         providerNotice = '当前模型不支持图片理解，本次已自动使用自然兜底回应。'
+        noticeMessage.value = providerNotice
       }
     } catch (providerError) {
       if (isAbortError(providerError)) throw providerError
@@ -1164,6 +1240,7 @@ async function requestAssistantReply(options?: {
       fallback = true
       visionUsed = false
       visionFallback = Boolean(visualMessage)
+      if (visualMessage) visionStage.value = 'fallback'
 
       response = await runProvider(
         fallbackProvider,
@@ -1179,37 +1256,36 @@ async function requestAssistantReply(options?: {
         : '真实接口未响应，已使用本地回复。'
     }
 
-    if (settings.streamResponse) {
-      streamSession.provider = providerId
-      streamSession.model = usedModel
-      streamSession.fallback = fallback
-
-      await finishStreamingMessage(
-        streamSession,
-        response.text,
-        settings.multiBubble
-      )
+    const parsedOutput = parseCompanionOutput(response.text)
+    if (!parsedOutput.messages.length) throw new Error('模型没有返回可显示的角色回复。')
+    if (debugTrace) await patchPromptDebugTrace(debugTrace.id, { provider: providerId, model: usedModel, rawOutput: response.text, visibleOutput: parsedOutput.visibleText, actionSummary: parsedOutput.actionSummary, naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(parsedOutput.visibleText)] })
+    if (!options?.alternativeTargetId && parsedOutput.status && conversationState.value) {
+      const statePatch = mergeStatusIntoConversationState(conversationState.value, parsedOutput.status)
+      conversationState.value = await patchConversationState(activeConversation.id, { ...statePatch, lastActionSummary: parsedOutput.actionSummary })
+      const characterPatch: Partial<Character> = { mood: parsedOutput.status.mood || activeCharacter.mood, activity: parsedOutput.status.activity || activeCharacter.activity, updatedAt: new Date().toISOString() }
+      await db.characters.update(activeCharacter.id, characterPatch)
+      character.value = { ...activeCharacter, ...characterPatch }
+    }
+    if (options?.alternativeTargetId) {
+      const target = messages.value.find(item => item.id === options.alternativeTargetId)
+      if (!target) throw new Error('没有找到需要添加候选回复的消息。')
+      const baseAlternatives = target.alternatives?.length ? target.alternatives.slice() : [target.content]
+      const candidate = parsedOutput.visibleText.trim()
+      const alternatives = baseAlternatives.includes(candidate) ? baseAlternatives : [...baseAlternatives, candidate]
+      const activeAlternativeIndex = Math.max(0, alternatives.indexOf(candidate))
+      const patch: Partial<Message> = { content: candidate, alternatives, activeAlternativeIndex, provider: providerId, model: usedModel, fallback, status: 'delivered' }
+      await db.messages.update(target.id, patch)
+      const targetIndex = messages.value.findIndex(item => item.id === target.id)
+      if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], ...patch }
+      noticeMessage.value = `已生成第 ${activeAlternativeIndex + 1} 个候选回复。`
+    } else if (useStreaming) {
+      streamSession.provider = providerId; streamSession.model = usedModel; streamSession.fallback = fallback
+      await finishStreamingMessage(streamSession, parsedOutput, settings.multiBubble)
     } else {
-      if (settings.naturalDelay) {
-        await wait(
-          240 + Math.min(900, response.text.length * 9),
-          signal
-        )
-      }
-
-      const bubbles = splitReplyText(
-        response.text,
-        settings.multiBubble
-      )
-
-      await saveAssistantBubbles({
-        texts: bubbles,
-        provider: providerId,
-        model: usedModel,
-        fallback,
-        type: options?.type,
-        signal
-      })
+      if (settings.naturalDelay) await wait(240 + Math.min(900, parsedOutput.visibleText.length * 9), signal)
+      let actions = parsedOutput.messages
+      if (actions.length === 1 && actions[0].kind === 'text' && !parsedOutput.rawPacket && settings.multiBubble) actions = splitReplyText(actions[0].content, true).map(content => ({ kind: 'text' as const, content }))
+      await saveAssistantActions({ actions, provider: providerId, model: usedModel, fallback, type: options?.type, signal })
     }
 
     await updateUserMessageState(
@@ -1235,7 +1311,7 @@ async function requestAssistantReply(options?: {
       const latestAssistant = [...messages.value]
         .reverse()
         .find(message => message.senderId !== 'user' && message.status === 'delivered')
-      speakText(response.text, latestAssistant?.id ?? '')
+      speakText(parsedOutput.visibleText, latestAssistant?.id ?? '')
     }
   } catch (error) {
     if (isAbortError(error)) {
@@ -1296,13 +1372,15 @@ async function requestAssistantReply(options?: {
     streamingMessageId.value = ''
     clearStreamTimers()
     abortController = undefined
+    visionStage.value = 'idle'
+    visionImageCount.value = 0
   }
 }
 
 async function send() {
   const text = draft.value.trim()
   const images = pendingImages.value.slice()
-  if ((!text && !images.length) || !conversation.value || !character.value || isSending.value || isPreparingImage.value) return
+  if ((!text && !images.length) || failedImages.value.length || !conversation.value || !character.value || isSending.value || isPreparingImage.value) return
   const activeConversation = conversation.value
   const messageId = crypto.randomUUID()
   const now = new Date().toISOString()
@@ -1323,7 +1401,11 @@ async function send() {
       name: image.name,
       width: image.width,
       height: image.height,
-      bytes: image.bytes
+      bytes: image.bytes,
+      originalBytes: image.originalBytes,
+      originalType: image.originalType,
+      outputType: image.outputType,
+      processingMode: image.processingMode
     })),
     imageDataUrl: firstImage?.dataUrl,
     imageName: firstImage?.name,
@@ -1333,6 +1415,8 @@ async function send() {
   }
   draft.value = ''
   pendingImages.value = []
+  failedImages.value = []
+  imageProgress.value = undefined
   replyTarget.value = undefined
   localStorage.removeItem(draftStorageKey(activeConversation.id))
   chatComposerRef.value?.resize()
@@ -1355,6 +1439,10 @@ async function send() {
       })
       await refreshMemoryList()
     }
+    if (images.length) {
+      visionImageCount.value = images.length
+      visionStage.value = 'sent'
+    }
     await requestAssistantReply({ sourceMessageId: messageId, visualMessageId: images.length ? messageId : undefined })
   } catch (error) {
     await updateUserMessageState(messageId, 'failed', {
@@ -1368,7 +1456,8 @@ async function handleImagesSelected(files: File[]) {
   if (isSending.value || isPreparingImage.value || !files.length) return
   if (!confirmImagePrivacy()) return
 
-  const remaining = MAX_CHAT_IMAGES - pendingImages.value.length
+  const occupied = pendingImages.value.length + failedImages.value.length
+  const remaining = MAX_CHAT_IMAGES - occupied
   if (remaining <= 0) {
     noticeMessage.value = `已经达到 ${MAX_CHAT_IMAGES} 张上限。`
     return
@@ -1376,34 +1465,52 @@ async function handleImagesSelected(files: File[]) {
 
   const selected = files.slice(0, remaining)
   isPreparingImage.value = true
-  noticeMessage.value = `正在整理 0 / ${selected.length} 张图片…`
+  imageProgress.value = {
+    completed: 0,
+    total: selected.length,
+    currentName: selected[0]?.name || '图片',
+    status: 'processing'
+  }
 
   try {
     const result = await prepareChatImageBatch(selected, {
       maxCount: remaining,
-      onProgress: (completed, total) => {
-        noticeMessage.value = `正在整理 ${completed} / ${total} 张图片…`
+      onProgress: progress => {
+        imageProgress.value = progress
       }
     })
 
-    const existingKeys = new Set(
-      pendingImages.value.map(image => `${image.name}:${image.originalBytes}:${image.width}x${image.height}`)
-    )
+    const existingKeys = new Set([
+      ...pendingImages.value.map(image => `${image.name}:${image.originalBytes}:${image.originalType}`),
+      ...failedImages.value.map(image => `${image.name}:${image.originalBytes}:${image.originalType}`)
+    ])
+
     const uniquePrepared = result.prepared.filter(image => {
-      const key = `${image.name}:${image.originalBytes}:${image.width}x${image.height}`
+      const key = `${image.name}:${image.originalBytes}:${image.originalType}`
       if (existingKeys.has(key)) return false
       existingKeys.add(key)
       return true
     })
+    const uniqueRejected = result.rejected.filter(image => {
+      const key = `${image.name}:${image.originalBytes}:${image.originalType}`
+      if (existingKeys.has(key)) return false
+      existingKeys.add(key)
+      return true
+    })
+
     pendingImages.value.push(...uniquePrepared)
+    failedImages.value.push(...uniqueRejected)
 
     const skippedByLimit = Math.max(0, files.length - remaining)
-    const duplicateCount = result.prepared.length - uniquePrepared.length
+    const duplicateCount = result.prepared.length + result.rejected.length - uniquePrepared.length - uniqueRejected.length
     const notes: string[] = []
-    if (uniquePrepared.length) notes.push(`已添加 ${uniquePrepared.length} 张`)
-    if (result.rejected.length) notes.push(`${result.rejected.length} 张无法处理`)
-    if (duplicateCount) notes.push(`${duplicateCount} 张重复图片已跳过`)
-    if (skippedByLimit) notes.push(`超过上限的 ${skippedByLimit} 张已跳过`)
+    if (uniquePrepared.length) notes.push(`成功 ${uniquePrepared.length} 张`)
+    if (uniqueRejected.length) {
+      const failedNames = uniqueRejected.slice(0, 2).map(item => item.name).join('、')
+      notes.push(`失败 ${uniqueRejected.length} 张（${failedNames}${uniqueRejected.length > 2 ? '等' : ''}）`)
+    }
+    if (duplicateCount) notes.push(`重复 ${duplicateCount} 张已跳过`)
+    if (skippedByLimit) notes.push(`超出上限 ${skippedByLimit} 张已跳过`)
     noticeMessage.value = notes.join('，') || '没有添加新图片。'
 
     await nextTick()
@@ -1413,6 +1520,7 @@ async function handleImagesSelected(files: File[]) {
     noticeMessage.value = error instanceof Error ? error.message : '图片读取失败。'
   } finally {
     isPreparingImage.value = false
+    imageProgress.value = undefined
   }
 }
 
@@ -1447,7 +1555,7 @@ async function refreshThought() {
       provider: createProvider(currentModel),
       model: currentModel.model,
       character: character.value,
-      profile: userProfile.value,
+      profile: displayUserProfile.value,
       messages: messages.value,
       visibility: chatSettings.value.innerThoughtVisibility
     })
@@ -1466,14 +1574,38 @@ async function refreshThought() {
   }
 }
 
-function openSettings(tab: 'chat' | 'memory' | 'advanced' = 'chat') {
+function openSettings(tab: 'chat' | 'roleplay' | 'memory' | 'advanced' = 'chat') {
   settingsTab.value = tab
   activePanel.value = 'settings'
+}
+
+async function insertCharacterGreeting(greeting: string) {
+  if (!conversation.value || !character.value || !greeting.trim()) return
+  if (messages.value.length && !window.confirm('把这个开场白作为角色的新消息插入当前聊天吗？')) return
+  const now = new Date().toISOString()
+  const message: Message = {
+    id: crypto.randomUUID(),
+    worldId: conversation.value.worldId,
+    conversationId: conversation.value.id,
+    senderId: character.value.id,
+    type: 'text',
+    content: greeting.trim(),
+    status: 'delivered',
+    createdAt: now
+  }
+  await db.transaction('rw', db.messages, db.conversations, async () => {
+    await db.messages.add(message)
+    await db.conversations.update(conversation.value!.id, { updatedAt: now })
+  })
+  messages.value.push(message)
+  activePanel.value = null
+  await scrollToBottom()
 }
 
 async function persistChatSettings() {
   if (!chatSettings.value) return
   await saveChatSettings(chatSettings.value)
+  activePersona.value = await getPersonaForChat(chatSettings.value)
 }
 
 async function addManualMemory() {
@@ -1541,6 +1673,90 @@ async function copySelectedMessage() {
   activePanel.value = null
 }
 
+async function editSelectedMessage() {
+  const message = selectedMessage.value
+  if (!message) return
+  const next = window.prompt('编辑这条消息', message.content)
+  if (next === null) return
+  const content = next.trim()
+  if (!content && message.type !== 'image') return
+  const patch: Partial<Message> = {
+    content,
+    alternatives: message.senderId === 'user' ? undefined : [content],
+    activeAlternativeIndex: message.senderId === 'user' ? undefined : 0,
+    editedAt: new Date().toISOString()
+  }
+  await db.messages.update(message.id, patch)
+  const index = messages.value.findIndex(item => item.id === message.id)
+  if (index >= 0) messages.value[index] = { ...messages.value[index], ...patch }
+  selectedMessage.value = index >= 0 ? messages.value[index] : undefined
+  noticeMessage.value = '消息已编辑。后续回复不会自动重算。'
+  activePanel.value = null
+}
+
+async function continueSelectedReply() {
+  const message = selectedMessage.value
+  if (!message || message.senderId === 'user' || isSending.value) return
+  activePanel.value = null
+  await requestAssistantReply({
+    musicPrompt: '<director_instruction>从上一条角色回复自然继续，不要重复已经说过的内容，也不要解释这条指令。</director_instruction>',
+    type: message.type === 'music' ? 'music' : 'text'
+  })
+}
+
+async function branchFromSelectedMessage() {
+  const message = selectedMessage.value
+  const activeConversation = conversation.value
+  if (!message || !activeConversation) return
+
+  const messageIndex = messages.value.findIndex(item => item.id === message.id)
+  if (messageIndex < 0) return
+
+  const now = new Date().toISOString()
+  const newConversationId = crypto.randomUUID()
+  const idMap = new Map<string, string>()
+  const sourceRows = messages.value.slice(0, messageIndex + 1)
+  for (const row of sourceRows) idMap.set(row.id, crypto.randomUUID())
+
+  const copiedMessages: Message[] = sourceRows.map(row => ({
+    ...row,
+    id: idMap.get(row.id) || crypto.randomUUID(),
+    conversationId: newConversationId,
+    replyGroupId: row.replyGroupId ? `${row.replyGroupId}-${newConversationId}` : undefined,
+    replyTo: row.replyTo
+      ? {
+        ...row.replyTo,
+        messageId: idMap.get(row.replyTo.messageId) || row.replyTo.messageId
+      }
+      : undefined
+  }))
+
+  const branchConversation: Conversation = {
+    ...activeConversation,
+    id: newConversationId,
+    title: `${activeConversation.title} · 分支`,
+    pinned: false,
+    unread: 0,
+    updatedAt: now
+  }
+
+  await db.transaction('rw', db.conversations, db.messages, db.chatSettings, async () => {
+    await db.conversations.add(branchConversation)
+    if (copiedMessages.length) await db.messages.bulkAdd(copiedMessages)
+    if (chatSettings.value) {
+      await db.chatSettings.put({
+        ...chatSettings.value,
+        id: newConversationId,
+        conversationId: newConversationId,
+        updatedAt: now
+      })
+    }
+  })
+
+  activePanel.value = null
+  await router.push(`/chat/${newConversationId}`)
+}
+
 function replyToSelectedMessage() {
   if (!selectedMessage.value) return
   replyTarget.value = selectedMessage.value
@@ -1587,11 +1803,37 @@ async function regenerateSelectedMessage() {
   if (!message || message.senderId === 'user' || isSending.value) return
 
   const source = sourceMessageBefore(message)
+  activePanel.value = null
+
+  if (chatSettings.value?.swipeRepliesEnabled) {
+    await requestAssistantReply({
+      sourceMessageId: source?.id,
+      visualMessageId: source?.type === 'image' ? source.id : undefined,
+      alternativeTargetId: message.id
+    })
+    return
+  }
+
   await deleteSelectedMessage()
   await requestAssistantReply({
     sourceMessageId: source?.id,
     visualMessageId: source?.type === 'image' ? source.id : undefined
   })
+}
+
+async function selectMessageAlternative(message: Message, offset: number) {
+  if (message.senderId === 'user' || !message.alternatives?.length) return
+  const current = message.activeAlternativeIndex ?? 0
+  const next = Math.min(message.alternatives.length - 1, Math.max(0, current + offset))
+  if (next === current) return
+  const content = message.alternatives[next]
+  const patch: Partial<Message> = {
+    content,
+    activeAlternativeIndex: next
+  }
+  await db.messages.update(message.id, patch)
+  const index = messages.value.findIndex(item => item.id === message.id)
+  if (index >= 0) messages.value[index] = { ...messages.value[index], ...patch }
 }
 
 async function retryMessage(message: Message) {
@@ -1881,9 +2123,9 @@ onUnmounted(() => {
         :messages="messages"
         :conversation="conversation"
         :character="character"
-        :user-profile="userProfile"
+        :user-profile="displayUserProfile"
         :is-sending="isSending"
-        :show-typing="chatSettings?.showTyping"
+        :show-typing="Boolean(chatSettings?.showTyping || visionImageCount)"
         :streaming-message-id="streamingMessageId"
         :sending-hint="sendingHint"
         :speech-available="speechPlaybackAvailable"
@@ -1896,6 +2138,7 @@ onUnmounted(() => {
         @toggle-speech="toggleMessageSpeech"
         @stop-speech="stopSpeechPlayback"
         @retry-message="retryMessage"
+        @select-alternative="selectMessageAlternative"
       />
 
       <button
@@ -1912,6 +2155,8 @@ onUnmounted(() => {
         ref="chatComposerRef"
         v-model="draft"
         :pending-images="pendingImages"
+        :failed-images="failedImages"
+        :image-progress="imageProgress"
         :max-images="MAX_CHAT_IMAGES"
         :reply-sender="replyTarget ? messageSenderName(replyTarget) : undefined"
         :reply-preview="replyTarget ? messagePreview(replyTarget, 56) : undefined"
@@ -1925,6 +2170,11 @@ onUnmounted(() => {
         @submit="send"
         @images-selected="handleImagesSelected"
         @remove-image="removePendingImage"
+        @move-image="movePendingImage"
+        @use-original-image="useOriginalPendingImage"
+        @retry-failed-image="retryFailedImage($event)"
+        @use-original-failed-image="retryFailedImage($event, true)"
+        @remove-failed-image="removeFailedImage"
         @clear-images="clearPendingImages"
         @preview-images="previewPendingImages"
         @cancel-reply="cancelReply"
@@ -1993,6 +2243,8 @@ onUnmounted(() => {
           :vision-capability-label="visionCapabilityLabel"
           :model-settings="modelSettings"
           :conversation-state="conversationState"
+          :personas="personas"
+          :greetings="availableGreetings"
           :panel-style="panelStyle"
           @update:tab="settingsTab = $event"
           @update:new-memory-text="newMemoryText = $event"
@@ -2007,6 +2259,11 @@ onUnmounted(() => {
           @clear-memories="clearAllMemories"
           @clear-conversation="clearConversationMessages"
           @open-model-settings="router.push('/settings/models')"
+          @open-personas="router.push('/settings/personas')"
+          @open-lorebook="router.push(`/settings/lorebook?character=${character?.id || ''}`)"
+          @open-character-card="character && router.push(`/characters/${character.id}/card`)"
+          @open-prompt-debug="conversation && router.push(`/chat/${conversation.id}/debug`)"
+          @use-greeting="insertCharacterGreeting"
         />
 
         <ChatActionSheet
@@ -2014,12 +2271,16 @@ onUnmounted(() => {
           :message="selectedMessage"
           :preview="selectedMessage ? messagePreview(selectedMessage, 90) : ''"
           :is-sending="isSending"
+          :swipe-replies-enabled="chatSettings?.swipeRepliesEnabled"
           :panel-style="panelStyle"
           @drag-start="beginPanelDrag"
           @drag-move="movePanelDrag"
           @drag-end="endPanelDrag"
           @reply="replyToSelectedMessage"
           @copy="copySelectedMessage"
+          @edit="editSelectedMessage"
+          @continue-reply="continueSelectedReply"
+          @branch="branchFromSelectedMessage"
           @download-image="downloadSelectedImage"
           @retry="retrySelectedMessage"
           @regenerate="regenerateSelectedMessage"
