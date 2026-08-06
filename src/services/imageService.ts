@@ -51,12 +51,12 @@ export async function prepareChatImage(
   }
 
   if (file.size > 15 * 1024 * 1024) {
-    throw new Error('图片不能超过 15 MB。')
+    throw new Error(`${file.name || '这张图片'}超过 15 MB。`)
   }
 
   const source = await readFileAsDataUrl(file)
   const image = await loadImage(source)
-  const maxSide = 1280
+  const maxSide = 1440
   const scale = Math.min(
     1,
     maxSide / Math.max(image.naturalWidth, image.naturalHeight)
@@ -93,7 +93,7 @@ export async function prepareChatImage(
 
   let quality = 0.86
   let dataUrl = canvasToJpeg(canvas, quality)
-  const targetBytes = 900 * 1024
+  const targetBytes = 760 * 1024
 
   while (
     estimateDataUrlBytes(dataUrl) > targetBytes &&
@@ -136,4 +136,36 @@ export async function prepareChatImages(
 
 export function totalPreparedImageBytes(images: PreparedChatImage[]) {
   return images.reduce((total, image) => total + image.bytes, 0)
+}
+
+
+export interface PreparedImageBatch {
+  prepared: PreparedChatImage[]
+  rejected: Array<{ name: string; reason: string }>
+}
+
+export async function prepareChatImageBatch(
+  files: File[],
+  options?: { maxCount?: number; onProgress?: (completed: number, total: number) => void }
+): Promise<PreparedImageBatch> {
+  const maxCount = options?.maxCount ?? MAX_CHAT_IMAGES
+  const selected = files.slice(0, maxCount)
+  const prepared: PreparedChatImage[] = []
+  const rejected: PreparedImageBatch['rejected'] = []
+
+  for (let index = 0; index < selected.length; index += 1) {
+    const file = selected[index]
+    try {
+      prepared.push(await prepareChatImage(file))
+    } catch (error) {
+      rejected.push({
+        name: file.name || `第 ${index + 1} 张图片`,
+        reason: error instanceof Error ? error.message : '图片处理失败。'
+      })
+    }
+    options?.onProgress?.(index + 1, selected.length)
+    await new Promise<void>(resolve => window.setTimeout(resolve, 0))
+  }
+
+  return { prepared, rejected }
 }

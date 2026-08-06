@@ -27,7 +27,7 @@ import {
 } from '../services/ai/provider'
 import { createProvider } from '../services/ai/providerFactory'
 import { getModelSettings, getVisionCapability, saveVisionCapability } from '../services/modelSettings'
-import { MAX_CHAT_IMAGES, prepareChatImages, type PreparedChatImage } from '../services/imageService'
+import { MAX_CHAT_IMAGES, prepareChatImageBatch, type PreparedChatImage } from '../services/imageService'
 import { getMessageImages, getMessageImageUrls } from '../services/messageImageService'
 import {
   getChatSettings,
@@ -100,8 +100,6 @@ const isPreparingImage = ref(false)
 interface ChatComposerHandle {
   focus: () => void
   resize: () => void
-  openImagePicker: () => void
-  openCameraPicker: () => void
 }
 interface ChatMusicPanelHandle {
   getAudioElement: () => HTMLAudioElement | undefined
@@ -110,6 +108,7 @@ const messageListRef = ref<ChatMessageListHandle>()
 const chatComposerRef = ref<ChatComposerHandle>()
 const musicPanelRef = ref<ChatMusicPanelHandle>()
 let abortController: AbortController | undefined
+let noticeTimer: number | undefined
 let streamPersistTimer: number | undefined
 let streamScrollFrame: number | undefined
 let localAudioObjectUrl = ''
@@ -286,6 +285,21 @@ function openImagePreview(urls: string[], index: number) {
   previewImageIndex.value = Math.min(Math.max(0, index), Math.max(0, urls.length - 1))
 }
 
+function previewPendingImages(index: number) {
+  openImagePreview(pendingImages.value.map(image => image.dataUrl).filter(Boolean), index)
+}
+
+function downloadPreviewImage(url: string, index: number) {
+  if (!url) return
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `chat-image-${Date.now()}-${index + 1}.jpg`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  noticeMessage.value = '图片已开始保存。'
+}
+
 function openMessageMenu(message: Message) {
   selectedMessage.value = message
   activePanel.value = 'message'
@@ -312,16 +326,6 @@ function confirmImagePrivacy() {
   }
 
   return accepted
-}
-
-function openImagePicker() {
-  if (!confirmImagePrivacy()) return
-  chatComposerRef.value?.openImagePicker()
-}
-
-function openCameraPicker() {
-  if (!confirmImagePrivacy()) return
-  chatComposerRef.value?.openCameraPicker()
 }
 
 function removePendingImage(index: number) {
@@ -1362,20 +1366,46 @@ async function send() {
 
 async function handleImagesSelected(files: File[]) {
   if (isSending.value || isPreparingImage.value || !files.length) return
+  if (!confirmImagePrivacy()) return
+
   const remaining = MAX_CHAT_IMAGES - pendingImages.value.length
   if (remaining <= 0) {
-    noticeMessage.value = `一次最多发送 ${MAX_CHAT_IMAGES} 张图片。`
+    noticeMessage.value = `已经达到 ${MAX_CHAT_IMAGES} 张上限。`
     return
   }
+
   const selected = files.slice(0, remaining)
   isPreparingImage.value = true
-  noticeMessage.value = `正在整理 ${selected.length} 张图片…`
+  noticeMessage.value = `正在整理 0 / ${selected.length} 张图片…`
+
   try {
-    const prepared = await prepareChatImages(selected, { maxCount: remaining })
-    pendingImages.value.push(...prepared)
-    noticeMessage.value = files.length > remaining
-      ? `已保留前 ${remaining} 张图片，一次最多发送 ${MAX_CHAT_IMAGES} 张。`
-      : ''
+    const result = await prepareChatImageBatch(selected, {
+      maxCount: remaining,
+      onProgress: (completed, total) => {
+        noticeMessage.value = `正在整理 ${completed} / ${total} 张图片…`
+      }
+    })
+
+    const existingKeys = new Set(
+      pendingImages.value.map(image => `${image.name}:${image.originalBytes}:${image.width}x${image.height}`)
+    )
+    const uniquePrepared = result.prepared.filter(image => {
+      const key = `${image.name}:${image.originalBytes}:${image.width}x${image.height}`
+      if (existingKeys.has(key)) return false
+      existingKeys.add(key)
+      return true
+    })
+    pendingImages.value.push(...uniquePrepared)
+
+    const skippedByLimit = Math.max(0, files.length - remaining)
+    const duplicateCount = result.prepared.length - uniquePrepared.length
+    const notes: string[] = []
+    if (uniquePrepared.length) notes.push(`已添加 ${uniquePrepared.length} 张`)
+    if (result.rejected.length) notes.push(`${result.rejected.length} 张无法处理`)
+    if (duplicateCount) notes.push(`${duplicateCount} 张重复图片已跳过`)
+    if (skippedByLimit) notes.push(`超过上限的 ${skippedByLimit} 张已跳过`)
+    noticeMessage.value = notes.join('，') || '没有添加新图片。'
+
     await nextTick()
     chatComposerRef.value?.focus()
     chatComposerRef.value?.resize()
@@ -1775,6 +1805,19 @@ watch(
   { immediate: true }
 )
 
+watch(noticeMessage, value => {
+  if (noticeTimer !== undefined) {
+    window.clearTimeout(noticeTimer)
+    noticeTimer = undefined
+  }
+  if (!value || value.startsWith('正在')) return
+  const current = value
+  noticeTimer = window.setTimeout(() => {
+    if (noticeMessage.value === current) noticeMessage.value = ''
+    noticeTimer = undefined
+  }, 3200)
+})
+
 watch(draft, value => {
   if (!conversation.value) return
   const key = draftStorageKey(conversation.value.id)
@@ -1786,6 +1829,7 @@ onUnmounted(() => {
   rememberScrollPosition()
   abortController?.abort()
   clearStreamTimers()
+  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer)
   stopSpeechPlayback()
   if (localAudioObjectUrl) URL.revokeObjectURL(localAudioObjectUrl)
 })
@@ -1825,9 +1869,12 @@ onUnmounted(() => {
         <small>点击查看详情</small>
       </button>
 
-      <p v-if="noticeMessage" class="chat-notice">
-        {{ noticeMessage }}
-      </p>
+      <Transition name="chat-notice">
+        <div v-if="noticeMessage" class="chat-notice" role="status" aria-live="polite">
+          <span>{{ noticeMessage }}</span>
+          <button type="button" aria-label="关闭提示" @click="noticeMessage = ''">×</button>
+        </div>
+      </Transition>
 
       <ChatMessageList
         ref="messageListRef"
@@ -1876,11 +1923,10 @@ onUnmounted(() => {
         :is-recognizing="isRecognizingSpeech"
         :recording-seconds="recordingSeconds"
         @submit="send"
-        @request-image="openImagePicker"
-        @request-camera="openCameraPicker"
         @images-selected="handleImagesSelected"
         @remove-image="removePendingImage"
         @clear-images="clearPendingImages"
+        @preview-images="previewPendingImages"
         @cancel-reply="cancelReply"
         @stop="stopGeneration"
         @focus="handleComposerFocus"
@@ -1986,6 +2032,7 @@ onUnmounted(() => {
         :images="previewImages"
         :current-index="previewImageIndex"
         @update:current-index="previewImageIndex = $event"
+        @download="downloadPreviewImage"
         @close="previewImages = []"
       />
     </section>
@@ -2075,8 +2122,7 @@ onUnmounted(() => {
   box-shadow: 0 5px 16px rgba(100,60,78,.06);
 }
 
-.chat-error,
-.chat-notice {
+.chat-error {
   flex: 0 0 auto;
   margin: 10px 14px 0;
   padding: 9px 12px;
@@ -2098,9 +2144,30 @@ onUnmounted(() => {
 }
 
 .chat-notice {
-  background: rgba(255,255,255,.76);
+  position: absolute;
+  z-index: 18;
+  top: 10px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid rgba(196,112,147,.12);
+  border-radius: 14px;
+  background: rgba(255,255,255,.94);
   color: #8a6e79;
+  text-align: center;
+  font-size: 12px;
+  box-shadow: 0 10px 28px rgba(89,56,70,.13);
+  backdrop-filter: blur(16px);
 }
+.chat-notice span{min-width:0;flex:1}
+.chat-notice button{width:27px;height:27px;flex:0 0 auto;padding:0;border:0;border-radius:50%;background:#f4e8ed;color:#8c6475;font-size:18px}
+.chat-notice-enter-active,.chat-notice-leave-active{transition:opacity .2s ease,transform .2s ease}
+.chat-notice-enter-from,.chat-notice-leave-to{opacity:0;transform:translateY(-8px)}
 
 .message-list {
   min-height: 0;
