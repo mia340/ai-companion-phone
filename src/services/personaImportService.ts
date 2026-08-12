@@ -77,6 +77,7 @@ const knownPersonaKeys = new Set([
   'appearance','looks','personality','traits','publicPersona','privatePersona','strengths','weaknesses','interests','likes','habits',
   'lifestyle','background','relationshipNote','relationship','characterKnowledge','knownByCharacter','boundaries','limits','tags','creator',
   'sourceUrl','source_url','source','isDefault','createdAt','updatedAt','extraFields','importFormat','sourceFileName',
+  'personaScope','boundCharacterId','boundCharacterName','sourceUserTemplate','isCardTemplate',
   '姓名','名字','年龄','性别','生日','身高','职业','工作','身份','外貌','五官特征','发型与装扮','体态','性格','性格细化','核心性格',
   '公开表现','工作状态','私下表现','优点','缺点','兴趣','爱好','习惯','生活状态','背景','经历','关系','角色已知','边界','禁忌'
 ])
@@ -140,7 +141,12 @@ function mapGenericPersona(source: Record<string, unknown>, fallbackName = '导�
     tags: stringList(source.tags),
     creator: pickText(source, ['creator', 'author']) || undefined,
     sourceUrl: pickText(source, ['sourceUrl', 'source_url', 'source']) || undefined,
-    extraFields: collectExtras(source)
+    extraFields: collectExtras(source),
+    personaScope: source.personaScope === 'character' ? 'character' : 'global',
+    boundCharacterId: pickText(source, ['boundCharacterId']) || undefined,
+    boundCharacterName: pickText(source, ['boundCharacterName']) || undefined,
+    sourceUserTemplate: pickRichText(source, ['sourceUserTemplate']) || undefined,
+    isCardTemplate: source.isCardTemplate === true
   }
   return patch
 }
@@ -273,6 +279,7 @@ export function parsePersonaText(value: string, sourceName = ''): ImportedPerson
     extractIndentedBlock(raw, ['发型与装扮', '穿着', '装扮'])
   ].filter(Boolean)
   const personalityParts = [
+    extractIndentedBlock(raw, ['性格', '性格细化']),
     extractIndentedBlock(raw, ['核心性格']),
     extractIndentedBlock(raw, ['工作状态']),
     extractIndentedBlock(raw, ['私下表现'])
@@ -352,7 +359,12 @@ export function exportPersonaJson(persona: UserPersona) {
       tags: persona.tags || [],
       creator: persona.creator || '',
       sourceUrl: persona.sourceUrl || '',
-      extraFields: persona.extraFields || {}
+      extraFields: persona.extraFields || {},
+      personaScope: persona.personaScope || 'global',
+      boundCharacterId: persona.boundCharacterId || '',
+      boundCharacterName: persona.boundCharacterName || '',
+      sourceUserTemplate: persona.sourceUserTemplate || '',
+      isCardTemplate: persona.isCardTemplate ?? false
     }
   }, null, 2)
 }

@@ -602,7 +602,7 @@ async function loadConversation(conversationId: string) {
     musicState.value = musicRow
     memories.value = memoryRows
     modelSettings.value = modelRow
-    personas.value = personaRows
+    personas.value = personaRows.filter(item => !item.boundCharacterId || item.boundCharacterId === characterRow?.id)
     activePersona.value = await getPersonaForChat(settingsRow)
     relationship.value = characterRow
       ? await getRelationship(characterRow.id)

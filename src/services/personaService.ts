@@ -1,18 +1,22 @@
 import { db } from '../db/database'
 import { getOrCreateUserProfile } from './userProfile'
 import type { ChatSettings, UserPersona } from '../types/domain'
+import { toPlainStorageValue } from './storageSanitizer'
 
 export async function ensureDefaultPersona(): Promise<UserPersona> {
   const existingDefault = await db.personas
-    .filter((item: UserPersona) => item.isDefault)
+    .filter((item: UserPersona) => item.isDefault && item.personaScope !== 'character')
     .first()
 
   if (existingDefault) return existingDefault
 
-  const existing = await db.personas.orderBy('updatedAt').reverse().first()
-  if (existing) {
-    await db.personas.update(existing.id, { isDefault: true })
-    return { ...existing, isDefault: true }
+  const existing = await db.personas
+    .filter((item: UserPersona) => item.personaScope !== 'character')
+    .toArray()
+  const latestGlobal = existing.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+  if (latestGlobal) {
+    await db.personas.update(latestGlobal.id, { isDefault: true })
+    return { ...latestGlobal, isDefault: true }
   }
 
   const profile = await getOrCreateUserProfile()
@@ -27,6 +31,7 @@ export async function ensureDefaultPersona(): Promise<UserPersona> {
     relationshipNote: '请让角色根据既有关系自然认识我，不要替我决定动作、想法或感受。',
     characterKnowledge: '',
     boundaries: '不要替用户说话，不要擅自决定用户的行为、心理和选择。',
+    personaScope: 'global',
     isDefault: true,
     createdAt: now,
     updatedAt: now
@@ -93,10 +98,20 @@ export async function savePersona(
     sourceFileName: clean(input.sourceFileName),
     importFormat: input.importFormat || existing?.importFormat,
     extraFields: input.extraFields || existing?.extraFields,
-    isDefault: input.isDefault ?? existing?.isDefault ?? false,
+    personaScope: input.personaScope || existing?.personaScope || 'global',
+    boundCharacterId: clean(input.boundCharacterId) || existing?.boundCharacterId,
+    boundCharacterName: clean(input.boundCharacterName) || existing?.boundCharacterName,
+    sourceUserTemplate: clean(input.sourceUserTemplate) || existing?.sourceUserTemplate,
+    isCardTemplate: input.isCardTemplate ?? existing?.isCardTemplate ?? false,
+    isDefault: (input.personaScope || existing?.personaScope) === 'character'
+      ? false
+      : (input.isDefault ?? existing?.isDefault ?? false),
     createdAt: existing?.createdAt || now,
     updatedAt: now
   }
+
+  // 导入预览可能保留 reactive/Proxy 的 extraFields 或 tags，统一去代理后再落库。
+  const storablePersona = toPlainStorageValue(persona)
 
   await db.transaction('rw', db.personas, async () => {
     if (persona.isDefault) {
@@ -107,18 +122,25 @@ export async function savePersona(
         }
       }
     }
-    await db.personas.put(persona)
+    await db.personas.put(storablePersona)
   })
 
-  if (!(await db.personas.filter((item: UserPersona) => item.isDefault).count())) {
-    await db.personas.update(persona.id, { isDefault: true })
-    persona.isDefault = true
+  const globalDefaultCount = await db.personas
+    .filter((item: UserPersona) => item.isDefault && item.personaScope !== 'character')
+    .count()
+  if (!globalDefaultCount && storablePersona.personaScope !== 'character') {
+    await db.personas.update(storablePersona.id, { isDefault: true })
+    storablePersona.isDefault = true
   }
 
-  return persona
+  return storablePersona
 }
 
 export async function setDefaultPersona(id: string): Promise<void> {
+  const target = await db.personas.get(id)
+  if (!target || target.personaScope === 'character') {
+    throw new Error('角色专属 Persona 不能设为全局默认。')
+  }
   const rows = await db.personas.toArray()
   await db.transaction('rw', db.personas, async () => {
     for (const row of rows) {
@@ -150,6 +172,29 @@ export async function deletePersona(id: string): Promise<void> {
   }
 }
 
+export async function listPersonasForCharacter(characterId: string): Promise<UserPersona[]> {
+  const rows = await listPersonas()
+  return rows.filter(item => !item.boundCharacterId || item.boundCharacterId === characterId)
+}
+
+export async function bindPersonaToCharacterChats(characterId: string, personaId: string): Promise<number> {
+  const conversations = await db.conversations
+    .filter(item => item.type === 'single' && item.memberIds.includes(characterId))
+    .toArray()
+
+  for (const conversation of conversations) {
+    const existing = await db.chatSettings.get(conversation.id)
+    if (existing) {
+      await db.chatSettings.update(existing.id, {
+        personaId,
+        updatedAt: new Date().toISOString()
+      })
+    }
+  }
+
+  return conversations.length
+}
+
 export function buildPersonaPrompt(persona: UserPersona): string {
   const basic = [
     persona.title ? `用户人设标题：${persona.title}` : '',
@@ -172,11 +217,18 @@ export function buildPersonaPrompt(persona: UserPersona): string {
     persona.lifestyle ? `用户生活状态：${persona.lifestyle}` : '',
     persona.background ? `用户背景：${persona.background}` : ''
   ].filter(Boolean)
-  const rawDescription = !detail.length && persona.description
-    ? `用户人设描述：${persona.description}`
+  const rawDescription = persona.description
+    ? persona.isCardTemplate
+      ? `角色卡自带 {{user}} 模板原文：${persona.description}`
+      : !detail.length
+        ? `用户人设描述：${persona.description}`
+        : ''
     : ''
   return [
     `用户使用的人设名：${persona.name}`,
+    persona.personaScope === 'character' && persona.boundCharacterName
+      ? `这是“${persona.boundCharacterName}”角色卡专属 Persona，只在该角色相关聊天中作为用户身份使用。`
+      : '',
     ...basic,
     ...detail,
     rawDescription,

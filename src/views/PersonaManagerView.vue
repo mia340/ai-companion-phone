@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, shallowRef } from 'vue'
 import PhoneFrame from '../components/PhoneFrame.vue'
 import {
   deletePersona,
@@ -16,9 +16,10 @@ import type { PersonaImportFormat, UserPersona } from '../types/domain'
 
 const personas = ref<UserPersona[]>([])
 const editingId = ref('')
+const editingPersonaScope = ref<'global' | 'character'>('global')
 const message = ref('')
 const importInput = ref<HTMLInputElement | null>(null)
-const importPreview = ref<ImportedPersonaPreview | null>(null)
+const importPreview = shallowRef<ImportedPersonaPreview | null>(null)
 const importFileName = ref('')
 const preservedExtra = ref<Record<string, unknown> | undefined>()
 const preservedImportFormat = ref<PersonaImportFormat | undefined>()
@@ -56,6 +57,7 @@ const form = reactive({
 
 function resetForm() {
   editingId.value = ''
+  editingPersonaScope.value = 'global'
   Object.assign(form, {
     name: '', avatar: '🧑', title: '', description: '', identity: '', age: '', gender: '', birthday: '', height: '', occupation: '',
     appearance: '', personality: '', publicPersona: '', privatePersona: '', strengths: '', weaknesses: '', interests: '', habits: '', lifestyle: '',
@@ -69,6 +71,7 @@ function resetForm() {
 
 function edit(persona: UserPersona) {
   editingId.value = persona.id
+  editingPersonaScope.value = persona.personaScope || 'global'
   Object.assign(form, {
     name: persona.name,
     avatar: persona.avatar,
@@ -339,7 +342,8 @@ onMounted(refresh)
         <label>角色已经知道的事<textarea v-model="form.characterKnowledge" rows="3" placeholder="明确允许角色长期知道的信息" /></label>
         <label>边界<textarea v-model="form.boundaries" rows="3" /></label>
         <p class="truth-tip">未填写的用户习惯、偏好、经历和现实信息一律视为未知。角色不能为了显得熟悉而自行补全。</p>
-        <label class="default-switch"><input v-model="form.isDefault" type="checkbox" />设为默认人设</label>
+        <label v-if="editingPersonaScope !== 'character'" class="default-switch"><input v-model="form.isDefault" type="checkbox" />设为默认人设</label>
+        <p v-else class="truth-tip">这是角色专属 Persona，只会用于绑定的角色，不能设为全局默认。</p>
         <button class="primary" type="submit">{{ editingId ? '保存修改' : '创建人设' }}</button>
       </form>
 
@@ -349,15 +353,23 @@ onMounted(refresh)
         <article v-for="persona in personas" :key="persona.id" class="persona-card">
           <div class="persona-avatar">{{ persona.avatar }}</div>
           <div class="persona-copy">
-            <div><b>{{ persona.name }}</b><span v-if="persona.isDefault">默认</span></div>
-            <small>{{ persona.identity || persona.occupation || '未填写身份' }}</small>
+            <div>
+              <b>{{ persona.name }}</b>
+              <span v-if="persona.isDefault">默认</span>
+              <span v-if="persona.personaScope === 'character'">角色专属</span>
+            </div>
+            <small>
+              {{ persona.personaScope === 'character' && persona.boundCharacterName
+                ? `仅用于 ${persona.boundCharacterName}`
+                : (persona.identity || persona.occupation || '未填写身份') }}
+            </small>
             <p>{{ persona.personality || persona.description || persona.background || '还没有详细描述。' }}</p>
             <small v-if="persona.importFormat">导入：{{ persona.importFormat }}<template v-if="persona.sourceFileName"> · {{ persona.sourceFileName }}</template></small>
           </div>
           <div class="card-actions">
             <button type="button" @click="edit(persona)">编辑</button>
             <button type="button" @click="downloadPersona(persona)">导出 JSON</button>
-            <button v-if="!persona.isDefault" type="button" @click="makeDefault(persona.id)">设为默认</button>
+            <button v-if="!persona.isDefault && persona.personaScope !== 'character'" type="button" @click="makeDefault(persona.id)">设为默认</button>
             <button class="danger" type="button" @click="remove(persona)">删除</button>
           </div>
         </article>

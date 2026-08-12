@@ -78,6 +78,8 @@ export interface Character {
   license?: string
   allowDerivative?: boolean
   importFormat?: 'native' | 'sillytavern-v2' | 'sillytavern-v3' | 'legacy-json'
+  embeddedUserTemplate?: string
+  embeddedUserPersonaId?: UUID
 
   groups: UUID[]
   replySpeed: 'instant' | 'natural' | 'slow' | 'custom'
@@ -139,6 +141,11 @@ export interface UserPersona {
   sourceFileName?: string
   importFormat?: PersonaImportFormat
   extraFields?: Record<string, unknown>
+  personaScope?: 'global' | 'character'
+  boundCharacterId?: UUID
+  boundCharacterName?: string
+  sourceUserTemplate?: string
+  isCardTemplate?: boolean
   isDefault: boolean
   createdAt: string
   updatedAt: string

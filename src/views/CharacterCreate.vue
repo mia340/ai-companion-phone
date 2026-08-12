@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import PhoneFrame from '../components/PhoneFrame.vue'
 import { db } from '../db/database'
 import { DEFAULT_WORLD_ID } from '../db/seed'
-import { parseExampleDialogues } from '../services/characterCardService'
-import type { Character } from '../types/domain'
+import { parseExampleDialogues, serializeExampleDialogues } from '../services/characterCardService'
+import { parseCharacterCardFile, type ImportedCharacterCard } from '../services/characterCardImportService'
+import { toPlainStorageValue } from '../services/storageSanitizer'
+import { createDefaultChatSettings } from '../services/chatSettings'
+import type { Character, UserPersona } from '../types/domain'
 
 type CharacterGender = NonNullable<Character['gender']>
 
@@ -48,6 +51,14 @@ const exampleDialoguesText = ref('')
 // 整段导入
 const importText = ref('')
 const parseMessage = ref('')
+
+// JSON 角色卡导入：在创建前直接读取，不再需要先建立空角色。
+const importedCard = shallowRef<ImportedCharacterCard>()
+const importedCardFileName = ref('')
+const cardImportMessage = ref('')
+const isImportingCard = ref(false)
+const createEmbeddedUserPersona = ref(true)
+const embeddedPersonaName = ref('')
 
 // 页面状态
 const isSaving = ref(false)
@@ -216,6 +227,64 @@ function appendText(original: string, addition: string) {
   }
 
   return `${trimmedOriginal}\n${addition}`
+}
+
+function applyImportedCardToForm(imported: ImportedCharacterCard) {
+  const patch = imported.patch
+  if (patch.name?.trim()) name.value = patch.name.trim()
+  if (patch.nickname?.trim()) nickname.value = patch.nickname.trim()
+  if (patch.identity?.trim()) identity.value = patch.identity.trim()
+  if (patch.persona?.trim()) persona.value = patch.persona.trim()
+  if (patch.speakingStyle?.trim()) speakingStyle.value = patch.speakingStyle.trim()
+  if (patch.background?.trim()) background.value = patch.background.trim()
+  if (patch.relationship?.trim()) relationship.value = patch.relationship.trim()
+  if (patch.scenario?.trim()) scenario.value = patch.scenario.trim()
+  if (patch.firstMessage?.trim()) firstMessage.value = patch.firstMessage.trim()
+  if (patch.exampleDialogues?.length) exampleDialoguesText.value = serializeExampleDialogues(patch.exampleDialogues)
+  if (patch.likes?.length) likesText.value = patch.likes.join('、')
+  if (patch.dislikes?.length) dislikesText.value = patch.dislikes.join('、')
+  if (typeof patch.age === 'number') age.value = String(patch.age)
+  if (patch.gender) gender.value = patch.gender
+}
+
+async function handleCharacterCardImport(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || isImportingCard.value) return
+
+  errorMessage.value = ''
+  parseMessage.value = ''
+  cardImportMessage.value = ''
+  isImportingCard.value = true
+
+  try {
+    const imported = await parseCharacterCardFile(file)
+    importedCard.value = imported
+    importedCardFileName.value = file.name
+    applyImportedCardToForm(imported)
+    createEmbeddedUserPersona.value = Boolean(imported.embeddedUser)
+    embeddedPersonaName.value = imported.embeddedUser?.patch.name || `${imported.patch.name || '角色'} · 原卡用户`
+    cardImportMessage.value = [
+      `已识别 ${imported.format}：${imported.patch.name || file.name}。`,
+      `备用开场 ${imported.patch.alternateGreetings?.length || 0} 条，示例对话 ${imported.patch.exampleDialogues?.length || 0} 组，内嵌世界书 ${imported.lorebookEntries.length} 条。`,
+      ...imported.notes
+    ].join(' ')
+  } catch (error) {
+    importedCard.value = undefined
+    importedCardFileName.value = ''
+    cardImportMessage.value = error instanceof Error ? error.message : '角色卡导入失败。'
+  } finally {
+    isImportingCard.value = false
+  }
+}
+
+function clearImportedCardReference() {
+  importedCard.value = undefined
+  importedCardFileName.value = ''
+  cardImportMessage.value = ''
+  createEmbeddedUserPersona.value = true
+  embeddedPersonaName.value = ''
 }
 
 function parseImportedCharacter() {
@@ -506,14 +575,30 @@ async function save() {
     const now = new Date().toISOString()
     const characterId = crypto.randomUUID()
     const conversationId = crypto.randomUUID()
+    // importedCard 可能来自 Vue 响应式状态。保存前强制转成纯 JSON 数据，
+    // 避免 IndexedDB structured clone 遇到 Proxy 数组时抛出 DataCloneError。
+    const importedSnapshot = importedCard.value
+      ? toPlainStorageValue(importedCard.value)
+      : undefined
+    const importedPatch = importedSnapshot?.patch || {}
+    const importedLorebook = importedSnapshot?.lorebookEntries || []
+    const embeddedUser = importedSnapshot?.embeddedUser
+    const shouldCreateEmbeddedPersona = Boolean(createEmbeddedUserPersona.value && embeddedUser)
+    const embeddedPersonaId = shouldCreateEmbeddedPersona ? crypto.randomUUID() : undefined
+    const parsedExamples = parseExampleDialogues(exampleDialoguesText.value)
 
     await db.transaction(
       'rw',
-      db.characters,
-      db.conversations,
-      db.messages,
+      [
+        db.characters,
+        db.conversations,
+        db.messages,
+        db.lorebookEntries,
+        db.personas,
+        db.chatSettings
+      ],
       async () => {
-        await db.characters.add({
+        await db.characters.add(toPlainStorageValue({
           id: characterId,
           worldId: DEFAULT_WORLD_ID,
 
@@ -533,27 +618,46 @@ async function save() {
 
           persona:
             persona.value.trim() ||
+            importedPatch.persona?.trim() ||
             '等待你逐渐了解的原创角色。',
 
           speakingStyle:
-            speakingStyle.value.trim() || undefined,
+            speakingStyle.value.trim() || importedPatch.speakingStyle || undefined,
 
           background:
-            background.value.trim() || undefined,
+            background.value.trim() || importedPatch.background || undefined,
 
-          likes: parseList(likesText.value),
-          dislikes: parseList(dislikesText.value),
+          likes: parseList(likesText.value).length ? parseList(likesText.value) : (importedPatch.likes || []),
+          dislikes: parseList(dislikesText.value).length ? parseList(dislikesText.value) : (importedPatch.dislikes || []),
 
           relationship: relationship.value,
-          scenario: scenario.value.trim() || undefined,
-          firstMessage: firstMessage.value.trim() || undefined,
-          alternateGreetings: [],
-          exampleDialogues: parseExampleDialogues(exampleDialoguesText.value),
-          initiative: 'natural',
-          narrationStyle: 'light',
-          emojiFrequency: 'low',
-          questionFrequency: 'natural',
+          scenario: scenario.value.trim() || importedPatch.scenario || undefined,
+          firstMessage: firstMessage.value.trim() || importedPatch.firstMessage || undefined,
+          alternateGreetings: importedPatch.alternateGreetings || [],
+          exampleDialogues: parsedExamples.length ? parsedExamples : (importedPatch.exampleDialogues || []),
+          appearance: importedPatch.appearance,
+          values: importedPatch.values,
+          habits: importedPatch.habits,
+          weaknesses: importedPatch.weaknesses,
+          secrets: importedPatch.secrets,
+          boundaries: importedPatch.boundaries,
+          creatorNotes: importedPatch.creatorNotes,
+          systemPrompt: importedPatch.systemPrompt,
+          postHistoryInstructions: importedPatch.postHistoryInstructions,
+          initiative: importedPatch.initiative || 'natural',
+          narrationStyle: importedPatch.narrationStyle || 'light',
+          emojiFrequency: importedPatch.emojiFrequency || 'low',
+          questionFrequency: importedPatch.questionFrequency || 'natural',
+          tags: importedPatch.tags || [],
           cardVersion: 2,
+          creator: importedPatch.creator,
+          resourceVersion: importedPatch.resourceVersion,
+          sourceUrl: importedPatch.sourceUrl,
+          license: importedPatch.license,
+          allowDerivative: importedPatch.allowDerivative,
+          importFormat: importedPatch.importFormat || 'native',
+          embeddedUserTemplate: embeddedUser?.rawTemplate || importedPatch.embeddedUserTemplate,
+          embeddedUserPersonaId: embeddedPersonaId,
           mood: '期待认识你',
           activity: '刚刚来到这个世界',
 
@@ -562,7 +666,7 @@ async function save() {
 
           createdAt: now,
           updatedAt: now
-        })
+        }))
 
         await db.conversations.add({
           id: conversationId,
@@ -576,17 +680,89 @@ async function save() {
           updatedAt: now
         })
 
-        if (firstMessage.value.trim()) {
+        if (shouldCreateEmbeddedPersona && embeddedUser && embeddedPersonaId) {
+          const patch = embeddedUser.patch
+          const embeddedPersona: UserPersona = {
+            id: embeddedPersonaId,
+            name: embeddedPersonaName.value.trim() || patch.name || `${trimmedName} · 原卡用户`,
+            avatar: patch.avatar || '🧑',
+            title: patch.title || `${trimmedName}角色卡自带 {{user}}`,
+            description: patch.description,
+            identity: patch.identity,
+            age: patch.age,
+            gender: patch.gender,
+            birthday: patch.birthday,
+            height: patch.height,
+            occupation: patch.occupation,
+            appearance: patch.appearance,
+            personality: patch.personality,
+            publicPersona: patch.publicPersona,
+            privatePersona: patch.privatePersona,
+            strengths: patch.strengths,
+            weaknesses: patch.weaknesses,
+            interests: patch.interests,
+            habits: patch.habits,
+            lifestyle: patch.lifestyle,
+            background: patch.background,
+            relationshipNote: patch.relationshipNote,
+            characterKnowledge: patch.characterKnowledge,
+            boundaries: patch.boundaries || '不要替用户说话，不要擅自决定用户的行为、心理和选择。',
+            tags: patch.tags || [],
+            creator: patch.creator,
+            sourceUrl: patch.sourceUrl,
+            sourceFileName: importedCardFileName.value || undefined,
+            importFormat: embeddedUser.format,
+            extraFields: patch.extraFields,
+            personaScope: 'character',
+            boundCharacterId: characterId,
+            boundCharacterName: trimmedName,
+            sourceUserTemplate: embeddedUser.rawTemplate,
+            isCardTemplate: true,
+            isDefault: false,
+            createdAt: now,
+            updatedAt: now
+          }
+          await db.personas.add(toPlainStorageValue(embeddedPersona))
+          await db.chatSettings.add(toPlainStorageValue({
+            ...createDefaultChatSettings(conversationId),
+            personaId: embeddedPersonaId,
+            updatedAt: now
+          }))
+        }
+
+        const openingMessage = firstMessage.value.trim() || importedPatch.firstMessage?.trim() || ''
+
+        if (openingMessage) {
           await db.messages.add({
             id: crypto.randomUUID(),
             worldId: DEFAULT_WORLD_ID,
             conversationId,
             senderId: characterId,
             type: 'text',
-            content: firstMessage.value.trim(),
+            content: openingMessage,
             status: 'delivered',
             createdAt: now
           })
+        }
+
+
+        if (importedLorebook.length) {
+          await db.lorebookEntries.bulkAdd(
+            toPlainStorageValue(importedLorebook.map((entry, index) => ({
+              id: crypto.randomUUID(),
+              worldId: DEFAULT_WORLD_ID,
+              characterId,
+              title: entry.title,
+              keywords: entry.keywords,
+              content: entry.content,
+              enabled: entry.enabled,
+              constant: entry.constant,
+              caseSensitive: entry.caseSensitive,
+              priority: entry.priority || (100 - index),
+              createdAt: now,
+              updatedAt: now
+            })))
+          )
         }
       }
     )
@@ -614,6 +790,78 @@ async function save() {
       class="form-page character-create-page"
       @submit.prevent="save"
     >
+      <section class="creation-card character-card-import">
+        <div class="import-title-row">
+          <div>
+            <h3>直接导入角色卡</h3>
+            <p class="section-description">
+              支持 SillyTavern / Tavo V2、V3 JSON。无需先创建空角色，选择文件后会直接填入下方表单。
+            </p>
+          </div>
+          <span class="format-badge">JSON</span>
+        </div>
+
+        <div class="card-import-actions">
+          <label class="card-import-button">
+            {{ isImportingCard ? '正在读取…' : '选择角色卡 JSON' }}
+            <input
+              class="visually-hidden-file"
+              type="file"
+              accept="application/json,.json"
+              :disabled="isImportingCard"
+              @change="handleCharacterCardImport"
+            />
+          </label>
+
+          <button
+            v-if="importedCard"
+            class="secondary-button"
+            type="button"
+            :disabled="isSaving"
+            @click="save"
+          >
+            直接创建这个角色
+          </button>
+        </div>
+
+        <div v-if="importedCard" class="card-import-preview">
+          <div>
+            <strong>{{ importedCard.patch.name || '未命名角色' }}</strong>
+            <span>{{ importedCard.format }}</span>
+          </div>
+          <p>{{ importedCardFileName }}</p>
+          <p>备用开场 {{ importedCard.patch.alternateGreetings?.length || 0 }} 条 · 示例对话 {{ importedCard.patch.exampleDialogues?.length || 0 }} 组 · 内嵌世界书 {{ importedCard.lorebookEntries.length }} 条</p>
+
+          <div v-if="importedCard.embeddedUser" class="embedded-user-card">
+            <div class="embedded-user-title">
+              <div>
+                <b>检测到角色卡自带 <span v-pre>{{user}}</span></b>
+                <small>可以直接建立为这个角色专属的用户 Persona，并自动绑定新聊天。</small>
+              </div>
+              <label class="embedded-user-switch">
+                <input v-model="createEmbeddedUserPersona" type="checkbox" />
+                使用
+              </label>
+            </div>
+            <template v-if="createEmbeddedUserPersona">
+              <label class="embedded-persona-name">
+                Persona 名称
+                <input v-model="embeddedPersonaName" maxlength="60" />
+              </label>
+              <details>
+                <summary>查看角色卡自带的用户人设</summary>
+                <pre>{{ importedCard.embeddedUser.rawTemplate }}</pre>
+              </details>
+              <p>创建后可在“我的资料 → Persona”以及“聊天设置 → 角色扮演 → 我的 Persona”中查看和切换。</p>
+            </template>
+          </div>
+
+          <button class="text-button" type="button" @click="clearImportedCardReference">取消本次角色卡关联</button>
+        </div>
+
+        <p v-if="cardImportMessage" class="message-box">{{ cardImportMessage }}</p>
+      </section>
+
       <section class="creation-card">
         <h3>快速导入人物设定</h3>
 
@@ -946,6 +1194,28 @@ async function save() {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.42);
 }
+
+.character-card-import { display: grid; gap: 10px; }
+.import-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.format-badge { flex: 0 0 auto; padding: 5px 9px; border-radius: 999px; background: rgba(217,111,155,.12); color: #b8567f; font-size: 11px; font-weight: 800; }
+.card-import-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 9px; }
+.card-import-button { display: flex; align-items: center; justify-content: center; min-height: 42px; border-radius: 13px; background: #d96f9b; color: white; font-weight: 800; cursor: pointer; }
+.visually-hidden-file { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.card-import-preview { padding: 11px 12px; border: 1px solid rgba(217,111,155,.18); border-radius: 14px; background: rgba(255,248,251,.82); }
+.card-import-preview > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card-import-preview span, .card-import-preview p { color: #9b7183; font-size: 12px; }
+.card-import-preview p { margin: 5px 0 0; }
+.embedded-user-card { margin-top: 10px; padding: 11px; border-radius: 13px; background: rgba(217,111,155,.08); display: grid; gap: 9px; }
+.embedded-user-title { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.embedded-user-title > div { display: grid; gap: 3px; }
+.embedded-user-title small { color: #9b7183; line-height: 1.45; }
+.embedded-user-switch { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; font-weight: 800; color: #b8567f; }
+.embedded-persona-name { display: grid; gap: 5px; font-size: 12px; color: #8e6577; }
+.embedded-persona-name input { min-height: 38px; border: 1px solid rgba(217,111,155,.18); border-radius: 11px; padding: 0 10px; background: rgba(255,255,255,.86); }
+.embedded-user-card details { border-top: 1px solid rgba(217,111,155,.12); padding-top: 8px; }
+.embedded-user-card summary { cursor: pointer; color: #b8567f; font-weight: 800; font-size: 12px; }
+.embedded-user-card pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; font: inherit; font-size: 12px; line-height: 1.55; color: #634b56; }
+@media (max-width: 390px) { .card-import-actions { grid-template-columns: 1fr; } }
 
 .creation-card h3 {
   margin: 0 0 6px;

@@ -240,7 +240,7 @@ const emit = defineEmits<{
         <select v-model="chatSettings.personaId" @change="emit('persist')">
           <option value="">使用默认人设</option>
           <option v-for="persona in personas" :key="persona.id" :value="persona.id">
-            {{ persona.name }}{{ persona.isDefault ? ' · 默认' : '' }}
+            {{ persona.name }}{{ persona.isDefault ? ' · 默认' : '' }}{{ persona.personaScope === 'character' ? ` · ${persona.boundCharacterName || '角色专属'}` : '' }}
           </option>
         </select>
       </label>

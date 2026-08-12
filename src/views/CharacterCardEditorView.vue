@@ -8,7 +8,14 @@ import {
   parseExampleDialogues,
   serializeExampleDialogues
 } from '../services/characterCardService'
-import { exportCharacterAsSillyTavernV2, parseCharacterCardFile } from '../services/characterCardImportService'
+import {
+  parseEmbeddedUserPersonaTemplate,
+  exportCharacterAsSillyTavernV2,
+  extractEmbeddedUserTemplate,
+  parseCharacterCardFile
+} from '../services/characterCardImportService'
+import { savePersona } from '../services/personaService'
+import { getChatSettings, saveChatSettings } from '../services/chatSettings'
 import type {
   Character,
   EmojiFrequency,
@@ -51,6 +58,14 @@ const form = reactive({
   license: '',
   allowDerivative: false
 })
+
+const embeddedUserPreview = computed(() => {
+  if (!character.value) return undefined
+  const raw = character.value.embeddedUserTemplate || extractEmbeddedUserTemplate(character.value.persona || '')
+  return parseEmbeddedUserPersonaTemplate(raw, character.value.name)
+})
+
+const embeddedPersonaMessage = ref('')
 
 const completeness = computed(() => {
   const values = [
@@ -161,12 +176,81 @@ async function importCard(event: Event) {
   if (!file || !character.value) return
   try {
     const imported = await parseCharacterCardFile(file)
-    if (!window.confirm(`识别为 ${imported.format}。导入会覆盖当前角色卡中同名字段，但保留聊天记录。继续吗？`)) return
+    const lorebookHint = imported.lorebookEntries.length
+      ? `，并导入 ${imported.lorebookEntries.length} 条内嵌角色世界书`
+      : ''
+    if (!window.confirm(`识别为 ${imported.format}。导入会覆盖当前角色卡中同名字段${lorebookHint}，但保留聊天记录。继续吗？`)) return
     await updateCharacterAndConversation(character.value.id, imported.patch)
+
+    if (imported.lorebookEntries.length) {
+      const existing = await db.lorebookEntries.where('characterId').equals(character.value.id).toArray()
+      const signatures = new Set(existing.map(item => `${item.title}\n${item.content}`))
+      const now = new Date().toISOString()
+      const additions = imported.lorebookEntries
+        .filter(item => !signatures.has(`${item.title}\n${item.content}`))
+        .map((item, index) => ({
+          id: crypto.randomUUID(),
+          worldId: character.value!.worldId,
+          characterId: character.value!.id,
+          title: item.title,
+          keywords: item.keywords,
+          content: item.content,
+          enabled: item.enabled,
+          constant: item.constant,
+          caseSensitive: item.caseSensitive,
+          priority: item.priority || (100 - index),
+          createdAt: now,
+          updatedAt: now
+        }))
+      if (additions.length) await db.lorebookEntries.bulkAdd(additions)
+    }
+
     await load()
     message.value = [`已导入 ${file.name}。`, ...imported.notes].join(' ')
   } catch (error) {
     message.value = error instanceof Error ? error.message : '角色卡导入失败。'
+  }
+}
+
+async function createOrUpdateEmbeddedPersona() {
+  if (!character.value || !embeddedUserPreview.value) return
+  embeddedPersonaMessage.value = ''
+  try {
+    const preview = embeddedUserPreview.value
+    const existing = character.value.embeddedUserPersonaId
+      ? await db.personas.get(character.value.embeddedUserPersonaId)
+      : undefined
+    const persona = await savePersona({
+      ...preview.patch,
+      id: existing?.id,
+      name: existing?.name || preview.patch.name || `${character.value.name} · 原卡用户`,
+      avatar: existing?.avatar || preview.patch.avatar || '🧑',
+      personaScope: 'character',
+      boundCharacterId: character.value.id,
+      boundCharacterName: character.value.name,
+      sourceUserTemplate: preview.rawTemplate,
+      isCardTemplate: true,
+      isDefault: false
+    })
+
+    await db.characters.update(character.value.id, {
+      embeddedUserTemplate: preview.rawTemplate,
+      embeddedUserPersonaId: persona.id,
+      updatedAt: new Date().toISOString()
+    })
+
+    const conversations = await db.conversations
+      .filter(item => item.type === 'single' && item.memberIds.includes(character.value!.id))
+      .toArray()
+    for (const conversation of conversations) {
+      const settings = await getChatSettings(conversation.id)
+      await saveChatSettings({ ...settings, personaId: persona.id })
+    }
+
+    await load()
+    embeddedPersonaMessage.value = `已创建并绑定“${persona.name}”。`
+  } catch (error) {
+    embeddedPersonaMessage.value = error instanceof Error ? error.message : '创建角色专属 Persona 失败。'
   }
 }
 
@@ -203,6 +287,27 @@ function exportCard() {
           <input ref="cardFileInput" type="file" accept="application/json,.json" @change="importCard" />
           <div class="import-actions"><button type="button" @click="cardFileInput?.click()">导入角色卡 JSON</button><button type="button" @click="exportCard">导出为 V2 JSON</button></div>
           <p>PNG 角色卡中嵌入数据的读取暂未开放；请先在酒馆中导出 JSON。</p>
+        </section>
+
+        <section v-if="embeddedUserPreview" class="embedded-user-section">
+          <div class="embedded-head">
+            <div>
+              <b>角色卡自带 <span v-pre>{{user}}</span></b>
+              <small>这是角色作者预设的“你”。可以查看原文，也可以生成角色专属 Persona。</small>
+            </div>
+            <span>USER</span>
+          </div>
+          <details>
+            <summary>查看完整用户模板</summary>
+            <pre>{{ embeddedUserPreview.rawTemplate }}</pre>
+          </details>
+          <div class="embedded-actions">
+            <button type="button" @click="createOrUpdateEmbeddedPersona">
+              {{ character.embeddedUserPersonaId ? '更新并重新绑定 Persona' : '创建并绑定角色专属 Persona' }}
+            </button>
+            <button type="button" @click="router.push('/settings/personas')">打开 Persona 管理</button>
+          </div>
+          <p v-if="embeddedPersonaMessage">{{ embeddedPersonaMessage }}</p>
         </section>
 
         <form class="card-form" @submit.prevent="save">
@@ -271,4 +376,14 @@ function exportCard() {
 
 <style scoped>
 .card-page{min-height:100%;padding:14px 14px 34px;background:#f7f0f3;color:#5d4350}.score-card,.form-section,.import-card{border:1px solid rgba(106,67,84,.08);border-radius:20px;background:#fff;box-shadow:0 8px 28px rgba(79,46,61,.06)}.score-card{padding:16px}.import-card{margin-top:12px;padding:14px;display:grid;gap:9px}.import-card>div:first-child{display:flex;flex-direction:column;gap:3px}.import-card small,.import-card p{color:#927381;font-size:11px;line-height:1.55}.import-card input{position:absolute;width:1px;height:1px;overflow:hidden;opacity:0}.import-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.import-actions button{border:0;border-radius:12px;background:#f4e8ed;color:#9e5b77;padding:10px;font-weight:800}.check-row{display:flex!important;align-items:center}.check-row input{position:static!important;width:18px!important;height:18px;opacity:1!important;accent-color:#d96f9b}.score-card>div{display:flex;justify-content:space-between;align-items:center}.score-card span{color:#c35f88;font-weight:700}.score-card p,.example-section p{color:#927381;line-height:1.6;font-size:12px}.score-track{height:7px!important;overflow:hidden;border-radius:999px;background:#f1e3e9}.score-track i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#e889b0,#cb5f8d)}.card-form{display:grid;gap:12px;margin-top:12px}.form-section{display:grid;gap:12px;padding:16px}.form-section h2{margin:0;font-size:17px}.form-section label{display:grid;gap:6px;font-size:13px;font-weight:700}.form-section input,.form-section textarea,.form-section select{box-sizing:border-box;width:100%;border:1px solid #eadce2;border-radius:12px;background:#fffbfc;padding:10px 12px;color:#593f4b;font:inherit;resize:vertical}.two-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.advanced summary{cursor:pointer;font-weight:800}.advanced[open] summary{margin-bottom:6px}.linked-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.linked-actions button{border:0;border-radius:13px;background:#fff;color:#a45f7b;padding:11px;font-weight:700}.message{margin:0;padding:10px 12px;border-radius:12px;background:#fff5f8;color:#b65178}.save-button{border:0;border-radius:15px;background:#d96f9b;color:#fff;padding:13px;font-weight:800}.save-button:disabled{opacity:.6}.state{text-align:center;color:#927381}.error{color:#b74c63}code{border-radius:5px;background:#f4e8ed;padding:1px 4px}@media(max-width:390px){.two-fields,.linked-actions{grid-template-columns:1fr}}
+
+.embedded-user-section { display:grid; gap:10px; padding:14px; border-radius:16px; background:rgba(255,248,251,.9); border:1px solid rgba(217,111,155,.18); }
+.embedded-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+.embedded-head > div { display:grid; gap:4px; }
+.embedded-head small { color:#9b7183; line-height:1.45; }
+.embedded-head > span { padding:4px 8px; border-radius:999px; background:rgba(217,111,155,.12); color:#b8567f; font-size:11px; font-weight:800; }
+.embedded-user-section summary { cursor:pointer; color:#b8567f; font-weight:800; }
+.embedded-user-section pre { white-space:pre-wrap; word-break:break-word; max-height:260px; overflow:auto; padding:10px; border-radius:12px; background:rgba(255,255,255,.72); font:inherit; font-size:12px; line-height:1.55; }
+.embedded-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+@media (max-width:390px){ .embedded-actions{grid-template-columns:1fr;} }
 </style>

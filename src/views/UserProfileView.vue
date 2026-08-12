@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import {
+  computed,
   onMounted,
   ref
 } from 'vue'
+import { useRouter } from 'vue-router'
 
 import PhoneFrame from '../components/PhoneFrame.vue'
 import CharacterAvatar from '../components/CharacterAvatar.vue'
@@ -11,6 +13,12 @@ import {
   getOrCreateUserProfile,
   USER_PROFILE_ID
 } from '../services/userProfile'
+import { listPersonas } from '../services/personaService'
+import type { UserPersona } from '../types/domain'
+
+const router = useRouter()
+const characterCardUserTemplateFallback = '来自角色卡 {{user}} 模板'
+const personas = ref<UserPersona[]>([])
 
 const name = ref('我')
 const identity = ref('')
@@ -24,6 +32,15 @@ const isSaving = ref(false)
 const message = ref('')
 const errorMessage = ref('')
 const originalCreatedAt = ref('')
+
+const defaultPersona = computed(() => personas.value.find(item => item.isDefault))
+const globalPersonas = computed(() => personas.value.filter(item => item.personaScope !== 'character'))
+const characterPersonas = computed(() => personas.value.filter(item => item.personaScope === 'character'))
+
+function openPersonaManager() {
+  router.push('/settings/personas')
+}
+
 
 function isImageAvatar(value: string) {
   return (
@@ -39,8 +56,11 @@ async function loadProfile() {
   errorMessage.value = ''
 
   try {
-    const profile =
-      await getOrCreateUserProfile()
+    const [profile, personaRows] = await Promise.all([
+      getOrCreateUserProfile(),
+      listPersonas()
+    ])
+    personas.value = personaRows
 
     name.value = profile.name
     identity.value = profile.identity ?? ''
@@ -230,7 +250,7 @@ async function saveProfile() {
       originalCreatedAt.value || now
 
     message.value =
-      '资料已保存，聊天中的头像也会同步更新。'
+      '基础资料已保存。角色扮演身份请在 Persona 中单独管理。'
   } catch (error) {
     console.error('保存资料失败：', error)
 
@@ -281,6 +301,46 @@ onMounted(loadProfile)
               }}
             </p>
           </div>
+        </section>
+
+        <section class="profile-card persona-overview">
+          <div class="persona-overview-head">
+            <div>
+              <h3>我的 Persona</h3>
+              <p>“我的资料”是手机里的基础身份；Persona 是进入不同角色和世界时，角色实际认识的“你”。</p>
+            </div>
+            <button class="persona-manage-button" type="button" @click="openPersonaManager">管理全部</button>
+          </div>
+
+          <article v-if="defaultPersona" class="persona-summary default">
+            <div class="persona-symbol">{{ defaultPersona.avatar || '🧑' }}</div>
+            <div>
+              <b>{{ defaultPersona.name }}</b>
+              <small>默认 Persona · {{ defaultPersona.identity || defaultPersona.occupation || '未填写身份' }}</small>
+            </div>
+          </article>
+
+          <div v-if="characterPersonas.length" class="character-persona-group">
+            <div class="group-title">
+              <b>角色卡自带 Persona</b>
+              <small>{{ characterPersonas.length }} 套</small>
+            </div>
+            <article v-for="persona in characterPersonas" :key="persona.id" class="persona-summary">
+              <div class="persona-symbol">{{ persona.avatar || '🧑' }}</div>
+              <div>
+                <b>{{ persona.name }}</b>
+                <small>{{ persona.boundCharacterName ? `仅用于 ${persona.boundCharacterName}` : '角色专属' }}</small>
+                <p>{{ persona.occupation || persona.identity || persona.personality || characterCardUserTemplateFallback }}</p>
+              </div>
+            </article>
+          </div>
+
+          <div class="persona-counts">
+            <span>全局 {{ globalPersonas.length }}</span>
+            <span>角色专属 {{ characterPersonas.length }}</span>
+          </div>
+
+          <p class="persona-note">角色卡里的 <span v-pre>{{user}}</span> 可以在导入角色时自动创建成专属 Persona；不会自动改写你的全局资料。</p>
         </section>
 
         <section class="profile-card">
@@ -380,7 +440,7 @@ onMounted(loadProfile)
         </button>
 
         <p class="hint">
-          头像和昵称将用于聊天、朋友圈、日记及其他虚拟应用。
+          头像和昵称用于整个虚拟手机；角色扮演中的身份、经历与边界由 Persona 独立控制。
         </p>
       </template>
     </form>
@@ -462,4 +522,22 @@ onMounted(loadProfile)
 .error-message {
   background: rgba(255, 225, 225, 0.88);
 }
+
+.persona-overview { gap: 10px; }
+.persona-overview-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.persona-overview-head h3 { margin:0 0 4px; }
+.persona-overview-head p { margin:0; color:#9b7183; font-size:12px; line-height:1.5; }
+.persona-manage-button { border:0; border-radius:12px; padding:9px 11px; background:rgba(217,111,155,.12); color:#b8567f; font-weight:800; white-space:nowrap; }
+.persona-summary { display:flex; gap:10px; align-items:flex-start; padding:11px; border-radius:14px; background:rgba(255,255,255,.72); }
+.persona-summary.default { border:1px solid rgba(217,111,155,.16); }
+.persona-symbol { width:42px; height:42px; border-radius:13px; display:grid; place-items:center; background:rgba(255,221,235,.7); font-size:22px; flex:0 0 auto; }
+.persona-summary > div:last-child { display:grid; gap:3px; min-width:0; }
+.persona-summary small { color:#9b7183; }
+.persona-summary p { margin:2px 0 0; color:#745b66; font-size:12px; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.character-persona-group { display:grid; gap:8px; }
+.group-title { display:flex; justify-content:space-between; align-items:center; color:#745b66; }
+.group-title small { color:#a78091; }
+.persona-counts { display:flex; gap:8px; flex-wrap:wrap; }
+.persona-counts span { padding:5px 9px; border-radius:999px; background:rgba(217,111,155,.08); color:#a35c78; font-size:11px; }
+.persona-note { margin:0; color:#9b7183; font-size:12px; line-height:1.5; }
 </style>

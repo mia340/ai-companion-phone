@@ -1725,3 +1725,23 @@ shapeCompanionActions()
 - Persona 结构化字段与 `description`/`extraFields` 分离：结构化字段服务于 Prompt 分层，原始内容服务于迁移保真。
 - `buildPersonaPrompt()` 只把明确填写的用户事实作为事实；未提供字段保持未知。
 - IndexedDB 仍为 V8，因为 Dexie 对新增可选对象字段无需新建表或索引。
+
+
+## V0.4.2.5 创建期角色卡导入
+CharacterCreate 直接调用 characterCardImportService；角色基础与高级字段在创建事务中一次落库，Character Card 内嵌 character_book 转换为带 characterId 的 LorebookEntry。无需建立临时空角色。
+
+
+## V0.4.2.8 角色卡内嵌用户模板
+
+`Character.embeddedUserTemplate` 保存从 Tavo / SillyTavern `description` 中检测到的独立 `{{user}}` 段。
+当用户选择使用原卡用户模板时，会创建一条 `UserPersona`：
+
+```text
+personaScope = character
+boundCharacterId = Character.id
+boundCharacterName = Character.name
+sourceUserTemplate = 原始 {{user}} 文本
+isCardTemplate = true
+```
+
+新建角色时，同时把 `ChatSettings.personaId` 指向该 Persona。因此角色卡作者预设的用户身份只在当前角色私聊生效，不会成为全局默认，也不会污染其他角色。

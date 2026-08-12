@@ -1,3 +1,22 @@
+## 0.4.2.9
+
+### Fixed
+- 修复 `CharacterCreate.vue` 创建“角色 + 角色专属 Persona”时 Dexie `transaction()` 传入 6 张表导致的 TypeScript `TS2554`。
+- 使用表数组开启同一读写事务，V0.4.2.7 的角色卡 `{{user}}` 自动 Persona 和绑定逻辑保持不变。
+- IndexedDB 保持 V8，备份格式保持 V7。
+
+## 0.4.2.7
+
+### Added
+- 检测角色卡 `{{user}}` 模板并可一键生成角色专属 Persona。
+- 创建角色时自动绑定卡内 Persona 到新私聊。
+- 角色卡编辑页新增卡内用户模板查看与 Persona 重建入口。
+- 我的资料页新增全局/角色专属 Persona 概览。
+
+### Fixed
+- 角色专属 Persona 不再可能被 `ensureDefaultPersona()` 误设成全局默认。
+- 当前角色聊天的 Persona 下拉列表会隐藏其他角色的专属 Persona。
+
 # Changelog
 
 ## V0.4.2.3 · 实时多气泡、Action 与事实约束修复
@@ -499,3 +518,22 @@
 - Character Card V2/V3 可显式转换为 Persona；世界书、预设、正则会被拦截。
 - 未识别社区字段保存在 extraFields，避免资源静默丢失。
 - 扩展 Persona 结构化字段，并强化“未知用户事实不得编造”的 Prompt 约束。
+
+## 0.4.2.6
+- 创建角色页支持直接导入 SillyTavern / Tavo JSON 角色卡，并同步导入内嵌 character_book。
+
+
+### 0.4.2.6
+- 修复创建页直接导入 Tavo / SillyTavern JSON 后可能出现的 IndexedDB `DataCloneError`。
+- 角色卡导入改用浅响应状态，角色、世界书与 Persona 入库前统一去除 Vue Proxy。
+- 增加 Tavo null 集合和 DataClone 回归测试。
+- 强化角色卡内置 `{{user}}` 模板与当前 Persona 的事实隔离。
+
+
+## 0.4.2.10
+
+- 修复 `UserProfileView.vue` 模板中 `{{user}}` 字面量导致的 Vite `Unterminated string constant`。
+- 将动态兜底文案移到 `<script setup>` 常量，模板只引用变量。
+- 全局复核 `CharacterCreate.vue`、`CharacterCardEditorView.vue`、`UserProfileView.vue` 中的 `{{user}}` 展示写法。
+- 删除交付源码中的旧 `characterCardImportService.js` 残留。
+- IndexedDB 仍为 V8，备份格式仍为 V7。

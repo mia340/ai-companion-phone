@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-V0.4.2.3
+V0.4.2.10
 
 ## 当前阶段
 
@@ -211,3 +211,26 @@ V0.5.0 建议先建设 Companion OS 公共底座：
 
 ### V0.4.2.4
 用户 Persona 已具备 JSON/TXT 导入、资源类型识别、导入预览、同名处理、V2 JSON 导出与社区字段保真能力。
+
+
+### V0.4.2.6
+创建角色页已支持直接导入 SillyTavern / Tavo V2/V3 JSON，并同步导入角色卡内嵌 character_book。
+
+
+## V0.4.2.6 当前状态
+创建角色页可直接导入 Tavo / SillyTavern JSON；导入数据会在写入 IndexedDB 前转换为纯可克隆数据，避免 Vue Proxy 导致 `DataCloneError`。Persona 导入也使用相同保护。
+
+
+### V0.4.2.9
+- 已支持角色卡 `{{user}}` → 角色专属 Persona。
+- 创建角色时可自动建立并绑定卡内用户身份。
+- 我的资料页可查看全局与角色专属 Persona。
+- IndexedDB V8 / 备份 V7 保持不变。
+
+
+### V0.4.2.10
+
+- 修复 `UserProfileView.vue` 中角色卡 `{{user}}` 字面量嵌套在 Vue 插值表达式导致的 Vite 模板解析失败。
+- 模板表达式不再直接包含 `{{user}}` 字面量，改为脚本常量。
+- 保留角色卡自带 `{{user}}` → 角色专属 Persona → 自动绑定聊天的完整流程。
+- IndexedDB 仍为 V8，备份格式仍为 V7。
