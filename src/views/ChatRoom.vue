@@ -70,7 +70,7 @@ import { getOrCreateUserProfile } from '../services/userProfile'
 import { getPersonaForChat, listPersonas } from '../services/personaService'
 import { buildLorebookPrompt } from '../services/lorebookService'
 import { composeRoleplaySystemPrompt } from '../services/promptComposer'
-import { estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
+import { estimateVoiceDuration, findUnsupportedUserFactClaims, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
 import { analyzePromptSections, buildRuleInfluences, buildTruncationNotes, estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
 import { buildConversationStatePrompt, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
 import type {
@@ -721,6 +721,7 @@ interface StreamingReplySession {
   fallback: boolean
   type: Message['type']
   conversation: Conversation
+  suppressPreview?: boolean
 }
 
 function clearStreamTimers() {
@@ -816,7 +817,7 @@ async function appendStreamChunk(
 ) {
   session.rawText = chunk.text
   session.text = visibleStreamingText(chunk.text)
-  if (!session.text) return
+  if (!session.text || session.suppressPreview) return
 
   await ensureStreamingMessage(session)
 
@@ -1034,6 +1035,21 @@ async function saveAssistantActions(options: { actions: CompanionActionMessage[]
     await scrollToBottom()
   }
 }
+function buildDeviceTimeContext(now = new Date()) {
+  const weekday = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()]
+  const date = now.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+  const time = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  const offsetMinutes = -now.getTimezoneOffset()
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const absolute = Math.abs(offsetMinutes)
+  const offset = `${sign}${String(Math.floor(absolute / 60)).padStart(2, '0')}:${String(absolute % 60).padStart(2, '0')}`
+  return [
+    `设备本地日期时间：${date} ${weekday} ${time}（UTC${offset}）`,
+    '所有“现在、今天、明天、几点、还有多久、几小时后”等时间判断都以这条设备时间为准。',
+    '如果要说“还有 X 小时/分钟”，必须按当前时间精确计算；不确定时只说具体时间，不要估算一个数字。'
+  ].join('\n')
+}
+
 function includeVisionCount(request: ChatRequest) {
   return request.messages.reduce((total, turn) => typeof turn.content === 'string' ? total : total + turn.content.filter(part => part.type === 'image_url').length, 0)
 }
@@ -1064,7 +1080,8 @@ async function requestAssistantReply(options?: {
     model: '',
     fallback: false,
     type: options?.type ?? 'text',
-    conversation: activeConversation
+    conversation: activeConversation,
+    suppressPreview: settings.actionProtocolEnabled && settings.multiBubble && resolvePresenceMode(settings, conversationState.value) === 'remote'
   }
   const useStreaming = settings.streamResponse && !options?.alternativeTargetId
 
@@ -1187,6 +1204,7 @@ async function requestAssistantReply(options?: {
             currentSummary: conversationState.value?.summary || '',
             statePrompt: buildConversationStatePrompt(conversationState.value ? { ...conversationState.value, presence: resolvePresenceMode(settings, conversationState.value) } : undefined),
             conversationState: conversationState.value ? { ...conversationState.value, presence: resolvePresenceMode(settings, conversationState.value) } : undefined,
+            deviceTimeContext: buildDeviceTimeContext(),
             memoryWriteNotice: options?.memoryWriteNotice,
             hasImages: includeVision && Boolean(visualMessage),
             imageCount: includeVision && visualMessage
@@ -1205,6 +1223,7 @@ async function requestAssistantReply(options?: {
     let usedModel = currentModelSettings.model
     let fallback = false
     let providerNotice = ''
+    let finalProvider: ModelProvider = provider
 
     const runProvider = async (
       activeProvider: ModelProvider,
@@ -1311,6 +1330,7 @@ async function requestAssistantReply(options?: {
       if (!mayFallback) throw providerError
 
       const fallbackProvider = new MockProvider()
+      finalProvider = fallbackProvider
       providerId = fallbackProvider.id
       usedModel = 'mock'
       fallback = true
@@ -1332,8 +1352,40 @@ async function requestAssistantReply(options?: {
         : '真实接口未响应，已使用本地回复。'
     }
 
-    const parsedOutput = parseCompanionOutput(response.text)
+    let parsedOutput = parseCompanionOutput(response.text)
     if (!parsedOutput.messages.length) throw new Error('模型没有返回可显示的角色回复。')
+
+    const userFactSupport = [
+      persona.identity || '', persona.appearance || '', persona.personality || '', persona.background || '',
+      persona.relationshipNote || '', persona.characterKnowledge || '',
+      ...memoryHits.map(item => item.content),
+      ...messages.value.filter(item => item.senderId === 'user').slice(-settings.recentMessageLimit).map(item => item.content)
+    ].filter(Boolean).join('\n')
+    const unsupportedUserClaims = findUnsupportedUserFactClaims(parsedOutput.visibleText, userFactSupport)
+    if (unsupportedUserClaims.length && finalProvider.id !== 'mock' && !signal.aborted) {
+      const repairRequest = createRequest(visionUsed)
+      repairRequest.temperature = Math.min(repairRequest.temperature ?? 0.8, 0.55)
+      repairRequest.messages = [
+        ...repairRequest.messages,
+        {
+          role: 'system',
+          content: [
+            '【事实纠偏重写】',
+            '上一版回复擅自把没有依据的用户习惯、偏好或旧经历说成事实。请重新生成整条回复。',
+            `需要删除或改写的无依据句子：${unsupportedUserClaims.join(' / ')}`,
+            '只能使用用户 Persona、当前聊天历史和本轮命中的长期记忆作为用户事实来源。',
+            '如果不知道用户喜欢什么、平时怎样、以前是否做过某事，就直接问或只回应当前消息，绝不能补设定。',
+            '仍要遵守小手机互动协议、当前相处状态和动作显示规则。不要解释为什么重写。'
+          ].join('\n')
+        }
+      ]
+      try {
+        response = await finalProvider.chat(repairRequest)
+        parsedOutput = parseCompanionOutput(response.text)
+      } catch {
+        parsedOutput.warnings.push('检测到无依据的用户事实，但自动纠偏请求失败。')
+      }
+    }
     if (debugTrace) await patchPromptDebugTrace(debugTrace.id, {
       provider: providerId,
       model: usedModel,

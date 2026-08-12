@@ -1715,3 +1715,13 @@ shapeCompanionActions()
 - Dexie：V8（不变）
 - Backup：V7（不变）
 - 新增字段均为可选字段或设置默认值，不需要 schema 迁移。
+
+
+## V0.4.2.4 Persona 资源兼容架构
+
+- `personaImportService.ts` 负责资源类型识别、Persona 字段映射、文本编码兼容、未知字段保真和导出。
+- Persona 导入先识别 `persona / character-card / world-book / preset / regex`，避免不同社区资源串类型。
+- Character Card 转 Persona 是显式转换：保留描述、性格、场景和原始扩展，但不把角色开场白/系统提示直接注入用户身份。
+- Persona 结构化字段与 `description`/`extraFields` 分离：结构化字段服务于 Prompt 分层，原始内容服务于迁移保真。
+- `buildPersonaPrompt()` 只把明确填写的用户事实作为事实；未提供字段保持未知。
+- IndexedDB 仍为 V8，因为 Dexie 对新增可选对象字段无需新建表或索引。

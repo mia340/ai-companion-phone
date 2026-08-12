@@ -153,9 +153,9 @@ export function buildInteractionProtocolPrompt(
     : [
       '当前相处状态：你与用户不在同一现场，正在通过手机联系。',
       actionVisibility === 'always'
-        ? '仍然可以使用 scene_action 描写角色此刻在另一边真正发生的动作，作为玩家可见的独立 Action。每轮通常 0～2 条，只写有情绪、情境或行为价值的动作，不写眨眼、呼吸之类流水账。'
+        ? '必须至少输出 1 条 scene_action，描写角色此刻在另一边真正发生的、有情绪或情境价值的动作，界面会把它显示成玩家可见的独立 Action。通常 1～2 条，不写眨眼、呼吸之类流水账。'
         : '当前动作视角不显示远程动作：不要输出 scene_action。',
-      '远程对白必须像真实手机聊天：较长内容自然拆成多个 text 消息；不要把角色动作塞进 text 的括号里。'
+      '远程对白必须像真实手机聊天：一个完整句子对应一个 text 消息；两个完整句子不要放进同一个 text。不要把角色身体动作塞进 text 的括号里。'
     ]
 
   return [
@@ -170,7 +170,7 @@ export function buildInteractionProtocolPrompt(
     '撤回和回应表情只能偶尔使用，不能每轮出现。不要用撤回来操控、惩罚或制造焦虑。',
     voiceAllowed ? '可以偶尔使用 voice，内容必须是角色真正会说的话。' : '当前没有开启角色声音，通常不要使用 voice。',
     expressive ? '这个角色情绪明显时，远程模式可以更自然地拆成 2～4 条短消息。' : '',
-    restrained ? '这个角色更克制，远程模式通常保持 1～2 条，不要为了“小手机感”强行碎片化。' : '',
+    restrained ? '这个角色更克制，可以少说几句，但只要输出了多个完整句子，仍然必须一完整句子一个 text 消息。' : '',
     `角色是“${character.name}”。presence 只有双方真正见面或分开时才改变，不要仅因为“我去找你”“我快到了”就提前切换。`,
     '状态只更新这一轮确实发生变化的字段，不要为了戏剧性突然改变地点、关系或事件。',
     '隐藏数据块必须放在回复最后，不要使用 Markdown 代码块，不要向用户解释协议。正文与 messages 不要重复；有 messages 时界面优先使用 messages。'
@@ -299,35 +299,18 @@ export function extractInlineSceneActions(text: string): CompanionActionMessage[
   return result.length ? result : [{ kind: 'text', content: value }]
 }
 
-function splitNaturalText(text: string, maxParts: number) {
-  const paragraphs = text.split(/\n{2,}/).map(item => item.trim()).filter(Boolean)
-  if (paragraphs.length > 1) {
-    if (paragraphs.length <= maxParts) return paragraphs
-    return [
-      ...paragraphs.slice(0, Math.max(1, maxParts - 1)),
-      paragraphs.slice(Math.max(1, maxParts - 1)).join('\n\n')
-    ]
-  }
-  const normalized = text.trim()
-  if (normalized.length < 12) return [normalized]
-  const sentences = normalized.match(/[^。！？!?]+[。！？!?]?/g)?.map(item => item.trim()).filter(Boolean) || [normalized]
-  if (sentences.length < 2) return [normalized]
-  if (normalized.length <= 42 && sentences.length <= maxParts) return sentences
-  const parts: string[] = []
-  let current = ''
-  for (const sentence of sentences) {
-    if (parts.length >= maxParts - 1) {
-      current += sentence
-      continue
-    }
-    const shouldBreak = Boolean(current) && ((current.length + sentence.length > 22 && current.length >= 4) || current.length >= 18)
-    if (shouldBreak) {
-      parts.push(current)
-      current = sentence
-    } else current += sentence
-  }
-  if (current) parts.push(current)
-  return parts.slice(0, maxParts)
+function splitNaturalText(text: string, _maxParts: number) {
+  const normalized = text.replace(/\r\n/g, '\n').trim()
+  if (!normalized) return []
+
+  // 远程模式严格采用“一完整句子一个气泡”。换行也视为明确消息边界。
+  const units = normalized
+    .split(/\n+/)
+    .flatMap(line => line.match(/[^。！？!?]+(?:[。！？!?]+|$)/g) || [line])
+    .map(item => item.trim())
+    .filter(Boolean)
+
+  return units.length ? units : [normalized]
 }
 
 function expandInlineActions(actions: CompanionActionMessage[]) {
@@ -380,7 +363,7 @@ function splitRemoteTextActions(
   const source = `${character.persona} ${character.speakingStyle || ''}`
   const restrained = /克制|清冷|寡言|简短|冷静|毒舌/.test(source)
   const expressive = /活泼|外向|黏人|元气|直率|话多/.test(source)
-  const maxParts = restrained ? 3 : expressive ? 5 : 4
+  const maxParts = restrained ? 5 : expressive ? 8 : 7
   const pause = expressive ? 360 : restrained ? 760 : 540
   const result: CompanionActionMessage[] = []
 
@@ -398,6 +381,18 @@ function splitRemoteTextActions(
   return result
 }
 
+function buildFallbackRemoteSceneAction(character: Character, state?: ConversationState): CompanionActionMessage {
+  const location = state?.location?.trim()
+  const activity = state?.innerActivity?.trim()
+  if (activity && activity !== '正在等你的消息') {
+    const place = location ? `在${location}` : ''
+    const cleanActivity = activity.replace(/^正在/, '').trim()
+    const activityText = cleanActivity ? `，正在${cleanActivity}` : ''
+    return { kind: 'scene_action', content: `${character.name}${place}${activityText}。` }
+  }
+  return { kind: 'scene_action', content: `${character.name}低头看着手机屏幕，停了一会儿才继续回复。` }
+}
+
 export function shapeCompanionActions(
   actions: CompanionActionMessage[],
   character: Character,
@@ -413,7 +408,10 @@ export function shapeCompanionActions(
     return mergeTogetherActions(expanded, actionVisibility !== 'off')
   }
 
-  const remoteActions = expanded.filter(action => action.kind !== 'scene_action' || actionVisibility === 'always')
+  let remoteActions = expanded.filter(action => action.kind !== 'scene_action' || actionVisibility === 'always')
+  if (actionVisibility === 'always' && !remoteActions.some(action => action.kind === 'scene_action')) {
+    remoteActions = [buildFallbackRemoteSceneAction(character, state), ...remoteActions]
+  }
   return splitRemoteTextActions(remoteActions, character, settings)
 }
 
@@ -440,6 +438,36 @@ export function mergeStatusIntoConversationState(state: ConversationState, patch
     stateVersion: 2,
     statusUpdatedAt: new Date().toISOString()
   }
+}
+
+export function findUnsupportedUserFactClaims(text: string, supportText: string): string[] {
+  const support = supportText.replace(/\s+/g, '').toLocaleLowerCase()
+  if (!text.trim()) return []
+  const sentences = text.match(/[^。！？!?\n]+(?:[。！？!?]+|$)/g)?.map(item => item.trim()).filter(Boolean) || []
+  const claimPattern = /(我记得(?:上次|之前|以前)?你|我记得你(?:上次|之前|以前)?|你(?:平时|一直|总是|经常|通常)|你(?:以前|之前|上次)(?:说过|提过|告诉过我)?|你(?:喜欢|不喜欢|习惯|爱[吃喝看玩买用去]))/
+  const stop = ['我记得','我记得上次','我记得之前','我记得以前','你上次','你之前','你以前','你平时','你一直','你总是','你经常','你通常','说过','提过','告诉过我','喜欢','不喜欢','爱吃','习惯','想吃','那个','这个','还是','然后','我们','你们']
+
+  const distinctiveBigrams = (sentence: string) => {
+    let clean = sentence.replace(/[，。！？!?、；;：:\s]/g, '')
+    for (const token of stop) clean = clean.replaceAll(token, '')
+    const result = new Set<string>()
+    for (let i = 0; i < clean.length - 1; i += 1) {
+      const pair = clean.slice(i, i + 2).toLocaleLowerCase()
+      if (/^[\p{L}\p{N}]{2}$/u.test(pair)) result.add(pair)
+    }
+    return [...result]
+  }
+
+  return sentences.filter(sentence => {
+    if (/[？?]$/.test(sentence)) return false
+    if (!claimPattern.test(sentence)) return false
+    const preferenceClaim = /(喜欢|不喜欢|习惯|平时|一直|总是|经常|通常|爱[吃喝看玩买用去])/.test(sentence)
+    const preferenceEvidence = /(喜欢|不喜欢|习惯|平时|一直|总是|经常|通常|爱[吃喝看玩买用去])/.test(support)
+    if (preferenceClaim && !preferenceEvidence) return true
+    const pairs = distinctiveBigrams(sentence)
+    if (!pairs.length) return true
+    return !pairs.some(pair => support.includes(pair))
+  })
 }
 
 export function naturalnessWarnings(text: string): string[] {

@@ -97,17 +97,48 @@ export interface UserProfile {
   updatedAt: string
 }
 
+export type PersonaImportFormat =
+  | 'native-v1'
+  | 'native-v2'
+  | 'sillytavern-persona'
+  | 'sillytavern-character-v2'
+  | 'sillytavern-character-v3'
+  | 'tavo-json'
+  | 'tavo-text'
+  | 'generic-json'
+  | 'plain-text'
+
 export interface UserPersona {
   id: UUID
   name: string
   avatar: string
+  title?: string
+  description?: string
   identity?: string
+  age?: string
+  gender?: string
+  birthday?: string
+  height?: string
+  occupation?: string
   appearance?: string
   personality?: string
+  publicPersona?: string
+  privatePersona?: string
+  strengths?: string
+  weaknesses?: string
+  interests?: string
+  habits?: string
+  lifestyle?: string
   background?: string
   relationshipNote?: string
   characterKnowledge?: string
   boundaries?: string
+  tags?: string[]
+  creator?: string
+  sourceUrl?: string
+  sourceFileName?: string
+  importFormat?: PersonaImportFormat
+  extraFields?: Record<string, unknown>
   isDefault: boolean
   createdAt: string
   updatedAt: string

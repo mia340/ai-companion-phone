@@ -71,4 +71,6 @@ V0.4.2.1：场景距离双模式消息；在身边时动作以括号进入同一
 ```
 
 
-V0.4.2.2：修复双模式版本严格 TypeScript 构建中的 `displayedConversationState` 未使用错误；数据结构不变。
+V0.4.2.3：修复双模式版本严格 TypeScript 构建中的 `displayedConversationState` 未使用错误；数据结构不变。
+
+V0.4.2.4：Persona 支持 JSON/TXT/MD 导入、导入预览、同名处理、V2 JSON 导出和 Tavo/酒馆资源识别；角色卡可显式转换为用户人设，世界书/预设/正则会阻止误导入。

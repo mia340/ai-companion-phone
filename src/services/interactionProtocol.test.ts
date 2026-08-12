@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   extractInlineSceneActions,
+  findUnsupportedUserFactClaims,
   naturalnessWarnings,
   parseCompanionOutput,
   scoreNaturalness,
@@ -71,4 +72,23 @@ describe('interaction protocol V2', () => {
     const robotic = scoreNaturalness({ text: '你分享了三张图片。你是想分析角色还是画风？', character, latestUserText: '他是我喜欢的角色' })
     expect(natural.total).toBeGreaterThan(robotic.total)
   })
+  it('远程模式一个完整句子一个气泡，并在始终显示动作时保证 scene_action', () => {
+    const settings = { ...createDefaultChatSettings('c'), presenceMode: 'remote' as const, actionVisibility: 'always' as const, multiBubble: true }
+    const state = { ...createDefaultConversationState('c'), presence: 'remote' as const, location: '训练场', innerActivity: '正在收拾球拍' }
+    const shaped = shapeCompanionActions([
+      { kind: 'text', content: '训练结束了。刚拿到手机。你十二点下班对吧？我等你。' }
+    ], character, settings, false, state)
+    expect(shaped[0].kind).toBe('scene_action')
+    expect(shaped.filter(item => item.kind === 'text').map(item => item.content)).toEqual([
+      '训练结束了。', '刚拿到手机。', '你十二点下班对吧？', '我等你。'
+    ])
+  })
+
+  it('detects invented user habits when history and memory do not support them', () => {
+    expect(findUnsupportedUserFactClaims('我记得上次你想吃寿司。', '用户说：晚上吃什么？')).toHaveLength(1)
+    expect(findUnsupportedUserFactClaims('我记得上次你想吃寿司。', '用户说：我上次想吃寿司。')).toHaveLength(0)
+    expect(findUnsupportedUserFactClaims('你一直很喜欢吃寿司。', '用户说：我今天想吃寿司。')).toHaveLength(1)
+    expect(findUnsupportedUserFactClaims('你一直很喜欢吃寿司。', '用户说：我一直很喜欢吃寿司。')).toHaveLength(0)
+  })
+
 })
