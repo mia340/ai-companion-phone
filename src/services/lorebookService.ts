@@ -60,7 +60,7 @@ export async function buildLorebookPrompt(options: {
   messages: Message[]
   latestText?: string
   maxEntries?: number
-}): Promise<{ prompt: string; activated: LorebookEntry[] }> {
+}): Promise<{ prompt: string; activated: Array<LorebookEntry & { activationReason: string }> }> {
   const entries = await listLorebookEntries({
     worldId: options.worldId,
     characterId: options.characterId
@@ -75,6 +75,12 @@ export async function buildLorebookPrompt(options: {
     .filter(item => item.enabled)
     .filter(item => !item.characterId || item.characterId === options.characterId)
     .filter(item => entryMatches(item, source))
+    .map(item => ({
+      ...item,
+      activationReason: item.constant
+        ? '常驻条目'
+        : `命中关键词：${item.keywords.filter(keyword => normalizeText(source, item.caseSensitive).includes(normalizeText(keyword.trim(), item.caseSensitive))).slice(0, 3).join('、') || '关键词匹配'}`
+    }))
     .slice(0, options.maxEntries ?? 8)
 
   const prompt = activated.length

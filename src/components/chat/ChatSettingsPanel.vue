@@ -47,6 +47,7 @@ const emit = defineEmits<{
   openLorebook: []
   openCharacterCard: []
   openPromptDebug: []
+  openMemoryManager: []
   useGreeting: [greeting: string]
 }>()
 </script>
@@ -163,15 +164,45 @@ const emit = defineEmits<{
         <input v-model="chatSettings.proactiveEnabled" type="checkbox" @change="emit('persist')" />
       </label>
 
-      <label v-if="chatSettings.proactiveEnabled" class="setting-control">
-        <span><b>多久后会想起你</b><small>至少间隔一段时间，不会频繁打扰</small></span>
-        <select v-model.number="chatSettings.proactiveIntervalHours" @change="emit('persist')">
-          <option :value="6">6 小时</option>
-          <option :value="12">12 小时</option>
-          <option :value="24">1 天</option>
-          <option :value="72">3 天</option>
-        </select>
-      </label>
+      <template v-if="chatSettings.proactiveEnabled">
+        <label class="setting-control">
+          <span><b>主动频率</b><small>会同时参考角色主动程度和关系阶段</small></span>
+          <select v-model="chatSettings.proactiveFrequency" @change="emit('persist')">
+            <option value="low">低</option>
+            <option value="natural">自然</option>
+            <option value="high">较高</option>
+          </select>
+        </label>
+
+        <label class="setting-control">
+          <span><b>最短联系间隔</b><small>即使有未完成话题也不会低于此间隔</small></span>
+          <select v-model.number="chatSettings.proactiveIntervalHours" @change="emit('persist')">
+            <option :value="6">6 小时</option>
+            <option :value="12">12 小时</option>
+            <option :value="24">1 天</option>
+            <option :value="72">3 天</option>
+          </select>
+        </label>
+
+        <label class="setting-switch">
+          <span><b>安静时段</b><small>在设定时段内不生成主动消息</small></span>
+          <input v-model="chatSettings.proactiveQuietHoursEnabled" type="checkbox" @change="emit('persist')" />
+        </label>
+
+        <div v-if="chatSettings.proactiveQuietHoursEnabled" class="quiet-hours-row">
+          <label><span>开始</span><input v-model="chatSettings.proactiveQuietStart" type="time" @change="emit('persist')" /></label>
+          <label><span>结束</span><input v-model="chatSettings.proactiveQuietEnd" type="time" @change="emit('persist')" /></label>
+        </div>
+
+        <fieldset class="source-options">
+          <legend>允许的主动消息来源</legend>
+          <label><input v-model="chatSettings.proactiveAllowedSources" type="checkbox" value="continue-topic" @change="emit('persist')" />延续话题</label>
+          <label><input v-model="chatSettings.proactiveAllowedSources" type="checkbox" value="promise-reminder" @change="emit('persist')" />履行承诺</label>
+          <label><input v-model="chatSettings.proactiveAllowedSources" type="checkbox" value="daily-share" @change="emit('persist')" />分享日常</label>
+          <label><input v-model="chatSettings.proactiveAllowedSources" type="checkbox" value="care" @change="emit('persist')" />关心状态</label>
+          <label><input v-model="chatSettings.proactiveAllowedSources" type="checkbox" value="story-event" @change="emit('persist')" />剧情事件</label>
+        </fieldset>
+      </template>
 
       <button class="danger-row" type="button" @click="emit('clearConversation')">清空聊天记录</button>
     </div>
@@ -183,6 +214,24 @@ const emit = defineEmits<{
           <option value="daily">日常陪伴</option>
           <option value="immersive">沉浸剧情</option>
           <option value="deep">深度角色扮演</option>
+        </select>
+      </label>
+
+      <label class="setting-control">
+        <span><b>当前相处状态</b><small>决定动作与对白是同场景气泡还是远程手机模式</small></span>
+        <select v-model="chatSettings.presenceMode" @change="emit('persist')">
+          <option value="auto">自动 · 当前 {{ conversationState?.presence === 'together' ? '在身边' : '远程' }}</option>
+          <option value="together">在身边 / 同一现场</option>
+          <option value="remote">不在身边 / 手机联系</option>
+        </select>
+      </label>
+
+      <label class="setting-control">
+        <span><b>角色动作视角</b><small>在身边时动作进括号；远程时可显示独立 Action</small></span>
+        <select v-model="chatSettings.actionVisibility" @change="emit('persist')">
+          <option value="always">始终显示</option>
+          <option value="together">只在身边显示</option>
+          <option value="off">关闭动作描写</option>
         </select>
       </label>
 
@@ -207,7 +256,7 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-switch">
-        <span><b>小手机互动协议</b><small>允许角色自然拆成多条消息、表情、语音样式并更新状态</small></span>
+        <span><b>小手机互动协议</b><small>远程拆多气泡；同场景把动作以括号合并进剧情气泡</small></span>
         <input v-model="chatSettings.actionProtocolEnabled" type="checkbox" @change="emit('persist')" />
       </label>
 
@@ -265,6 +314,7 @@ const emit = defineEmits<{
       </div>
       <p v-else class="panel-empty">还没有保存任何重要记忆。</p>
 
+      <button class="debug-button" type="button" @click="emit('openMemoryManager')">打开完整记忆管理</button>
       <button class="danger-row" type="button" @click="emit('clearMemories')">清除全部记忆</button>
     </div>
 
@@ -537,4 +587,6 @@ const emit = defineEmits<{
   margin-top: 3px;
 }
 .debug-button{width:100%;margin:0 0 9px;padding:12px 14px;border:0;border-radius:15px;background:#f2e6ec;color:#955a74;font-weight:800}
+
+.quiet-hours-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.quiet-hours-row label{display:grid;gap:5px;padding:10px;border-radius:13px;background:#f8eff3;color:#8c6d79;font-size:11px}.quiet-hours-row input{width:100%;min-width:0;border:0;background:transparent;color:#654c57}.source-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0;padding:12px;border:1px solid #eedfe5;border-radius:15px}.source-options legend{padding:0 5px;color:#8e6d7b;font-size:11px}.source-options label{display:flex;align-items:center;gap:6px;color:#755866;font-size:12px}.source-options input{accent-color:#d96b99}
 </style>

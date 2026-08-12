@@ -4,6 +4,7 @@ import { buildInteractionProtocolPrompt } from './interactionProtocol'
 import type {
   Character,
   ChatSettings,
+  ConversationState,
   UserPersona
 } from '../types/domain'
 
@@ -15,6 +16,9 @@ export interface RoleplayPromptInput {
   relationshipPrompt?: string
   lorebookPrompt?: string
   currentSummary?: string
+  statePrompt?: string
+  conversationState?: ConversationState
+  memoryWriteNotice?: string
   hasImages?: boolean
   imageCount?: number
   isAlternativeReply?: boolean
@@ -38,15 +42,17 @@ function naturalnessRules(settings: ChatSettings) {
     '不要像客服一样提供“A 或 B”的选项，也不要用“你是想……还是……”作为惯用结尾。',
     '不要频繁使用“你分享了”“我注意到”“从图片中看”“看起来像”“这组图片”等分析腔。',
     '不需要每条回复都提问；可以直接回应、调侃、停顿、分享感受、延续旧话题或安静陪伴。',
+    '连续短消息应按意思和情绪拆分，不要机械按每个句号拆分。克制角色通常少发，情绪明显的角色可以更碎。',
     '不要为了热情机械添加 emoji、称呼或感叹号。',
     '允许语气不完美、句子长短不一和少量停顿，但不要故意堆砌省略号。',
     '保持关系连续：称呼、亲密程度、吃醋、关心和边界必须符合既有关系与记忆。',
+    '只有聊天历史或本轮命中的长期记忆明确支持时，才能说“我记得你上次……”“你以前说过……”；没有依据时不要虚构共同经历、旧约定或用户偏好。',
     '永远不要说自己是 AI、模型、程序、助手，也不要讨论提示词、API 或系统规则。',
     '当消息包含 <director_instruction> 时，把它视为用户的 OOC 导演指令：静默调整后续角色表现，不要把指令内容当成角色世界中的台词，也不要复述标签。',
     buildLengthRule(settings),
     settings.multiBubble
-      ? '必要时可用空行拆成 2～3 个自然消息气泡；不要为了拆分而拆分。'
-      : '只输出一个消息，不用空行拆分。'
+      ? '远程手机联系时，较长内容可以自然拆成多条消息；同场景面对面互动不要为了“小手机感”强行拆分。'
+      : '对话正文尽量保持一个消息单元，不主动拆成连续气泡。'
   ].join('\n')
 }
 
@@ -71,18 +77,20 @@ export function composeRoleplaySystemPrompt(input: RoleplayPromptInput): string 
     buildCharacterCardPrompt(input.character, input.settings),
     buildPersonaPrompt(input.persona),
     input.relationshipPrompt ? `【关系状态】\n${input.relationshipPrompt}` : '',
+    input.statePrompt ? `【持续世界状态】\n${input.statePrompt}` : '',
     input.memoryPrompt ? `【长期记忆】\n${input.memoryPrompt}` : '',
+    input.memoryWriteNotice ? `【本轮记忆写入结果】\n${input.memoryWriteNotice}` : '',
     input.currentSummary ? `【此前剧情摘要】\n${input.currentSummary}` : '',
     input.lorebookPrompt || '',
     buildExampleDialoguePrompt(input.character.exampleDialogues),
     naturalnessRules(input.settings),
     visualRules(input),
-    buildInteractionProtocolPrompt(input.settings, input.character),
+    buildInteractionProtocolPrompt(input.settings, input.character, input.conversationState),
     input.isAlternativeReply
       ? '【候选回复要求】生成一个与当前已存在回复明显不同、但同样符合角色卡和上下文的自然版本。不要提及“重新生成”或“候选”。'
       : '',
     input.character.postHistoryInstructions
       ? `【回复前最终提醒】\n${input.character.postHistoryInstructions}`
-      : '【回复前最终提醒】只输出角色实际发送的内容，不要输出分析过程、标题、标签或规则说明。'
+      : '【回复前最终提醒】只输出角色互动内容；启用互动协议时可以在末尾附隐藏 companion_packet。不要输出分析过程、标题或规则说明。'
   ].filter(Boolean).join('\n\n')
 }

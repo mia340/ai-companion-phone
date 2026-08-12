@@ -23,6 +23,11 @@ export function createDefaultChatSettings(
     autoFallback: true,
     proactiveEnabled: true,
     proactiveIntervalHours: 12,
+    proactiveFrequency: 'natural',
+    proactiveQuietHoursEnabled: true,
+    proactiveQuietStart: '23:00',
+    proactiveQuietEnd: '08:00',
+    proactiveAllowedSources: ['continue-topic', 'promise-reminder', 'daily-share', 'care', 'story-event'],
     autoReadAloud: false,
     voiceName: '',
     voiceRate: 1,
@@ -33,6 +38,8 @@ export function createDefaultChatSettings(
     actionProtocolEnabled: true,
     messagePacing: 'natural',
     promptDebugEnabled: true,
+    presenceMode: 'auto',
+    actionVisibility: 'always',
     updatedAt: new Date().toISOString()
   }
 }
@@ -53,7 +60,14 @@ export async function getChatSettings(
       swipeRepliesEnabled: row.swipeRepliesEnabled ?? true,
       actionProtocolEnabled: row.actionProtocolEnabled ?? true,
       messagePacing: row.messagePacing ?? 'natural',
-      promptDebugEnabled: row.promptDebugEnabled ?? true
+      promptDebugEnabled: row.promptDebugEnabled ?? true,
+      presenceMode: row.presenceMode ?? 'auto',
+      actionVisibility: row.actionVisibility ?? 'always',
+      proactiveFrequency: row.proactiveFrequency ?? 'natural',
+      proactiveQuietHoursEnabled: row.proactiveQuietHoursEnabled ?? true,
+      proactiveQuietStart: row.proactiveQuietStart ?? '23:00',
+      proactiveQuietEnd: row.proactiveQuietEnd ?? '08:00',
+      proactiveAllowedSources: row.proactiveAllowedSources?.length ? row.proactiveAllowedSources : ['continue-topic', 'promise-reminder', 'daily-share', 'care', 'story-event']
     }
     : defaults
 }
@@ -66,6 +80,13 @@ export async function saveChatSettings(
     id: value.conversationId,
     proactiveEnabled: value.proactiveEnabled ?? true,
     proactiveIntervalHours: Math.min(168, Math.max(1, Math.round(value.proactiveIntervalHours ?? 12))),
+    proactiveFrequency: value.proactiveFrequency ?? 'natural',
+    proactiveQuietHoursEnabled: value.proactiveQuietHoursEnabled ?? true,
+    proactiveQuietStart: value.proactiveQuietStart || '23:00',
+    proactiveQuietEnd: value.proactiveQuietEnd || '08:00',
+    proactiveAllowedSources: value.proactiveAllowedSources?.length ? value.proactiveAllowedSources : ['continue-topic', 'promise-reminder', 'daily-share', 'care', 'story-event'],
+    presenceMode: value.presenceMode ?? 'auto',
+    actionVisibility: value.actionVisibility ?? 'always',
     voiceRate: Math.min(1.4, Math.max(0.7, Number(value.voiceRate ?? 1))),
     recentMessageLimit: Math.min(
       60,
@@ -85,6 +106,13 @@ export function createDefaultConversationState(
     innerMood: '平静',
     innerActivity: '正在等你的消息',
     innerThought: '好像还有很多话想慢慢告诉你。',
+    presence: 'remote',
+    timePeriod: '',
+    energy: '平稳',
+    unresolvedTopics: [],
+    pendingEvents: [],
+    shortTermGoals: [],
+    stateVersion: 2,
     updatedAt: new Date().toISOString()
   }
 }
@@ -93,7 +121,17 @@ export async function getConversationState(
   conversationId: string
 ): Promise<ConversationState> {
   const row = await db.conversationStates.get(conversationId)
-  return row ?? createDefaultConversationState(conversationId)
+  const defaults = createDefaultConversationState(conversationId)
+  return row
+    ? {
+      ...defaults,
+      ...row,
+      presence: row.presence ?? 'remote',
+      unresolvedTopics: row.unresolvedTopics ?? [],
+      pendingEvents: row.pendingEvents ?? [],
+      shortTermGoals: row.shortTermGoals ?? []
+    }
+    : defaults
 }
 
 export async function patchConversationState(

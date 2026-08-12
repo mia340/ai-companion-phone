@@ -19,6 +19,7 @@ import ModelSettingsView from '../views/ModelSettingsView.vue'
 import PersonaManagerView from '../views/PersonaManagerView.vue'
 import LorebookView from '../views/LorebookView.vue'
 import PromptDebugView from '../views/PromptDebugView.vue'
+import MemoryManagerView from '../views/MemoryManagerView.vue'
 import PlaceholderApp from '../views/PlaceholderApp.vue'
 
 export const router = createRouter({
@@ -40,6 +41,10 @@ export const router = createRouter({
     {
       path: '/chat/:id/debug',
       component: PromptDebugView
+    },
+    {
+      path: '/chat/:id/memory',
+      component: MemoryManagerView
     },
     {
       path: '/chat/:id',

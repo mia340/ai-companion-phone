@@ -10,6 +10,7 @@ import type {
   ContactGroup,
   Conversation,
   ConversationState,
+  ConversationStateHistory,
   Message,
   MessageImage,
   MusicState,
@@ -22,7 +23,7 @@ import type {
 
 export interface CompanionBackup {
   format: 'ai-companion-phone-backup'
-  version: 6
+  version: 7
   exportedAt: string
 
   data: {
@@ -40,6 +41,7 @@ export interface CompanionBackup {
     relationshipEvents: RelationshipEvent[]
     personas: UserPersona[]
     lorebookEntries: LorebookEntry[]
+    conversationStateHistory: ConversationStateHistory[]
   }
 }
 
@@ -55,6 +57,7 @@ export interface BackupSummary {
   relationshipEvents: number
   personas: number
   lorebookEntries: number
+  stateHistory: number
   images: number
   imageBytes: number
 }
@@ -86,7 +89,8 @@ export async function createBackup(options?: {
     relationships,
     relationshipEvents,
     personas,
-    lorebookEntries
+    lorebookEntries,
+    conversationStateHistory
   ] = await Promise.all([
     db.worlds.toArray(),
     db.characters.toArray(),
@@ -101,7 +105,8 @@ export async function createBackup(options?: {
     db.relationships.toArray(),
     db.relationshipEvents.toArray(),
     db.personas.toArray(),
-    db.lorebookEntries.toArray()
+    db.lorebookEntries.toArray(),
+    db.conversationStateHistory.toArray()
   ])
 
   const includeImages = options?.includeImages ?? true
@@ -116,7 +121,7 @@ export async function createBackup(options?: {
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 6,
+    version: 7,
     exportedAt: new Date().toISOString(),
     data: {
       worlds,
@@ -132,7 +137,8 @@ export async function createBackup(options?: {
       relationships,
       relationshipEvents,
       personas,
-      lorebookEntries
+      lorebookEntries,
+      conversationStateHistory
     }
   }
 }
@@ -152,6 +158,7 @@ export function getBackupSummary(
     relationshipEvents: backup.data.relationshipEvents.length,
     personas: backup.data.personas.length,
     lorebookEntries: backup.data.lorebookEntries.length,
+    stateHistory: backup.data.conversationStateHistory.length,
     images: backup.data.messages.reduce(
       (total, message) => total + getMessageImages(message).filter(image => Boolean(image.dataUrl)).length,
       0
@@ -216,7 +223,7 @@ export async function parseBackupFile(
     throw new Error('这不是 AI Companion Phone 备份文件。')
   }
 
-  if (![1, 2, 3, 4, 5, 6].includes(Number(parsed.version))) {
+  if (![1, 2, 3, 4, 5, 6, 7].includes(Number(parsed.version))) {
     throw new Error('当前版本暂不支持此备份版本。')
   }
 
@@ -245,7 +252,7 @@ export async function parseBackupFile(
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 6,
+    version: 7,
     exportedAt:
       typeof parsed.exportedAt === 'string'
         ? parsed.exportedAt
@@ -264,7 +271,8 @@ export async function parseBackupFile(
       relationships: optionalArray('relationships') as CharacterRelationship[],
       relationshipEvents: optionalArray('relationshipEvents') as RelationshipEvent[],
       personas: optionalArray('personas') as UserPersona[],
-      lorebookEntries: optionalArray('lorebookEntries') as LorebookEntry[]
+      lorebookEntries: optionalArray('lorebookEntries') as LorebookEntry[],
+      conversationStateHistory: optionalArray('conversationStateHistory') as ConversationStateHistory[]
     }
   }
 }
@@ -291,6 +299,7 @@ export async function restoreBackup(
     await db.relationshipEvents.clear()
     await db.personas.clear()
     await db.lorebookEntries.clear()
+    await db.conversationStateHistory.clear()
     await db.promptDebugTraces.clear()
 
     if (plainBackup.data.worlds.length) {
@@ -334,6 +343,9 @@ export async function restoreBackup(
     }
     if (plainBackup.data.lorebookEntries.length) {
       await db.lorebookEntries.bulkPut(plainBackup.data.lorebookEntries)
+    }
+    if (plainBackup.data.conversationStateHistory.length) {
+      await db.conversationStateHistory.bulkPut(plainBackup.data.conversationStateHistory)
     }
   })
 }

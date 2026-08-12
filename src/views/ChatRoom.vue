@@ -51,9 +51,12 @@ import {
   clearMemories,
   createLocalSummary,
   listMemories,
-  rememberFromMessage,
+  rememberCharacterObservation,
+  rememberFromMessageDetailed,
+  buildMemoryWriteNotice,
   removeMemory,
-  selectMemoryHits
+  recordMemoryHits,
+  selectMemoryHitsDetailed
 } from '../services/memoryService'
 import { generateVisibleCharacterState } from '../services/characterStateService'
 import {
@@ -67,8 +70,9 @@ import { getOrCreateUserProfile } from '../services/userProfile'
 import { getPersonaForChat, listPersonas } from '../services/personaService'
 import { buildLorebookPrompt } from '../services/lorebookService'
 import { composeRoleplaySystemPrompt } from '../services/promptComposer'
-import { estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
-import { estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
+import { estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
+import { analyzePromptSections, buildRuleInfluences, buildTruncationNotes, estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
+import { buildConversationStatePrompt, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
 import type {
   Character,
   CharacterMemory,
@@ -138,6 +142,14 @@ let localAudioObjectUrl = ''
 let lastMusicSaveSecond = -1
 
 const title = computed(() => character.value?.name || conversation.value?.title || '聊天')
+const displayedConversationState = computed<ConversationState | undefined>(() => {
+  if (!conversationState.value) return undefined
+  if (!chatSettings.value) return conversationState.value
+  return {
+    ...conversationState.value,
+    presence: resolvePresenceMode(chatSettings.value, conversationState.value)
+  }
+})
 const displayUserProfile = computed<UserProfile | undefined>(() => {
   const persona = activePersona.value
   if (!persona) return userProfile.value
@@ -268,6 +280,8 @@ function wait(ms: number, signal?: AbortSignal) {
 }
 
 function messagePreview(message: Message, maxLength = 42) {
+  if (message.recalledAt) return '[已撤回的消息]'
+  if (message.type === 'action') return `[动作] ${message.content}`
   if (message.type === 'image') {
     const caption = message.content.trim()
     return caption ? `[图片] ${caption}` : '[图片]'
@@ -307,7 +321,9 @@ function chatTurnContentText(content: ChatTurn['content']) {
 function formatMessageForPrompt(message: Message) {
   const caption = message.content.trim()
   const imageCount = getMessageImages(message).length
-  const base = message.type === 'image'
+  const base = message.type === 'image' && message.placeholderImagePrompt
+    ? `<shared_image_description>${message.placeholderImagePrompt}</shared_image_description>`
+    : message.type === 'image'
     ? [
       `<image_share count="${imageCount || 1}" details="unavailable">`,
       caption ? `用户附言：${caption}` : '用户没有附言。',
@@ -316,6 +332,8 @@ function formatMessageForPrompt(message: Message) {
     ].join('\n')
     : message.type === 'voice'
       ? `<voice_message>${message.content}</voice_message>`
+      : message.type === 'action'
+        ? `<scene_action perspective="remote">${message.content}</scene_action>`
       : message.type === 'emoji'
         ? `<emoji_message>${message.content}</emoji_message>`
         : /^(?:\/ooc\b|ooc\s*[：:])/i.test(message.content.trim())
@@ -611,7 +629,14 @@ async function loadConversation(conversationId: string) {
         worldId: conversationRow.worldId,
         messages: recoveredMessageRows,
         enabled: settingsRow.proactiveEnabled ?? true,
-        intervalHours: settingsRow.proactiveIntervalHours ?? 12
+        intervalHours: settingsRow.proactiveIntervalHours ?? 12,
+        frequency: settingsRow.proactiveFrequency,
+        quietHoursEnabled: settingsRow.proactiveQuietHoursEnabled,
+        quietStart: settingsRow.proactiveQuietStart,
+        quietEnd: settingsRow.proactiveQuietEnd,
+        allowedSources: settingsRow.proactiveAllowedSources,
+        memories: memoryRows,
+        state: stateRow
       })
       if (proactive) {
         messages.value = [...recoveredMessageRows, proactive]
@@ -630,42 +655,6 @@ async function loadConversation(conversationId: string) {
       ? `聊天加载失败：${error.message}`
       : '聊天加载失败。'
   }
-}
-
-function splitReplyText(text: string, enabled: boolean) {
-  const normalized = text.trim()
-  if (!enabled) return [normalized]
-
-  const paragraphs = normalized
-    .split(/\n\s*\n+/)
-    .map(item => item.trim())
-    .filter(Boolean)
-
-  if (paragraphs.length > 1) return paragraphs.slice(0, 3)
-
-  if (normalized.length < 90) return [normalized]
-
-  const sentences = normalized
-    .split(/(?<=[。！？!?])\s*/)
-    .map(item => item.trim())
-    .filter(Boolean)
-
-  if (sentences.length < 3) return [normalized]
-
-  const groups: string[] = []
-  let current = ''
-
-  for (const sentence of sentences) {
-    if (groups.length < 2 && current.length >= 45) {
-      groups.push(current)
-      current = sentence
-    } else {
-      current += sentence
-    }
-  }
-
-  if (current) groups.push(current)
-  return groups.filter(Boolean).slice(0, 3)
 }
 
 async function refreshMemoryList() {
@@ -876,15 +865,14 @@ async function finishStreamingMessage(
   output: ParsedCompanionOutput,
   multiBubble: boolean
 ) {
-  let actions = output.messages.slice()
-  if (actions.length === 1 && actions[0].kind === 'text' && !output.rawPacket && multiBubble) {
-    actions = splitReplyText(actions[0].content, true).map(content => ({ kind: 'text' as const, content }))
-  }
+  let actions = character.value && chatSettings.value
+    ? shapeCompanionActions(output.messages.slice(), character.value, { ...chatSettings.value, multiBubble }, Boolean(output.rawPacket), conversationState.value)
+    : output.messages.slice()
   if (!actions.length) throw new Error('模型没有返回有效回复。')
   session.text = actions.map(item => item.content).join('\n\n')
   const canReuse = Boolean(session.messageId) && actions.length === 1 && actions[0].kind === 'text' && session.type !== 'voice' && session.type !== 'emoji'
   if (canReuse && session.messageId) {
-    await db.messages.update(session.messageId, { content: actions[0].content, status: 'delivered', provider: session.provider, model: session.model, fallback: session.fallback, errorText: undefined, protocolVersion: output.rawPacket ? 1 : undefined })
+    await db.messages.update(session.messageId, { content: actions[0].content, status: 'delivered', provider: session.provider, model: session.model, fallback: session.fallback, errorText: undefined, protocolVersion: output.rawPacket ? 2 : undefined })
   } else {
     await saveAssistantActions({ actions, provider: session.provider, model: session.model, fallback: session.fallback, type: session.type, replaceMessageId: session.messageId })
   }
@@ -950,33 +938,96 @@ async function preserveInterruptedStream(
 }
 
 function actionMessageType(action: CompanionActionMessage, baseType?: Message['type']): Message['type'] {
+  if (action.kind === 'scene_action') return 'action'
   if (action.kind === 'emoji') return 'emoji'
   if (action.kind === 'voice') return 'voice'
+  if (action.kind === 'image_placeholder') return 'image'
   return baseType === 'music' ? 'music' : 'text'
 }
 function messagePacingDelay(action: CompanionActionMessage, index: number) {
-  if (index === 0 || !chatSettings.value?.naturalDelay) return 0
+  if (action.kind === 'typing_pause') return action.delayMs ?? 620
+  if (index === 0 || !chatSettings.value?.naturalDelay) return action.delayMs ?? 0
   const pacing = chatSettings.value.messagePacing ?? 'natural'
-  if (pacing === 'off') return 0
+  if (pacing === 'off') return action.delayMs ?? 0
   const speedFactor = character.value?.replySpeed === 'slow' ? 1.35 : character.value?.replySpeed === 'instant' ? .65 : 1
   const base = pacing === 'quick' ? 260 : pacing === 'slow' ? 760 : 430
   const perCharacter = action.kind === 'emoji' ? 0 : pacing === 'slow' ? 17 : 11
-  return Math.round((base + Math.min(1400, action.content.length * perCharacter)) * speedFactor)
+  return Math.max(action.delayMs ?? 0, Math.round((base + Math.min(1400, action.content.length * perCharacter)) * speedFactor))
+}
+function resolveActionTarget(targetMessageId: string | undefined, sender: 'user' | 'assistant') {
+  if (targetMessageId && targetMessageId !== 'latest_user' && targetMessageId !== 'latest_assistant') {
+    return messages.value.find(item => item.id === targetMessageId)
+  }
+  const wantUser = targetMessageId === 'latest_user' || sender === 'user'
+  return [...messages.value].reverse().find(item => wantUser ? item.senderId === 'user' : item.senderId !== 'user')
 }
 async function saveAssistantActions(options: { actions: CompanionActionMessage[]; provider: string; model: string; fallback: boolean; type?: Message['type']; signal?: AbortSignal; replaceMessageId?: string }) {
   if (!conversation.value || !options.actions.length) return
   const activeConversation = conversation.value
   const groupId = crypto.randomUUID()
-  if (options.replaceMessageId) await db.messages.delete(options.replaceMessageId)
+  if (options.replaceMessageId) {
+    await db.messages.delete(options.replaceMessageId)
+    messages.value = messages.value.filter(item => item.id !== options.replaceMessageId)
+  }
+
   for (let index = 0; index < options.actions.length; index += 1) {
     if (options.signal?.aborted) throw new DOMException('请求已取消', 'AbortError')
     const action = options.actions[index]
     const delay = messagePacingDelay(action, index)
     if (delay > 0) await wait(delay, options.signal)
+
+    if (action.kind === 'typing_pause') continue
+
+    if (action.kind === 'recall_message') {
+      const target = resolveActionTarget(action.targetMessageId, 'assistant')
+      if (target && target.senderId !== 'user' && !target.recalledAt) {
+        const recalledAt = new Date().toISOString()
+        await db.messages.update(target.id, {
+          recalledAt,
+          recalledOriginalContent: target.content,
+          content: '',
+          alternatives: undefined,
+          activeAlternativeIndex: undefined,
+          protocolVersion: 2
+        })
+        const targetIndex = messages.value.findIndex(item => item.id === target.id)
+        if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], recalledAt, recalledOriginalContent: target.content, content: '', alternatives: undefined, activeAlternativeIndex: undefined, protocolVersion: 2 }
+      }
+      continue
+    }
+
+    if (action.kind === 'react_to_message') {
+      const target = resolveActionTarget(action.targetMessageId || 'latest_user', 'user')
+      if (target && action.content) {
+        await db.messages.update(target.id, { reactionEmoji: action.content.slice(0, 8), reactionToMessageId: target.id, protocolVersion: 2 })
+        const targetIndex = messages.value.findIndex(item => item.id === target.id)
+        if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], reactionEmoji: action.content.slice(0, 8), reactionToMessageId: target.id, protocolVersion: 2 }
+      }
+      continue
+    }
+
     const now = new Date(Date.now() + index).toISOString()
     const type = actionMessageType(action, options.type)
+    const message: Message = {
+      id: crypto.randomUUID(),
+      worldId: activeConversation.worldId,
+      conversationId: activeConversation.id,
+      senderId: activeConversation.memberIds[0],
+      type,
+      content: action.kind === 'image_placeholder' ? '' : action.content,
+      status: 'delivered',
+      createdAt: now,
+      provider: options.provider,
+      model: options.model,
+      fallback: options.fallback,
+      replyGroupId: groupId,
+      replySequence: index,
+      voiceDurationSeconds: type === 'voice' ? estimateVoiceDuration(action.content) : undefined,
+      placeholderImagePrompt: action.kind === 'image_placeholder' ? action.content : undefined,
+      protocolVersion: 2
+    }
     await db.transaction('rw', db.messages, db.conversations, async () => {
-      await db.messages.add({ id: crypto.randomUUID(), worldId: activeConversation.worldId, conversationId: activeConversation.id, senderId: activeConversation.memberIds[0], type, content: action.content, status: 'delivered', createdAt: now, provider: options.provider, model: options.model, fallback: options.fallback, replyGroupId: groupId, voiceDurationSeconds: type === 'voice' ? estimateVoiceDuration(action.content) : undefined, protocolVersion: 1 })
+      await db.messages.add(message)
       await db.conversations.update(activeConversation.id, { updatedAt: now })
     })
     messages.value = await db.messages.where('conversationId').equals(activeConversation.id).sortBy('createdAt')
@@ -993,6 +1044,7 @@ async function requestAssistantReply(options?: {
   sourceMessageId?: string
   visualMessageId?: string
   alternativeTargetId?: string
+  memoryWriteNotice?: string
 }) {
   if (!conversation.value || !character.value || !chatSettings.value) return
 
@@ -1028,10 +1080,13 @@ async function requestAssistantReply(options?: {
     const persona = activePersona.value ?? await getPersonaForChat(settings)
     activePersona.value = persona
     const latestUserText = [...messages.value].reverse().find(item => item.senderId === 'user')?.content ?? ''
-    const memoryHits = settings.memoryEnabled
-      ? selectMemoryHits(memories.value, [latestUserText, options?.musicPrompt || ''].filter(Boolean).join('\n'), settings.memoryStrength === 'deep' ? 14 : settings.memoryStrength === 'light' ? 6 : 10)
+    const memoryQuery = [latestUserText, options?.musicPrompt || '', conversationState.value?.unresolvedTopics?.join(' ') || ''].filter(Boolean).join('\n')
+    const memoryHitDetails = settings.memoryEnabled
+      ? selectMemoryHitsDetailed(memories.value, memoryQuery, settings.memoryStrength === 'deep' ? 14 : settings.memoryStrength === 'light' ? 6 : 10)
       : []
+    const memoryHits = memoryHitDetails.map(item => item.memory)
     const memoryPrompt = settings.memoryEnabled ? buildMemoryPrompt(memoryHits, conversationState.value?.summary ?? '') : ''
+    if (memoryHitDetails.length) void recordMemoryHits(memoryHitDetails)
 
     const lorebook = settings.lorebookEnabled
       ? await buildLorebookPrompt({
@@ -1073,7 +1128,7 @@ async function requestAssistantReply(options?: {
         ? messages.value.slice(0, alternativeIndex)
         : messages.value
       const turns: ChatTurn[] = promptMessages
-        .filter(message => message.type !== 'system')
+        .filter(message => message.type !== 'system' && !message.recalledAt)
         .slice(-settings.recentMessageLimit)
         .map(message => ({
           role: message.senderId === 'user'
@@ -1130,6 +1185,9 @@ async function requestAssistantReply(options?: {
               : '',
             lorebookPrompt: lorebook.prompt,
             currentSummary: conversationState.value?.summary || '',
+            statePrompt: buildConversationStatePrompt(conversationState.value ? { ...conversationState.value, presence: resolvePresenceMode(settings, conversationState.value) } : undefined),
+            conversationState: conversationState.value ? { ...conversationState.value, presence: resolvePresenceMode(settings, conversationState.value) } : undefined,
+            memoryWriteNotice: options?.memoryWriteNotice,
             hasImages: includeVision && Boolean(visualMessage),
             imageCount: includeVision && visualMessage
               ? getMessageImageUrls(visualMessage).length
@@ -1155,7 +1213,25 @@ async function requestAssistantReply(options?: {
       if (!debugTrace && settings.promptDebugEnabled) {
         const systemPrompt = chatTurnContentText(request.messages[0]?.content || '')
         const recentMessages = request.messages.slice(1).map(turn => ({ role: turn.role, content: chatTurnContentText(turn.content) }))
-        debugTrace = await savePromptDebugTrace({ conversationId: activeConversation.id, characterId: activeCharacter.id, provider: activeProvider.id, model: request.model, roleplayMode: settings.roleplayMode, personaName: persona.name, systemPrompt, recentMessages, activatedLorebook: lorebook.activated.map(item => ({ id: item.id, title: item.title })), memoryHits: memoryHits.map(item => ({ id: item.id, content: item.content, importance: item.importance })), imageCount: includeVisionCount(request), estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages), protocolEnabled: settings.actionProtocolEnabled })
+        const promptSections = analyzePromptSections(systemPrompt, recentMessages)
+        debugTrace = await savePromptDebugTrace({
+          conversationId: activeConversation.id,
+          characterId: activeCharacter.id,
+          provider: activeProvider.id,
+          model: request.model,
+          roleplayMode: settings.roleplayMode,
+          personaName: persona.name,
+          systemPrompt,
+          recentMessages,
+          activatedLorebook: lorebook.activated.map(item => ({ id: item.id, title: item.title, reason: item.activationReason })),
+          memoryHits: memoryHitDetails.map(item => ({ id: item.memory.id, content: item.memory.content, importance: item.memory.importance, layer: item.memory.layer, score: item.score, reason: item.reasons.join('；') })),
+          imageCount: includeVisionCount(request),
+          estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages),
+          protocolEnabled: settings.actionProtocolEnabled,
+          promptSections,
+          truncations: buildTruncationNotes({ allMessageCount: messages.value.length, includedMessageCount: recentMessages.length, systemPrompt, sections: promptSections }),
+          ruleInfluences: buildRuleInfluences(systemPrompt)
+        })
       }
       streamSession.provider = activeProvider.id
       streamSession.model = request.model
@@ -1258,10 +1334,47 @@ async function requestAssistantReply(options?: {
 
     const parsedOutput = parseCompanionOutput(response.text)
     if (!parsedOutput.messages.length) throw new Error('模型没有返回可显示的角色回复。')
-    if (debugTrace) await patchPromptDebugTrace(debugTrace.id, { provider: providerId, model: usedModel, rawOutput: response.text, visibleOutput: parsedOutput.visibleText, actionSummary: parsedOutput.actionSummary, naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(parsedOutput.visibleText)] })
+    if (debugTrace) await patchPromptDebugTrace(debugTrace.id, {
+      provider: providerId,
+      model: usedModel,
+      rawOutput: response.text,
+      visibleOutput: parsedOutput.visibleText,
+      actionSummary: parsedOutput.actionSummary,
+      naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(parsedOutput.visibleText)],
+      naturalnessScore: scoreNaturalness({
+        text: parsedOutput.visibleText,
+        character: activeCharacter,
+        latestUserText,
+        relationshipNote: conversationState.value?.relationshipNote,
+        imageCount: visualMessage ? getMessageImageUrls(visualMessage).length : 0,
+        recentAssistantMessages: messages.value.filter(item => item.senderId !== 'user')
+      })
+    })
     if (!options?.alternativeTargetId && parsedOutput.status && conversationState.value) {
-      const statePatch = mergeStatusIntoConversationState(conversationState.value, parsedOutput.status)
-      conversationState.value = await patchConversationState(activeConversation.id, { ...statePatch, lastActionSummary: parsedOutput.actionSummary })
+      const beforeState = conversationState.value
+      const statePatch = mergeStatusIntoConversationState(beforeState, parsedOutput.status)
+      const nextState = await patchConversationState(activeConversation.id, { ...statePatch, lastActionSummary: parsedOutput.actionSummary })
+      await recordConversationStateChanges({
+        conversationId: activeConversation.id,
+        characterId: activeCharacter.id,
+        before: beforeState,
+        after: nextState,
+        sourceMessageId: options?.sourceMessageId
+      })
+      conversationState.value = nextState
+      if (settings.memoryEnabled && (parsedOutput.status.relationshipNote || parsedOutput.status.innerThought)) {
+        const observation = [parsedOutput.status.relationshipNote, parsedOutput.status.innerThought]
+          .filter(Boolean)
+          .join('；')
+        await rememberCharacterObservation({
+          conversationId: activeConversation.id,
+          characterId: activeCharacter.id,
+          content: `角色主观感受：${observation}`,
+          sourceMessageId: options?.sourceMessageId,
+          importance: parsedOutput.status.relationshipNote ? 4 : 3
+        })
+        await refreshMemoryList()
+      }
       const characterPatch: Partial<Character> = { mood: parsedOutput.status.mood || activeCharacter.mood, activity: parsedOutput.status.activity || activeCharacter.activity, updatedAt: new Date().toISOString() }
       await db.characters.update(activeCharacter.id, characterPatch)
       character.value = { ...activeCharacter, ...characterPatch }
@@ -1283,8 +1396,7 @@ async function requestAssistantReply(options?: {
       await finishStreamingMessage(streamSession, parsedOutput, settings.multiBubble)
     } else {
       if (settings.naturalDelay) await wait(240 + Math.min(900, parsedOutput.visibleText.length * 9), signal)
-      let actions = parsedOutput.messages
-      if (actions.length === 1 && actions[0].kind === 'text' && !parsedOutput.rawPacket && settings.multiBubble) actions = splitReplyText(actions[0].content, true).map(content => ({ kind: 'text' as const, content }))
+      const actions = shapeCompanionActions(parsedOutput.messages, activeCharacter, settings, Boolean(parsedOutput.rawPacket), conversationState.value)
       await saveAssistantActions({ actions, provider: providerId, model: usedModel, fallback, type: options?.type, signal })
     }
 
@@ -1310,8 +1422,9 @@ async function requestAssistantReply(options?: {
     if (settings.autoReadAloud && speechPlaybackAvailable.value) {
       const latestAssistant = [...messages.value]
         .reverse()
-        .find(message => message.senderId !== 'user' && message.status === 'delivered')
-      speakText(parsedOutput.visibleText, latestAssistant?.id ?? '')
+        .find(message => message.senderId !== 'user' && message.type !== 'action' && message.status === 'delivered')
+      const spokenText = parsedOutput.messages.filter(item => item.kind === 'text' || item.kind === 'voice').map(item => item.content).filter(Boolean).join('\n') || parsedOutput.visibleText
+      speakText(spokenText, latestAssistant?.id ?? '')
     }
   } catch (error) {
     if (isAbortError(error)) {
@@ -1429,21 +1542,31 @@ async function send() {
     messages.value = await db.messages.where('conversationId').equals(activeConversation.id).sortBy('createdAt')
     await scrollToBottom()
     relationship.value = await recordInteraction({ character: character.value, conversationId: activeConversation.id, message })
+    if (text && conversationState.value) {
+      const beforeState = conversationState.value
+      const derivedPatch = deriveUserStatePatch(text, beforeState)
+      const nextState = await patchConversationState(activeConversation.id, derivedPatch)
+      await recordConversationStateChanges({ conversationId: activeConversation.id, characterId: character.value.id, before: beforeState, after: nextState, sourceMessageId: messageId })
+      conversationState.value = nextState
+    }
+    let memoryWriteNotice = ''
     if (chatSettings.value?.memoryEnabled && text) {
-      await rememberFromMessage({
+      const memoryWrite = await rememberFromMessageDetailed({
         conversationId: activeConversation.id,
         characterId: character.value.id,
         sourceMessageId: messageId,
         text,
         strength: chatSettings.value.memoryStrength
       })
+      memoryWriteNotice = buildMemoryWriteNotice(memoryWrite, text)
       await refreshMemoryList()
+      if (memoryWrite.conflicts.length) noticeMessage.value = '发现一组记忆冲突，可在“记忆管理”中确认正确版本。'
     }
     if (images.length) {
       visionImageCount.value = images.length
       visionStage.value = 'sent'
     }
-    await requestAssistantReply({ sourceMessageId: messageId, visualMessageId: images.length ? messageId : undefined })
+    await requestAssistantReply({ sourceMessageId: messageId, visualMessageId: images.length ? messageId : undefined, memoryWriteNotice })
   } catch (error) {
     await updateUserMessageState(messageId, 'failed', {
       errorText: error instanceof Error ? error.message : '消息发送失败。'
@@ -2194,7 +2317,7 @@ onUnmounted(() => {
           v-if="activePanel === 'thought'"
           :title="title"
           :character="character"
-          :conversation-state="conversationState"
+          :conversation-state="displayedConversationState"
           :relationship="relationship"
           :chat-settings="chatSettings"
           :is-loading="isLoadingThought"
@@ -2242,7 +2365,7 @@ onUnmounted(() => {
           :provider-label="providerLabel"
           :vision-capability-label="visionCapabilityLabel"
           :model-settings="modelSettings"
-          :conversation-state="conversationState"
+          :conversation-state="displayedConversationState"
           :personas="personas"
           :greetings="availableGreetings"
           :panel-style="panelStyle"
@@ -2263,6 +2386,7 @@ onUnmounted(() => {
           @open-lorebook="router.push(`/settings/lorebook?character=${character?.id || ''}`)"
           @open-character-card="character && router.push(`/characters/${character.id}/card`)"
           @open-prompt-debug="conversation && router.push(`/chat/${conversation.id}/debug`)"
+          @open-memory-manager="conversation && router.push(`/chat/${conversation.id}/memory`)"
           @use-greeting="insertCharacterGreeting"
         />
 

@@ -25,11 +25,14 @@ const isImageAvatar = computed(() => {
   )
 })
 
-const avatarStyle = computed(() => ({
-  width: `${props.size}px`,
-  height: `${props.size}px`,
-  fontSize: `${Math.round(props.size * 0.52)}px`
-}))
+const avatarStyle = computed(() => {
+  const size = props.size ?? 44
+  return {
+    width: `${size}px`,
+    height: `${size}px`,
+    fontSize: `${Math.round(size * 0.52)}px`
+  }
+})
 </script>
 
 <template>

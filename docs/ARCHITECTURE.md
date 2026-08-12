@@ -1606,3 +1606,112 @@ Dexie：V7
 Backup：V6
 新增表：promptDebugTraces
 ```
+
+
+---
+
+## V0.4.2 长期记忆与主动陪伴架构
+
+### 记忆写入与检索
+
+```text
+用户消息
+→ extractMemoryCandidates
+→ 相似度去重 / 合并
+→ 单值主题冲突检测
+→ memories（六层结构）
+
+本轮消息 + 未完话题
+→ selectMemoryHitsDetailed
+→ 关键词、重要度、层级、锁定、日期与冲突评分
+→ buildMemoryPrompt
+→ Prompt Composer
+```
+
+角色状态中的关系感受和内心想法可作为“角色主观记忆”保存，和客观事实分开。
+
+### 状态协议 V2
+
+```text
+companion_packet.status
+→ parseCompanionOutput
+→ mergeStatusIntoConversationState
+→ conversationStates
+→ recordConversationStateChanges
+→ conversationStateHistory
+```
+
+状态字段只用于后续上下文和自然 UI，不直接显示 JSON。
+
+### 主动消息
+
+```text
+打开聊天
+→ 检查安静时段 / 最短间隔 / 频率 / 关系阶段
+→ 承诺到期 > 未完话题 > 关心状态 > 剧情事件 > 分享日常
+→ 去重
+→ 写入带 proactiveSource 的普通角色消息
+```
+
+主动消息当前仍是“打开应用时检查”，尚未使用后台推送。
+
+### 调试链路
+
+```text
+最终 Prompt
+→ analyzePromptSections / buildTruncationNotes
+→ 世界书触发原因 + 记忆命中原因
+→ 原始模型输出 / 互动协议解析
+→ 自然度规则评分
+→ promptDebugTraces（最多 20 条，不进入备份）
+```
+
+### 数据版本
+
+- Dexie V8：新增 `conversationStateHistory`，扩展 memories/messages 索引。
+- Backup V7：加入状态变化历史，继续兼容 V1～V6。
+
+
+---
+
+## V0.4.2.1 场景距离双模式消息架构
+
+### 表现模式
+
+```text
+ChatSettings.presenceMode = auto | together | remote
+ConversationState.presence = together | remote
+        ↓
+resolvePresenceMode()
+        ↓
+shapeCompanionActions()
+   ├─ together：scene_action → （动作）+ dialogue → 同一 text 消息
+   └─ remote：scene_action → 独立 action 消息；dialogue → 多条 text 消息
+```
+
+`actionVisibility` 控制玩家是否看到场景动作：`always / together / off`。远程 Action 是玩家可见的角色侧写，不等价于角色通过手机发送的文字；`typing_pause / recall_message / react_to_message` 等仍属于手机行为。
+
+### 消息落库
+
+同一轮角色回复共享 `replyGroupId`，分开的消息记录使用 `replySequence` 保持顺序。`Message.type = action` 用于独立场景动作，普通对白仍为 `text`。旧消息没有这些字段时按旧格式正常渲染。
+
+### 记忆纠偏
+
+```text
+明确记忆消息
+→ stripMemoryCommand
+→ 未来事件识别 / reminder 拆分
+→ fact + 可选 promise
+→ subject 稳定化
+→ 重复合并或正反冲突
+→ buildMemoryWriteNotice
+→ Prompt Composer
+```
+
+“下周X”按下一自然周计算。冲突记录不直接同时作为事实注入 Prompt，而由记忆管理页确认。
+
+### 数据版本
+
+- Dexie：V8（不变）
+- Backup：V7（不变）
+- 新增字段均为可选字段或设置默认值，不需要 schema 迁移。

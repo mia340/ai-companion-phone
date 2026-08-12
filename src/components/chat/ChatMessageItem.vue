@@ -78,10 +78,14 @@ onBeforeUnmount(cancel)
 
 <template>
   <div v-if="showTime" class="message-time">{{ timeLabel }}</div>
-  <div :class="['message-row',message.senderId==='user'?'message-row--mine':'message-row--theirs']">
+  <div :class="['message-row',message.senderId==='user'?'message-row--mine':'message-row--theirs',{'message-row--action':message.type==='action'}]">
     <template v-if="message.senderId !== 'user'">
-      <CharacterAvatar v-if="character" :avatar="character.avatar" :name="character.name" :size="38" />
-      <div class="assistant-message-stack">
+      <div v-if="message.type==='action'" class="scene-action-card">
+        <small>{{ character?.name || '角色' }}此刻</small>
+        <span>{{ message.content }}</span>
+      </div>
+      <CharacterAvatar v-if="character && message.type!=='action'" :avatar="character.avatar" :name="character.name" :size="38" />
+      <div v-if="message.type!=='action'" class="assistant-message-stack">
         <button
           :class="['bubble','bubble--theirs',{
             'bubble--music':message.type==='music',
@@ -90,7 +94,8 @@ onBeforeUnmount(cancel)
             'bubble--multi-image':message.type==='image' && images.length>1,
             'bubble--streaming':streaming,
             'bubble--emoji':message.type==='emoji',
-            'bubble--voice':message.type==='voice'
+            'bubble--voice':message.type==='voice',
+            'bubble--recalled':Boolean(message.recalledAt)
           }]"
           type="button"
           @pointerdown="start"
@@ -101,7 +106,8 @@ onBeforeUnmount(cancel)
           @click="message.type==='voice' ? emit('toggleSpeech', message) : undefined"
         >
           <span v-if="message.replyTo" class="message-reply-quote"><b>{{ message.replyTo.senderName }}</b><span>{{ message.replyTo.preview }}</span></span>
-          <template v-if="message.type==='image' && urls.length">
+          <template v-if="message.recalledAt"><span class="recalled-message">对方撤回了一条消息</span></template>
+          <template v-else-if="message.type==='image' && urls.length">
             <div :class="['message-image-grid',imageCountClass]">
               <button
                 v-for="(image,index) in images"
@@ -124,11 +130,14 @@ onBeforeUnmount(cancel)
             </div>
             <span v-if="message.content" class="image-caption">{{ message.content }}</span>
           </template>
+          <span v-else-if="message.type==='image' && message.placeholderImagePrompt" class="image-placeholder"><b>角色想分享一张图片</b><small>{{ message.placeholderImagePrompt }}</small></span>
           <span v-else-if="message.type==='image'" class="missing-image">图片未包含在这份备份中<small v-if="message.content">{{ message.content }}</small></span>
           <template v-else-if="message.type==='emoji'"><span class="emoji-message">{{ message.content }}</span></template>
           <template v-else-if="message.type==='voice'"><span class="voice-message-icon">{{ speechState==='playing' ? 'Ⅱ' : '▶' }}</span><span class="voice-message-main"><b>语音消息 · {{ message.voiceDurationSeconds || 2 }}″</b><small>{{ message.content }}</small></span></template>
           <template v-else><span v-if="message.type==='music'" class="music-message-mark">♫</span>{{ message.content }}<i v-if="streaming" class="streaming-caret"></i></template>
         </button>
+        <div v-if="message.reactionEmoji" class="message-reaction">{{ message.reactionEmoji }}</div>
+        <small v-if="message.proactiveSource" class="proactive-source">{{ message.proactiveSource==='continue-topic'?'延续话题':message.proactiveSource==='promise-reminder'?'履行承诺':message.proactiveSource==='daily-share'?'分享日常':message.proactiveSource==='care'?'关心状态':'剧情事件' }}</small>
         <div v-if="speechAvailable && message.type!=='image' && message.type!=='voice' && message.type!=='emoji' && message.content && !streaming" class="speech-controls">
           <button type="button" @click.stop="emit('toggleSpeech',message)">{{ speechState==='playing'?'暂停':speechState==='paused'?'继续':'朗读' }}</button>
           <button v-if="speechState==='playing'||speechState==='paused'" type="button" @click.stop="emit('stopSpeech')">停止</button>
@@ -149,7 +158,8 @@ onBeforeUnmount(cancel)
           'bubble--single-image':message.type==='image' && images.length===1,
           'bubble--multi-image':message.type==='image' && images.length>1,
           'bubble--emoji':message.type==='emoji',
-          'bubble--voice':message.type==='voice'
+          'bubble--voice':message.type==='voice',
+          'bubble--recalled':Boolean(message.recalledAt)
         }]"
         type="button"
         @pointerdown="start"
@@ -159,7 +169,8 @@ onBeforeUnmount(cancel)
         @contextmenu.prevent="openMenu"
       >
         <span v-if="message.replyTo" class="message-reply-quote message-reply-quote--mine"><b>{{ message.replyTo.senderName }}</b><span>{{ message.replyTo.preview }}</span></span>
-        <template v-if="message.type==='image' && urls.length">
+        <template v-if="message.recalledAt"><span class="recalled-message">你撤回了一条消息</span></template>
+        <template v-else-if="message.type==='image' && urls.length">
           <div :class="['message-image-grid',imageCountClass]">
             <button
               v-for="(image,index) in images"
@@ -182,11 +193,13 @@ onBeforeUnmount(cancel)
           </div>
           <span v-if="message.content" class="image-caption image-caption--mine">{{ message.content }}</span>
         </template>
+        <span v-else-if="message.type==='image' && message.placeholderImagePrompt" class="image-placeholder image-placeholder--mine"><b>想分享一张图片</b><small>{{ message.placeholderImagePrompt }}</small></span>
         <span v-else-if="message.type==='image'" class="missing-image missing-image--mine">图片未包含在这份备份中<small v-if="message.content">{{ message.content }}</small></span>
         <template v-else-if="message.type==='emoji'"><span class="emoji-message">{{ message.content }}</span></template>
         <template v-else-if="message.type==='voice'"><span class="voice-message-icon">▶</span><span class="voice-message-main"><b>语音消息 · {{ message.voiceDurationSeconds || 2 }}″</b><small>{{ message.content }}</small></span></template>
         <template v-else>{{ message.content }}</template>
       </button>
+      <span v-if="message.reactionEmoji" class="message-reaction message-reaction--mine">{{ message.reactionEmoji }}</span>
       <button type="button" :class="['message-delivery-state',`message-delivery-state--${message.status}`,{'message-delivery-state--vision-fallback':message.visionFallback}]" :title="message.status==='failed'||message.status==='cancelled'?'点击重试':undefined" @click="message.status==='failed'||message.status==='cancelled'?emit('retryMessage',message):openMenu()">{{ deliveryLabel }}</button>
       <CharacterAvatar :avatar="userProfile?.avatar || '🧑'" :name="userProfile?.name || '我'" :size="38" />
     </template>
@@ -196,7 +209,8 @@ onBeforeUnmount(cancel)
 <style scoped>
 .message-time{margin:15px 0 9px;text-align:center;color:rgba(91,63,74,.46);font-size:11px}
 .message-row{width:100%;display:flex;align-items:flex-start;gap:9px;margin:9px 0;animation:bubble-in .22s cubic-bezier(.2,.82,.24,1) both}
-.message-row--theirs{justify-content:flex-start}.message-row--mine{justify-content:flex-end}
+.message-row--theirs{justify-content:flex-start}.message-row--mine{justify-content:flex-end}.message-row--action{justify-content:center;margin:5px 0}
+.scene-action-card{width:min(84%,430px);display:grid;gap:3px;padding:8px 12px;border:1px solid rgba(174,111,139,.12);border-radius:13px;background:rgba(255,255,255,.52);color:#806573;text-align:center;box-shadow:none}.scene-action-card small{color:#b06f8c;font-size:9px;letter-spacing:.04em}.scene-action-card span{font-size:12px;line-height:1.55;font-style:italic;white-space:pre-wrap}
 .assistant-message-stack{min-width:0;max-width:74%;display:flex;flex-direction:column;align-items:flex-start;gap:3px}.assistant-message-stack .bubble{max-width:100%}
 .bubble{position:relative;max-width:74%;padding:11px 14px;overflow:hidden;border:0;border-radius:17px;line-height:1.6;font-size:15px;text-align:left;word-break:break-word;white-space:pre-wrap;box-shadow:0 2px 10px rgba(89,56,70,.06);user-select:text;cursor:default;touch-action:pan-y}
 .bubble--theirs{border-top-left-radius:6px;background:#fff;color:#563f49}.bubble--mine{border-top-right-radius:6px;background:#e88ab0;color:#fff}.bubble--music{background:linear-gradient(145deg,#fff,#fff1f7)}.music-message-mark{margin-right:5px;color:#cf6f98}
@@ -228,4 +242,6 @@ onBeforeUnmount(cancel)
 @media(prefers-reduced-motion:reduce){.message-row,.streaming-caret{animation:none}}
 
 .bubble--emoji{min-width:52px;padding:6px 10px;background:transparent!important;box-shadow:none;font-size:34px;line-height:1.15}.emoji-message{display:block;filter:drop-shadow(0 3px 6px rgba(72,42,55,.12))}.bubble--voice{min-width:190px;display:flex;align-items:center;gap:10px;white-space:normal}.voice-message-icon{width:34px;height:34px;display:grid;place-items:center;flex:0 0 auto;border-radius:50%;background:rgba(215,105,151,.12);color:#c05f88;font-size:13px;font-weight:900}.bubble--mine .voice-message-icon{background:rgba(255,255,255,.22);color:#fff}.voice-message-main{min-width:0;display:flex;flex:1;flex-direction:column;gap:2px}.voice-message-main b{font-size:12px}.voice-message-main small{max-width:210px;overflow:hidden;opacity:.72;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+
+.bubble--recalled{background:rgba(255,255,255,.52);box-shadow:none}.recalled-message{color:#9c818c;font-size:12px;font-style:italic}.message-reaction{align-self:flex-start;margin:-8px 0 0 10px;padding:2px 7px;border:1px solid rgba(128,88,105,.1);border-radius:999px;background:#fff;font-size:15px;box-shadow:0 3px 10px rgba(80,49,62,.08)}.message-reaction--mine{align-self:flex-end;margin:24px -18px 0 0;z-index:2}.proactive-source{margin:0 0 0 4px;color:#a27c8c;font-size:9px}.image-placeholder{min-width:190px;display:grid;gap:5px;padding:18px 15px;border-radius:13px;background:linear-gradient(145deg,#fff2f7,#f2e5ed);color:#7a5967;text-align:center}.image-placeholder:before{content:'▧';font-size:30px;color:#c66b91}.image-placeholder small{color:#977381;line-height:1.5}.image-placeholder--mine{background:rgba(255,255,255,.18);color:#fff}.image-placeholder--mine small{color:rgba(255,255,255,.82)}
 </style>

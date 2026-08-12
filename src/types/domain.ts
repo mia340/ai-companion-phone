@@ -14,7 +14,14 @@ export type InitiativeLevel = 'low' | 'natural' | 'high'
 export type EmojiFrequency = 'none' | 'low' | 'natural' | 'high'
 export type QuestionFrequency = 'low' | 'natural' | 'high'
 export type MessagePacing = 'off' | 'quick' | 'natural' | 'slow'
-export type CompanionMessageKind = 'text' | 'emoji' | 'voice'
+export type PresenceMode = 'auto' | 'together' | 'remote'
+export type ActionVisibility = 'off' | 'together' | 'always'
+export type CompanionMessageKind = 'text' | 'emoji' | 'voice' | 'scene_action'
+export type CompanionActionKind = CompanionMessageKind | 'typing_pause' | 'recall_message' | 'react_to_message' | 'image_placeholder'
+export type ProactiveFrequency = 'low' | 'natural' | 'high'
+export type ProactiveSource = 'continue-topic' | 'promise-reminder' | 'daily-share' | 'care' | 'story-event'
+export type MemoryLayer = 'fact' | 'subjective' | 'shared' | 'promise' | 'relationship' | 'story'
+export type MemoryStatus = 'active' | 'conflict' | 'invalid'
 
 export interface CharacterExampleDialogue {
   id: UUID
@@ -171,7 +178,7 @@ export interface Message {
   worldId: UUID
   conversationId: UUID
   senderId: UUID | 'user'
-  type: 'text' | 'system' | 'music' | 'image' | 'emoji' | 'voice'
+  type: 'text' | 'system' | 'music' | 'image' | 'emoji' | 'voice' | 'action'
   content: string
   status: MessageStatus
   createdAt: string
@@ -181,6 +188,7 @@ export interface Message {
   fallback?: boolean
   errorText?: string
   replyGroupId?: UUID
+  replySequence?: number
   replyTo?: MessageReplyReference
   imageDataUrl?: string
   imageName?: string
@@ -196,7 +204,13 @@ export interface Message {
   activeAlternativeIndex?: number
   editedAt?: string
   voiceDurationSeconds?: number
-  protocolVersion?: 1
+  protocolVersion?: 1 | 2
+  recalledAt?: string
+  recalledOriginalContent?: string
+  reactionEmoji?: string
+  reactionToMessageId?: UUID
+  proactiveSource?: ProactiveSource
+  placeholderImagePrompt?: string
 }
 
 export type MemoryStrength = 'light' | 'standard' | 'deep'
@@ -223,6 +237,11 @@ export interface ChatSettings {
   autoFallback: boolean
   proactiveEnabled: boolean
   proactiveIntervalHours: number
+  proactiveFrequency: ProactiveFrequency
+  proactiveQuietHoursEnabled: boolean
+  proactiveQuietStart: string
+  proactiveQuietEnd: string
+  proactiveAllowedSources: ProactiveSource[]
   autoReadAloud: boolean
   voiceName: string
   voiceRate: number
@@ -237,6 +256,10 @@ export interface ChatSettings {
   actionProtocolEnabled: boolean
   messagePacing: MessagePacing
   promptDebugEnabled: boolean
+
+  // V0.4.2.1 场景距离与动作视角
+  presenceMode: PresenceMode
+  actionVisibility: ActionVisibility
   updatedAt: string
 }
 
@@ -254,6 +277,22 @@ export interface CharacterMemory {
   content: string
   importance: 1 | 2 | 3 | 4 | 5
   sourceMessageId?: UUID
+
+  // V0.4.2 多层记忆与可靠性字段。旧记录缺少这些字段时会按默认值读取。
+  layer?: MemoryLayer
+  subject?: string
+  topicKey?: string
+  confidence?: number
+  locked?: boolean
+  status?: MemoryStatus
+  dueAt?: string
+  sourceType?: 'automatic' | 'manual' | 'imported'
+  lastHitAt?: string
+  hitCount?: number
+  mergedFrom?: UUID[]
+  conflictWith?: UUID[]
+  note?: string
+
   createdAt: string
   updatedAt: string
 }
@@ -269,10 +308,31 @@ export interface ConversationState {
   lastTechnicalError?: string
   lastProviderNotice?: string
   location?: string
+  presence?: 'together' | 'remote'
   relationshipNote?: string
+  timePeriod?: string
+  energy?: string
+  unresolvedTopics?: string[]
+  pendingEvents?: string[]
+  shortTermGoals?: string[]
+  lastCompletedEvent?: string
   lastActionSummary?: string
+  stateVersion?: 2
   statusUpdatedAt?: string
   updatedAt: string
+}
+
+
+export interface ConversationStateHistory {
+  id: UUID
+  conversationId: UUID
+  characterId: UUID
+  field: 'location' | 'presence' | 'timePeriod' | 'energy' | 'mood' | 'activity' | 'relationship' | 'topic' | 'event' | 'goal'
+  label: string
+  previousValue?: string
+  nextValue: string
+  sourceMessageId?: UUID
+  createdAt: string
 }
 
 export interface MusicState {
@@ -332,10 +392,24 @@ export interface PromptDebugTrace {
   personaName: string
   systemPrompt: string
   recentMessages: PromptDebugMessage[]
-  activatedLorebook: Array<{ id: UUID; title: string }>
-  memoryHits: Array<{ id: UUID; content: string; importance: number }>
+  activatedLorebook: Array<{ id: UUID; title: string; reason?: string }>
+  memoryHits: Array<{ id: UUID; content: string; importance: number; layer?: MemoryLayer; score?: number; reason?: string }>
   imageCount: number
   estimatedCharacters: number
+  promptSections?: Array<{ key: string; label: string; characters: number; budget?: number; truncated?: boolean }>
+  truncations?: string[]
+  ruleInfluences?: string[]
+  naturalnessScore?: {
+    total: number
+    roleConsistency: number
+    aiToneRisk: number
+    repetitionRisk: number
+    questionBalance: number
+    lengthFit: number
+    relationshipResponse: number
+    userFocus: number
+    imageUse: number
+  }
   protocolEnabled: boolean
   rawOutput?: string
   visibleOutput?: string

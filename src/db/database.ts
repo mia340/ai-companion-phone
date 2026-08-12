@@ -9,6 +9,7 @@ import type {
   ContactGroup,
   Conversation,
   ConversationState,
+  ConversationStateHistory,
   Message,
   MusicState,
   CharacterRelationship,
@@ -39,6 +40,7 @@ export class CompanionDatabase extends Dexie {
   personas!: EntityTable<UserPersona, 'id'>
   lorebookEntries!: EntityTable<LorebookEntry, 'id'>
   promptDebugTraces!: EntityTable<PromptDebugTrace, 'id'>
+  conversationStateHistory!: EntityTable<ConversationStateHistory, 'id'>
 
   constructor() {
     super('companion-world-v1')
@@ -139,6 +141,46 @@ export class CompanionDatabase extends Dexie {
       personas: 'id, isDefault, updatedAt',
       lorebookEntries: 'id, worldId, characterId, enabled, priority, updatedAt',
       promptDebugTraces: 'id, conversationId, characterId, createdAt'
+    })
+
+    // V8：多层记忆、状态协议 V2、主动消息来源与状态变化历史。
+    this.version(8).stores({
+      worlds: 'id, createdAt',
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt, status, type, proactiveSource',
+      userProfiles: 'id, updatedAt',
+      modelSettings: 'id, provider, updatedAt',
+      chatSettings: 'id, conversationId, updatedAt',
+      memories: 'id, conversationId, characterId, importance, layer, status, topicKey, dueAt, updatedAt',
+      conversationStates: 'id, updatedAt',
+      conversationStateHistory: 'id, conversationId, characterId, field, createdAt',
+      musicStates: 'id, updatedAt',
+      relationships: 'id, characterId, stage, updatedAt',
+      relationshipEvents: 'id, characterId, conversationId, createdAt',
+      personas: 'id, isDefault, updatedAt',
+      lorebookEntries: 'id, worldId, characterId, enabled, priority, updatedAt',
+      promptDebugTraces: 'id, conversationId, characterId, createdAt'
+    }).upgrade(async transaction => {
+      const memories = transaction.table('memories')
+      await memories.toCollection().modify(memory => {
+        memory.layer = memory.layer || (memory.category === 'promise' ? 'promise' : memory.category === 'relationship' ? 'relationship' : memory.category === 'event' ? 'shared' : 'fact')
+        memory.status = memory.status || 'active'
+        memory.confidence = typeof memory.confidence === 'number' ? memory.confidence : .82
+        memory.locked = Boolean(memory.locked)
+        memory.hitCount = Number(memory.hitCount || 0)
+        memory.sourceType = memory.sourceType || (memory.sourceMessageId ? 'automatic' : 'manual')
+      })
+      const states = transaction.table('conversationStates')
+      await states.toCollection().modify(state => {
+        state.unresolvedTopics = Array.isArray(state.unresolvedTopics) ? state.unresolvedTopics : []
+        state.pendingEvents = Array.isArray(state.pendingEvents) ? state.pendingEvents : []
+        state.shortTermGoals = Array.isArray(state.shortTermGoals) ? state.shortTermGoals : []
+        state.timePeriod = state.timePeriod || ''
+        state.energy = state.energy || '平稳'
+        state.stateVersion = 2
+      })
     })
 
   }

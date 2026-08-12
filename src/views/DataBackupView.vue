@@ -290,6 +290,11 @@ async function importData() {
             <b>{{ summary.lorebookEntries }}</b>
             条世界书设定
           </span>
+
+          <span>
+            <b>{{ summary.stateHistory }}</b>
+            条状态变化
+          </span>
         </div>
 
         <p class="export-time">
