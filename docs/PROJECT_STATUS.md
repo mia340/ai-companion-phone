@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-V0.4.3.4
+V0.4.3.6.1
 
 ## 当前阶段
 
@@ -58,6 +58,29 @@ V0.4.3.4
 - 主动消息来源、频率、最短间隔、安静时段和关系阶段控制
 - 输入停顿、撤回、消息回应表情和主动分享图片占位
 - Prompt 分区预算、截断风险、命中原因、规则影响和自然度评分
+
+### V0.4.3.6.1 构建修复
+
+- 修复 `ChatRoom.vue` 未定义变量 `lorebookPrompt`。
+- 改用当前运行链路已有的 `runtimeLorebookPrompt`。
+- 不改变 V0.4.3.6 社区 UI 优先级与数据结构。
+
+### V0.4.3.6 社区 UI 输出优先级
+
+- 自动识别本轮激活 WorldBook、Preset、角色卡规则和 assistant-output Regex 中的 UI / 固定输出协议。
+- 检测到社区 UI 后停用小手机默认 `scene_action / companion_packet` 输出协议，不再拆分或合并社区作者定义的正文。
+- UI Regex 直接处理模型原始输出；Rich HTML 直接进入 Shadow DOM 安全渲染。
+- 完整 HTML document 会提取 style + body fragment，`body/html` CSS 安全映射到 Shadow Host。
+- 聊天设置移除“动作与对白排版”；无社区 UI 时根据 presence 自动 remote 分开 / together 合并。
+- 安全边界不变：社区 JavaScript 不执行。
+
+### V0.4.3.5 初始状态与 User Resolver
+
+- 新角色不再统一显示“刚刚来到这个世界”；优先从角色卡 first_mes 状态提取活动，没有明确活动就不伪造。
+- 旧角色在通讯录/聊天打开时自动清理历史占位活动与心情，并可从开场明确关系修复旧“朋友”。
+- `{{user}}` 解析升级为三层：当前聊天 Persona、角色卡专属 Persona、角色世界中的剧情身份。三者不互相污染。
+- 内嵌世界书 `user人设 / 用户人设 / user persona` 可自动建立角色专属 Persona；无明确用户名时绝不猜名。
+- 开场与 alternate greetings 统一经过宏替换、普通 `<br>` 换行、Regex/Rich UI 和状态头抽取。
 
 ### V0.4.3.4 可靠性与真实社区资源回归
 

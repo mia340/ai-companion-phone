@@ -1,3 +1,28 @@
+## V0.4.3.6.1 构建修复
+
+修复 V0.4.3.6 Windows `vue-tsc -b` 报错：`ChatRoom.vue` 中残留旧变量名 `lorebookPrompt`，已改为 `runtimeLorebookPrompt`。功能行为沿用 V0.4.3.6，IndexedDB V10 / backup V9 不变。
+
+## V0.4.3.6 社区 UI 输出接管
+
+- 社区角色卡 / 世界书 / Preset / Regex 定义 UI 或固定输出协议时，社区格式优先于小手机默认动作/对白协议。
+- UI 模式不再注入 `scene_action / companion_packet`，也不再执行“动作与对白分开/合并”的二次排版。
+- assistant-output Regex 在 UI 模式直接处理模型原始输出，避免 XML/特殊标签先被默认解析器吃掉。
+- Regex / 角色卡输出 Rich HTML 时直接进入 Safe Rich Runtime；完整 `<!DOCTYPE html><html>...` 会拆成可挂载的 style + body fragment。
+- 去掉聊天设置中的“动作与对白排版”选择；普通角色自动 remote 分开 / together 合并，旧手动值保留但不再覆盖。
+- Prompt Debug 可看到“社区 UI 输出接管”规则影响。
+- 用墨清尘状态栏 UI 与“离婚的诱惑”XML + Regex HTML 状态栏做真实资源检测。
+- 数据库仍为 V10，备份格式仍为 V9。
+
+## V0.4.3.5 初始状态与 User Persona 识别修复
+
+- 删除新角色固定“刚刚来到这个世界 / 期待认识你”占位；优先从角色卡开场状态提取真实活动，否则留空。
+- 通讯录与聊天加载时自动清理历史占位状态；开场明确写了关系时可修复旧“朋友”默认值。
+- Character Card 可从内嵌世界书的“user人设 / 用户人设 / user persona”条目识别角色专属 `{{user}}` Persona。
+- `{{user}}` 本身只作为占位符：没有明确姓名时不猜用户名，运行时使用当前选中的 Persona；世界书里的剧情身份只在当前角色/会话中生效，不覆盖全局“我的资料”。
+- 开场 `<br>` 在普通文本消息中转换为真实换行；完整 Rich HTML / Regex UI 仍按安全 Rich Runtime 渲染。
+- Tavo emoji/XML 状态头继续识别日期、时间、地点、内心等状态；alternate greetings 也走同一条宏、Regex、Rich UI 管线。
+- 数据库仍为 V10，备份格式仍为 V9。
+
 ## V0.4.3.4 可靠性与社区 JSON 兼容修复
 
 - 模型最大输出旧默认 576 / 600 自动迁移到 2048，降低回复截断和半截协议概率。

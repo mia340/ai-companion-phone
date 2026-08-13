@@ -137,9 +137,9 @@ export function resolveActionTextLayout(
   settings: ChatSettings,
   state?: ConversationState
 ): 'separate' | 'merged' {
-  if (settings.actionTextLayout === 'separate' || settings.actionTextLayout === 'merged') {
-    return settings.actionTextLayout
-  }
+  // V0.4.3.6 起不再提供“始终分开 / 始终合并”的手动排版选择。
+  // 无社区 UI 时只按真实场景自动决定：远程分开、同场合并；
+  // 社区 UI 模式则会在 ChatRoom 更上层直接绕过本默认整形。
   return resolvePresenceMode(settings, state) === 'together' ? 'merged' : 'separate'
 }
 
@@ -186,9 +186,7 @@ export function buildInteractionProtocolPrompt(
         ? '必须至少输出 1 条 scene_action，描写角色此刻在另一边真正发生的、有情绪或情境价值的动作，界面会把它显示成玩家可见的独立 Action。通常 1～2 条，不写眨眼、呼吸之类流水账。'
         : '当前动作视角不显示远程动作：不要输出 scene_action。',
       layoutRule,
-      actionTextLayout === 'separate'
-        ? '远程对白必须像真实手机聊天：一个完整句子对应一个 text 消息；两个完整句子不要放进同一个 text。不要把角色身体动作塞进 text 的括号里。'
-        : '当前手动选择了动作与对白合并；仍要保持手机聊天口吻，但不要额外插入换行来分隔动作与对白。'
+      '远程对白必须像真实手机聊天：一个完整句子对应一个 text 消息；两个完整句子不要放进同一个 text。不要把角色身体动作塞进 text 的括号里。'
     ]
 
   return [

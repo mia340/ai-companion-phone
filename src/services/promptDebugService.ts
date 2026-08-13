@@ -50,6 +50,7 @@ const SECTION_LABELS: Record<string, string> = {
   示例对话: '示例对话',
   自然交流规则: '自然回复规则',
   视觉信息使用规则: '图片内部观察规则',
+  '社区 UI 输出接管 · 最高优先级': '社区 UI 输出协议',
   '小手机互动协议 V2': '小手机动作协议',
   小手机互动协议: '小手机动作协议',
   回复前最终提醒: '最终约束'
@@ -108,6 +109,7 @@ export function buildRuleInfluences(systemPrompt: string) {
   if (systemPrompt.includes('不要像客服')) rules.push('启用了去客服腔和减少二选一追问规则。')
   if (systemPrompt.includes('视觉信息使用规则')) rules.push('图片分析被限制为内部观察，最终必须以角色口吻表达。')
   if (systemPrompt.includes('被用户锁定的记忆')) rules.push('本轮包含用户锁定的高可信记忆。')
+  if (systemPrompt.includes('社区 UI 输出接管 · 最高优先级')) rules.push('检测到社区 JSON 自带 UI / 固定输出协议；本轮由社区格式接管，小手机动作/对白排版不会覆盖它。')
   return rules
 }
 

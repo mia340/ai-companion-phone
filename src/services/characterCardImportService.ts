@@ -86,6 +86,22 @@ function inferInitiative(talkativeness?: number): Character['initiative'] | unde
   return 'natural'
 }
 
+function inferRelationshipFromCard(firstMessage: string, embeddedUser?: ImportedPersonaPreview) {
+  const normalized = firstMessage.replace(/<br\s*\/?\s*>/gi, '\n')
+  const explicit = normalized.match(/(?:^|\n)\s*[▪•·-]?\s*关系\s*[:：]\s*([^\n<]{1,24})/i)?.[1]?.trim()
+  if (explicit && !/^(?:无|未知|待定|未设定)$/i.test(explicit)) return explicit
+
+  const identity = [embeddedUser?.patch.identity, embeddedUser?.patch.relationshipNote, embeddedUser?.patch.description]
+    .filter(Boolean)
+    .join(' ')
+  if (/徒弟|弟子/.test(identity)) return '师徒'
+  if (/妻子|丈夫|老公|老婆|配偶|已婚/.test(identity)) return '夫妻'
+  if (/恋人|情侣|男友|女友/.test(identity)) return '恋人'
+  if (/同事/.test(identity)) return '同事'
+  if (/朋友|好友/.test(identity)) return '朋友'
+  return undefined
+}
+
 
 const extractDialogue = (value: unknown): CharacterExampleDialogue[] => {
   const normalized = asText(value)
@@ -129,11 +145,41 @@ export function extractEmbeddedUserTemplate(description: string): string {
 export function parseEmbeddedUserPersonaTemplate(rawTemplate: string, characterName = '角色'): (ImportedPersonaPreview & { rawTemplate: string }) | undefined {
   const cleanTemplate = rawTemplate.trim()
   if (!cleanTemplate) return undefined
-  const preview = parsePersonaText(cleanTemplate, `${characterName} · 原卡用户.txt`)
+
+  // 社区卡并不总使用“{{user}}:”这种 YAML 风格。
+  // 常见写法还有“{{user}}我是洛梨,……”。先移除占位符，再做文本 Persona 解析。
+  const personaText = cleanTemplate
+    .replace(/^\s*\{\{user\}\}\s*(?:[:：]\s*)?/i, '')
+    .trim()
+  const preview = parsePersonaText(personaText || cleanTemplate, `${characterName} · 原卡用户.txt`)
   const fallbackName = `${characterName} · 原卡用户`
-  if (!preview.patch.name || preview.patch.name === '导入的人设') {
+
+  // 自然语言首句中的“我是/我叫/我名为”优先于文件名回退。
+  const explicitName = (personaText || cleanTemplate).match(/^(?:我(?:是|叫|名为)\s*|姓名\s*[:：]\s*)([^,，。；;\n]{1,30})/u)?.[1]?.trim()
+  if (explicitName) preview.patch.name = explicitName
+  else if (!preview.patch.name || preview.patch.name === '导入的人设' || preview.patch.name === `${characterName} · 原卡用户`) {
     preview.patch.name = fallbackName
   }
+
+  if (!preview.patch.age) {
+    const age = (personaText || cleanTemplate).match(/(?:^|[,，。；;.\s])(\d{1,3})\s*岁(?:[,，。；;.\s]|$)/)?.[1]
+    if (age) preview.patch.age = age
+  }
+
+  if (!preview.patch.identity && explicitName) {
+    const firstLine = (personaText || cleanTemplate).split('\n')[0] || ''
+    const afterName = firstLine.slice(firstLine.indexOf(explicitName) + explicitName.length)
+    const identitySource = afterName.split(/\d{1,3}\s*岁/)[0] || afterName
+    const segments = identitySource
+      .split(/[,，。；;.]/)
+      .map(item => item.trim())
+      .filter(Boolean)
+      .filter(item => !/^\d{1,3}\s*岁$/.test(item))
+      .slice(0, 3)
+    if (segments.length) preview.patch.identity = segments.join('、')
+  }
+
+  preview.patch.description = preview.patch.description || personaText || cleanTemplate
   preview.patch.title = preview.patch.title || `${characterName}角色卡自带 {{user}}`
   preview.patch.personaScope = 'character'
   preview.patch.isCardTemplate = true
@@ -152,6 +198,34 @@ export function parseEmbeddedUserPersonaTemplate(rawTemplate: string, characterN
 export function buildEmbeddedUserPreview(description: string, characterName = '角色'): (ImportedPersonaPreview & { rawTemplate: string }) | undefined {
   const rawTemplate = extractEmbeddedUserTemplate(description)
   return parseEmbeddedUserPersonaTemplate(rawTemplate, characterName)
+}
+
+function characterBookEntryRows(value: unknown): Record<string, unknown>[] {
+  const book = asRecord(value)
+  const entries = book.entries
+  if (Array.isArray(entries)) return entries.map(asRecord).filter(item => Object.keys(item).length)
+  if (entries && typeof entries === 'object') return Object.values(asRecord(entries)).map(asRecord).filter(item => Object.keys(item).length)
+  return []
+}
+
+function userPersonaEntryScore(entry: Record<string, unknown>): number {
+  const label = [asText(entry.name), asText(entry.comment), asText(entry.title)].filter(Boolean).join(' ').toLowerCase()
+  const content = asText(entry.content)
+  let score = 0
+  if (/^(?:user|用户|\{\{user\}\}).{0,8}(?:人设|设定|persona|profile)$/i.test(label.replace(/\s+/g, ''))) score += 100
+  if (/(?:user人设|用户人设|userpersona|user设定|用户设定|\{\{user\}\}人设)/i.test(label.replace(/\s+/g, ''))) score += 80
+  if (/^\s*\{\{user\}\}/i.test(content)) score += 30
+  if (/^\s*\{\{user\}\}\s*(?:我(?:是|叫|名为)|姓名\s*[:：])/i.test(content)) score += 40
+  return score
+}
+
+export function buildEmbeddedUserPreviewFromCharacterBook(value: unknown, characterName = '角色'): (ImportedPersonaPreview & { rawTemplate: string }) | undefined {
+  const candidates = characterBookEntryRows(value)
+    .map(entry => ({ entry, score: userPersonaEntryScore(entry) }))
+    .filter(item => item.score >= 60)
+    .sort((a, b) => b.score - a.score)
+  const content = candidates.length ? asText(candidates[0].entry.content) : ''
+  return parseEmbeddedUserPersonaTemplate(content, characterName)
 }
 
 function inferFormat(root: Record<string, unknown>) {
@@ -250,10 +324,23 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
       regexScripts = []
     }
   }
-  const embeddedUser = buildEmbeddedUserPreview(description, asText(data.name) || '角色')
+  const characterName = asText(data.name) || '角色'
+  const embeddedUserFromBook = buildEmbeddedUserPreviewFromCharacterBook(data.character_book, characterName)
+  const embeddedUserFromDescription = buildEmbeddedUserPreview(description, characterName)
+  // “user人设/用户人设”这类专门世界书条目比 description 中的模糊模板更明确。
+  const embeddedUser = embeddedUserFromBook || embeddedUserFromDescription
+  const hasUserPlaceholder = [
+    description,
+    asText(data.scenario),
+    asText(data.first_mes),
+    asText(data.mes_example),
+    JSON.stringify(data.character_book || {})
+  ].some(value => /\{\{user\}\}/i.test(value))
+  const inferredRelationship = inferRelationshipFromCard(asText(data.first_mes), embeddedUser)
   const patch: Partial<Character> = {
     name: asText(data.name) || undefined,
     avatar: importableAvatar(data.avatar ?? record.avatar),
+    relationship: inferredRelationship,
     persona: [personality, description].filter(Boolean).join('\n\n') || undefined,
     scenario: asText(data.scenario) || undefined,
     firstMessage: asText(data.first_mes) || undefined,
@@ -284,8 +371,14 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   if (format === 'legacy-json') notes.push('已按旧版 JSON 字段导入，部分扩展字段可能无法识别。')
   if (!patch.exampleDialogues?.length) notes.push('角色卡没有可识别的示例对话。')
   if (!patch.firstMessage) notes.push('角色卡没有开场白。')
+  if (inferredRelationship) notes.push(`从角色卡明确状态/用户设定识别到与用户关系：${inferredRelationship}。`)
   if (lorebookEntries.length) notes.push(`检测到内嵌角色世界书 ${lorebookEntries.length} 条，将随角色一起导入。`)
-  if (embeddedUser) notes.push(`检测到角色卡自带 {{user}} 用户模板，可直接生成角色专属 Persona 并自动绑定聊天。`)
+  if (embeddedUser) {
+    const sourceLabel = embeddedUserFromBook ? '内嵌世界书 user 人设条目' : '角色 description'
+    notes.push(`检测到${sourceLabel}中的 {{user}} 用户模板，可直接生成角色专属 Persona 并自动绑定聊天。`)
+  } else if (hasUserPlaceholder) {
+    notes.push('检测到 {{user}} 剧情占位，但没有可安全提取的独立用户姓名/Persona：不会猜名字；运行时使用当前聊天 Persona，角色卡与世界书中的剧情关系仍按本会话设定生效。')
+  }
   if (regexScripts.length) notes.push(`检测到内嵌正则 ${regexScripts.length} 条，将保存为角色专属正则并自动启用。`)
   if (depthPrompt) notes.push('检测到 depth_prompt，将按角色卡扩展提示参与运行时 Prompt。')
   if (talkativeness != null) notes.push(`检测到 talkativeness=${talkativeness}，已映射到角色主动程度。`)

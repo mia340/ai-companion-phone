@@ -33,6 +33,13 @@ function substituteMacros(value: string, script: RegexScript, macros?: { user?: 
     .replace(/\{\{char\}\}/gi, transform(macros.char || '{{char}}'))
 }
 
+function substituteReplacementMacros(value: string, macros?: { user?: string; char?: string }) {
+  if (!macros) return value
+  return value
+    .replace(/\{\{user\}\}/gi, macros.user || '{{user}}')
+    .replace(/\{\{char\}\}/gi, macros.char || '{{char}}')
+}
+
 function expandReplacement(template: string, match: string, groups: string[]) {
   let output = template.replace(/\{\{match\}\}/g, match).replace(/\$&/g, match)
   groups.forEach((group, index) => {
@@ -45,7 +52,7 @@ export function applyRegexScript(text: string, script: RegexScript, macros?: { u
   if (!script.enabled || !script.findRegex) return text
   const pattern = parsePattern(substituteMacros(script.findRegex, script, macros))
   if (!pattern) return text
-  const replacement = script.replaceString || ''
+  const replacement = substituteReplacementMacros(script.replaceString || '', macros)
   return text.replace(pattern, (...args: unknown[]) => {
     const match = String(args[0] ?? '')
     const offset = typeof args.at(-2) === 'number' ? Number(args.at(-2)) : 0
@@ -86,13 +93,51 @@ export async function listActiveRegexScripts(characterId: string, target: RegexT
 
 export function normalizeRichHtml(value: string) {
   const trimmed = value.trim()
-  const fenced = trimmed.match(/^```(?:html)?\s*([\s\S]*?)\s*```$/i)
-  return (fenced?.[1] || trimmed).trim()
+  const fullyFenced = trimmed.match(/^```(?:html)?\s*([\s\S]*?)\s*```$/i)
+  let source = (fullyFenced?.[1] || trimmed).trim()
+
+  // HTML fence 可能只是整条回复中的一部分；只解开 html fence，不破坏社区自己需要的普通 code block。
+  source = source.replace(/```html\s*([\s\S]*?)\s*```/gi, (_whole, body: string) => String(body).trim())
+
+  const documentToFragment = (documentHtml: string) => {
+    const styles = [...documentHtml.matchAll(/<style\b[^>]*>[\s\S]*?<\/style>/gi)].map(match => match[0])
+    const body = documentHtml.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1]
+    if (body != null) return [...styles, body].join('\n')
+    return documentHtml
+      .replace(/<!doctype[^>]*>/gi, '')
+      .replace(/<\/?html\b[^>]*>/gi, '')
+      .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, styles.join('\n'))
+      .replace(/<\/?body\b[^>]*>/gi, '')
+  }
+
+  // 社区正则经常返回完整 document。逐块转为 Shadow DOM 可挂载 fragment，
+  // 这样正文 + HTML UI 混合输出时也不会把正文一起丢掉。
+  source = source.replace(/(?:<!doctype\s+html[^>]*>\s*)?<html\b[^>]*>[\s\S]*?<\/html>/gi, documentToFragment)
+
+  // 容错：少数模板只带 doctype/head/body，没有完整 </html>。
+  if (/^\s*<!doctype\s+html/i.test(source) && /<body\b/i.test(source)) {
+    source = documentToFragment(source)
+  }
+
+  return source.trim()
 }
 
 export function looksLikeRichHtml(value: string) {
   const source = normalizeRichHtml(value)
-  return /<(?:style|div|details|summary|section|article|span|img|table|p|audio|video)\b/i.test(source)
+  return /<(?:style|div|details|summary|section|article|span|img|table|p|audio|video|html|body|main|header|footer|ul|ol|li)\b/i.test(source)
+}
+
+/**
+ * 很多 Tavo / 酒馆开场只用 <br> 做换行，并不是一整块 HTML UI。
+ * 这类内容应该作为普通聊天文本显示真实换行，而不是把“<br>”字样漏进气泡。
+ */
+export function normalizeCommunityPlainText(value: string) {
+  if (looksLikeRichHtml(value)) return value.trim()
+  return value
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 export async function applyRegexPipeline(options: {

@@ -12,6 +12,7 @@ import PhoneFrame from '../components/PhoneFrame.vue'
 import CharacterAvatar from '../components/CharacterAvatar.vue'
 
 import { db } from '../db/database'
+import { normalizeLegacyCharacterInitialState } from '../services/characterInitialStateService'
 
 import type {
   Character,
@@ -88,8 +89,15 @@ async function loadContacts() {
       db.characters.toArray()
     ])
 
+    const normalizedRows = characterRows.map(character => {
+      const patch = normalizeLegacyCharacterInitialState(character)
+      return Object.keys(patch).length ? { ...character, ...patch, updatedAt: new Date().toISOString() } : character
+    })
+    const changedRows = normalizedRows.filter((character, index) => character !== characterRows[index])
+    if (changedRows.length) await db.characters.bulkPut(changedRows)
+
     groups.value = groupRows
-    characters.value = characterRows
+    characters.value = normalizedRows
   } catch (error) {
     console.error(
       '读取通讯录失败：',
@@ -175,15 +183,8 @@ onMounted(loadContacts)
               <b>{{ character.name }}</b>
 
               <small>
-                {{
-                  character.relationship ||
-                  '朋友'
-                }}
-                ·
-                {{
-                  character.activity ||
-                  '正在等待你的消息'
-                }}
+                {{ character.relationship || '朋友' }}
+                <template v-if="character.activity"> · {{ character.activity }}</template>
               </small>
             </span>
 

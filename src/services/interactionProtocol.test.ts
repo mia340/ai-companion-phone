@@ -137,21 +137,21 @@ it('V0.4.3.4 自动排版：远程默认分开、同场景默认合并且动作�
   expect(togetherRows[0].content).not.toContain('\n')
 })
 
-it('允许用户手动覆盖动作与对白排版', () => {
-  const togetherSeparate = { ...createDefaultChatSettings('layout-a'), presenceMode: 'together' as const, actionTextLayout: 'separate' as const }
-  const separated = shapeCompanionActions([
+it('旧版手动动作排版值不再覆盖自动场景规则', () => {
+  const togetherLegacy = { ...createDefaultChatSettings('layout-a'), presenceMode: 'together' as const, actionTextLayout: 'separate' as const }
+  const togetherRows = shapeCompanionActions([
     { kind: 'scene_action', content: '抬手碰了碰你的额头。' },
     { kind: 'text', content: '不烫。' }
-  ], character, togetherSeparate, true, createDefaultConversationState('layout-a'))
-  expect(separated.map(item => item.kind)).toEqual(['scene_action', 'text'])
+  ], character, togetherLegacy, true, createDefaultConversationState('layout-a'))
+  expect(togetherRows).toHaveLength(1)
+  expect(togetherRows[0].content).toBe('（抬手碰了碰你的额头。）不烫。')
 
-  const remoteMerged = { ...createDefaultChatSettings('layout-b'), presenceMode: 'remote' as const, actionTextLayout: 'merged' as const }
-  const merged = shapeCompanionActions([
+  const remoteLegacy = { ...createDefaultChatSettings('layout-b'), presenceMode: 'remote' as const, actionTextLayout: 'merged' as const }
+  const remoteRows = shapeCompanionActions([
     { kind: 'scene_action', content: '靠在椅背上看手机。' },
     { kind: 'text', content: '等我一下。' }
-  ], character, remoteMerged, true, createDefaultConversationState('layout-b'))
-  expect(merged).toHaveLength(1)
-  expect(merged[0].content).toBe('（靠在椅背上看手机。）等我一下。')
+  ], character, remoteLegacy, true, createDefaultConversationState('layout-b'))
+  expect(remoteRows.map(item => item.kind)).toEqual(['scene_action', 'text'])
 })
 
 it('流式截断和带额外空格的 scene_action 标签都不会泄漏', () => {

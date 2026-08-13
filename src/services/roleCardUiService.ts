@@ -84,10 +84,11 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
   const parsed = parseRoleCardUi(text)
   if (parsed.ui) return parsed.ui
 
+  const source = text.replace(/\r\n/g, '\n').replace(/<br\s*\/?\s*>/gi, '\n')
   const ui: RoleCardUiState = {}
   let found = 0
   const linePattern = /^\s*(日期|时间|地点|内心|心声|周围|待办)\s*[|：:]\s*(.+?)\s*$/gm
-  for (const match of text.replace(/\r\n/g, '\n').matchAll(linePattern)) {
+  for (const match of source.matchAll(linePattern)) {
     const key = match[1]
     const value = clean(match[2])
     if (!value) continue
@@ -99,6 +100,30 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
     else if (key === '周围') ui.surroundings = value
     else if (key === '待办') ui.todos = parseTodos(value)
   }
+
+  // 常见 Tavo 状态栏：📆日期｜时间｜天气 / 🗺地点 / ♥内心。
+  const calendarLine = source.match(/(?:^|\n)\s*📆\s*([^\n]+)/)?.[1]?.trim()
+  if (calendarLine) {
+    const parts = calendarLine.split(/[｜|]/).map(item => item.trim()).filter(Boolean)
+    if (!ui.date && parts[0]) { ui.date = parts[0]; found += 1 }
+    if (!ui.time && parts[1]) { ui.time = parts[1]; found += 1 }
+  }
+  const location = source.match(/(?:^|\n)\s*🗺(?:️)?\s*([^\n]+)/)?.[1]?.trim()
+  if (!ui.location && location) { ui.location = location; found += 1 }
+  const inner = source.match(/(?:^|\n)\s*[♥❤💗]\s*内心\s*[:：]\s*([^\n]+)/)?.[1]?.trim()
+  if (!ui.inner && inner) { ui.inner = inner; found += 1 }
+  const present = source.match(/(?:^|\n)\s*😶\s*(?:在场角色|周围)\s*[:：]\s*([^\n]+)/)?.[1]?.trim()
+  if (!ui.surroundings && present) { ui.surroundings = present; found += 1 }
+
+  // XML 状态栏只提取世界状态，不在这里删除标签；后续 Regex 仍可用完整 XML 渲染社区 UI。
+  const xmlValue = (tag: string) => source.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*<\\/${tag}>`, 'i'))?.[1]?.trim()
+  const xmlDate = xmlValue('日期')
+  const xmlTime = xmlValue('时间')
+  const xmlLocation = xmlValue('地点')
+  if (!ui.date && xmlDate) { ui.date = xmlDate; found += 1 }
+  if (!ui.time && xmlTime) { ui.time = xmlTime; found += 1 }
+  if (!ui.location && xmlLocation) { ui.location = xmlLocation; found += 1 }
+
   return found >= 2 ? ui : undefined
 }
 

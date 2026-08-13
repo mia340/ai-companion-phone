@@ -59,6 +59,7 @@ import {
   selectMemoryHitsDetailed
 } from '../services/memoryService'
 import { generateVisibleCharacterState } from '../services/characterStateService'
+import { normalizeLegacyCharacterInitialState } from '../services/characterInitialStateService'
 import {
   getRelationship,
   maybeCreateProactiveMessage,
@@ -70,10 +71,11 @@ import { getOrCreateUserProfile } from '../services/userProfile'
 import { getPersonaForChat, listPersonas } from '../services/personaService'
 import { buildLorebookPrompt } from '../services/lorebookService'
 import { composeRoleplaySystemPrompt } from '../services/promptComposer'
-import { applyRegexPipeline, applyRegexScripts, listActiveRegexScripts, looksLikeRichHtml, normalizeRichHtml } from '../services/regexRuntime'
+import { applyRegexPipeline, applyRegexScripts, listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml } from '../services/regexRuntime'
 import { composeWithPromptPreset, getActivePromptPreset } from '../services/presetRuntime'
+import { buildCommunityUiPriorityPrompt, detectCommunityUiContract, sanitizeCommunityUiText } from '../services/communityUiRuntime'
 import { estimateVoiceDuration, findUnsupportedUserFactClaims, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
-import { parseRoleCardUi, roleCardUiToConversationPatch } from '../services/roleCardUiService'
+import { extractRoleCardUiHints, parseRoleCardUi, roleCardUiToConversationPatch } from '../services/roleCardUiService'
 import { analyzePromptSections, buildRuleInfluences, buildTruncationNotes, estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
 import { buildConversationStatePrompt, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
 import type {
@@ -674,6 +676,15 @@ async function loadConversation(conversationId: string) {
       listPersonas()
     ])
 
+    if (characterRow) {
+      const initialPatch = normalizeLegacyCharacterInitialState(characterRow)
+      if (Object.keys(initialPatch).length) {
+        Object.assign(characterRow, initialPatch)
+        characterRow.updatedAt = new Date().toISOString()
+        await db.characters.update(characterRow.id, { ...initialPatch, updatedAt: characterRow.updatedAt })
+      }
+    }
+
     const legacySceneNormalized = await normalizeLegacySceneActionMessages(messageRows, conversationId, characterRow, settingsRow, stateRow)
     const sceneStateRow = legacySceneNormalized.state || stateRow
     const legacyNormalized = await normalizeLegacyRoleCardUiMessages(legacySceneNormalized.rows, conversationId)
@@ -1261,6 +1272,14 @@ async function requestAssistantReply(options?: {
     const runtimeLorebookPrompt = activeWorldRegex.length
       ? applyRegexScripts(lorebook.prompt, activeWorldRegex, regexMacros).text
       : lorebook.prompt
+    const communityUiContract = detectCommunityUiContract({
+      character: activeCharacter,
+      lorebookPrompt: runtimeLorebookPrompt,
+      preset: activePreset,
+      assistantRegex: activeAssistantRegex,
+      promptRegex: activePromptRegex
+    })
+    if (communityUiContract.active) streamSession.suppressPreview = true
 
     visualMessage = options?.visualMessageId
       ? messages.value.find(item => item.id === options.visualMessageId)
@@ -1331,7 +1350,8 @@ async function requestAssistantReply(options?: {
         memoryWriteNotice: options?.memoryWriteNotice,
         hasImages: includeVision && Boolean(visualMessage),
         imageCount: includeVision && visualMessage ? getMessageImageUrls(visualMessage).length : 0,
-        isAlternativeReply: Boolean(options?.alternativeTargetId)
+        isAlternativeReply: Boolean(options?.alternativeTargetId),
+        communityUiContract
       }), activePreset, {
         char: activeCharacter.name,
         user: persona.name,
@@ -1341,7 +1361,9 @@ async function requestAssistantReply(options?: {
         description: activeCharacter.background || activeCharacter.identity || '',
         lastChatMessage: latestUserText
       })
-      return activePromptRegex.length ? applyRegexScripts(base, activePromptRegex, regexMacros).text : base
+      const transformed = activePromptRegex.length ? applyRegexScripts(base, activePromptRegex, regexMacros).text : base
+      const uiPriority = buildCommunityUiPriorityPrompt(communityUiContract)
+      return uiPriority ? `${transformed}\n\n${uiPriority}` : transformed
     }
 
     const createRequest = (includeVision: boolean): ChatRequest => ({
@@ -1405,7 +1427,7 @@ async function requestAssistantReply(options?: {
           memoryHits: memoryHitDetails.map(item => ({ id: item.memory.id, content: item.memory.content, importance: item.memory.importance, layer: item.memory.layer, score: item.score, reason: item.reasons.join('；') })),
           imageCount: includeVisionCount(request),
           estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages),
-          protocolEnabled: settings.actionProtocolEnabled,
+          protocolEnabled: settings.actionProtocolEnabled && !communityUiContract.active,
           promptSections,
           truncations: buildTruncationNotes({ allMessageCount: messages.value.length, includedMessageCount: recentMessages.length, systemPrompt, sections: promptSections }),
           ruleInfluences: buildRuleInfluences(systemPrompt)
@@ -1513,22 +1535,26 @@ async function requestAssistantReply(options?: {
 
     let parsedOutput = parseCompanionOutput(response.text)
     let regexDisplay = await applyRegexPipeline({
-      text: parsedOutput.visibleText,
+      text: communityUiContract.active ? response.text : parsedOutput.visibleText,
       characterId: activeCharacter.id,
       target: 'assistant-output',
       userName: persona.name,
       characterName: activeCharacter.name
     })
     let richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? normalizeRichHtml(regexDisplay.text) : ''
-    if (!richReplyHtml && regexDisplay.applied.length) {
+    let communityUiText = communityUiContract.active && !richReplyHtml ? sanitizeCommunityUiText(regexDisplay.text) : ''
+    if (!communityUiContract.active && !richReplyHtml && regexDisplay.applied.length) {
       const transformed = parseCompanionOutput(regexDisplay.text)
       parsedOutput = { ...parsedOutput, messages: transformed.messages, visibleText: transformed.visibleText, actionSummary: transformed.actionSummary, status: transformed.status || parsedOutput.status, roleCardUi: transformed.roleCardUi || parsedOutput.roleCardUi, presenceResolution: transformed.presenceResolution?.resolvedPresence ? transformed.presenceResolution : parsedOutput.presenceResolution }
     }
-    if (!parsedOutput.messages.length && !richReplyHtml) throw new Error('模型没有返回可显示的角色回复。')
+    if (!parsedOutput.messages.length && !richReplyHtml && !communityUiText) throw new Error('模型没有返回可显示的角色回复。')
 
     const userFactSupport = [
-      persona.identity || '', persona.appearance || '', persona.personality || '', persona.background || '',
-      persona.relationshipNote || '', persona.characterKnowledge || '',
+      persona.name || '', persona.title || '', persona.description || '', persona.identity || '', persona.age || '', persona.gender || '',
+      persona.birthday || '', persona.height || '', persona.occupation || '', persona.appearance || '', persona.personality || '',
+      persona.publicPersona || '', persona.privatePersona || '', persona.strengths || '', persona.weaknesses || '', persona.interests || '',
+      persona.habits || '', persona.lifestyle || '', persona.background || '', persona.relationshipNote || '', persona.characterKnowledge || '',
+      activeCharacter.embeddedUserTemplate || '', activeCharacter.scenario || '', runtimeLorebookPrompt || '',
       ...memoryHits.map(item => item.content),
       ...messages.value.filter(item => item.senderId === 'user').slice(-settings.recentMessageLimit).map(item => item.content)
     ].filter(Boolean).join('\n')
@@ -1546,16 +1572,19 @@ async function requestAssistantReply(options?: {
             `需要删除或改写的无依据句子：${unsupportedUserClaims.join(' / ')}`,
             '只能使用用户 Persona、当前聊天历史和本轮命中的长期记忆作为用户事实来源。',
             '如果不知道用户喜欢什么、平时怎样、以前是否做过某事，就直接问或只回应当前消息，绝不能补设定。',
-            '仍要遵守小手机互动协议、当前相处状态和动作显示规则。不要解释为什么重写。'
+            communityUiContract.active
+              ? '仍要严格遵守当前社区 JSON 的 UI / 标签 / 状态栏输出协议，不要切换成小手机默认动作与对白格式。不要解释为什么重写。'
+              : '仍要遵守小手机互动协议、当前相处状态和动作显示规则。不要解释为什么重写。'
           ].join('\n')
         }
       ]
       try {
         response = await finalProvider.chat(repairRequest)
         parsedOutput = parseCompanionOutput(response.text)
-        regexDisplay = await applyRegexPipeline({ text: parsedOutput.visibleText, characterId: activeCharacter.id, target: 'assistant-output', userName: persona.name, characterName: activeCharacter.name })
+        regexDisplay = await applyRegexPipeline({ text: communityUiContract.active ? response.text : parsedOutput.visibleText, characterId: activeCharacter.id, target: 'assistant-output', userName: persona.name, characterName: activeCharacter.name })
         richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? normalizeRichHtml(regexDisplay.text) : ''
-        if (!richReplyHtml && regexDisplay.applied.length) {
+        communityUiText = communityUiContract.active && !richReplyHtml ? sanitizeCommunityUiText(regexDisplay.text) : ''
+        if (!communityUiContract.active && !richReplyHtml && regexDisplay.applied.length) {
           const transformed = parseCompanionOutput(regexDisplay.text)
           parsedOutput = { ...parsedOutput, messages: transformed.messages, visibleText: transformed.visibleText, actionSummary: transformed.actionSummary, status: transformed.status || parsedOutput.status, roleCardUi: transformed.roleCardUi || parsedOutput.roleCardUi, presenceResolution: transformed.presenceResolution?.resolvedPresence ? transformed.presenceResolution : parsedOutput.presenceResolution }
         }
@@ -1584,7 +1613,7 @@ async function requestAssistantReply(options?: {
       provider: providerId,
       model: usedModel,
       rawOutput: response.text,
-      visibleOutput: richReplyHtml || parsedOutput.visibleText,
+      visibleOutput: richReplyHtml || communityUiText || parsedOutput.visibleText,
       actionSummary: parsedOutput.actionSummary,
       presenceResolution: parsedOutput.presenceResolution,
       naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(parsedOutput.visibleText)],
@@ -1630,7 +1659,7 @@ async function requestAssistantReply(options?: {
       const target = messages.value.find(item => item.id === options.alternativeTargetId)
       if (!target) throw new Error('没有找到需要添加候选回复的消息。')
       const baseAlternatives = target.alternatives?.length ? target.alternatives.slice() : [target.content]
-      const candidate = (richReplyHtml || parsedOutput.visibleText).trim()
+      const candidate = (richReplyHtml || communityUiText || parsedOutput.visibleText).trim()
       const alternatives = baseAlternatives.includes(candidate) ? baseAlternatives : [...baseAlternatives, candidate]
       const activeAlternativeIndex = Math.max(0, alternatives.indexOf(candidate))
       const patch: Partial<Message> = { content: candidate, alternatives, activeAlternativeIndex, provider: providerId, model: usedModel, fallback, status: 'delivered' }
@@ -1640,6 +1669,19 @@ async function requestAssistantReply(options?: {
       noticeMessage.value = `已生成第 ${activeAlternativeIndex + 1} 个候选回复。`
     } else if (richReplyHtml) {
       await saveRichAssistantMessage({ html: richReplyHtml, rawContent: response.text, provider: providerId, model: usedModel, fallback, source: regexDisplay.applied.length ? 'regex' : 'worldbook-ui', replaceMessageId: streamSession.messageId })
+      streamSession.messageId = undefined
+    } else if (communityUiContract.active) {
+      const preserved = communityUiText || sanitizeCommunityUiText(response.text)
+      await saveAssistantActions({
+        actions: [{ kind: 'text', content: preserved }],
+        provider: providerId,
+        model: usedModel,
+        fallback,
+        type: options?.type,
+        signal,
+        replaceMessageId: streamSession.messageId,
+        roleCardUi: parsedOutput.roleCardUi
+      })
       streamSession.messageId = undefined
     } else if (useStreaming) {
       streamSession.provider = providerId; streamSession.model = usedModel; streamSession.fallback = fallback
@@ -1958,20 +2000,51 @@ function openSettings(tab: 'chat' | 'roleplay' | 'memory' | 'advanced' = 'chat')
 async function insertCharacterGreeting(greeting: string) {
   if (!conversation.value || !character.value || !greeting.trim()) return
   if (messages.value.length && !window.confirm('把这个开场白作为角色的新消息插入当前聊天吗？')) return
+
+  const rawGreeting = greeting.trim()
+  const userName = activePersona.value?.name?.trim() || '你'
+  const macroResolved = rawGreeting
+    .replace(/\{\{user\}\}/gi, userName)
+    .replace(/\{\{char\}\}/gi, character.value.name)
+  const plainSource = normalizeCommunityPlainText(macroResolved)
+  const parsedUi = parseRoleCardUi(plainSource)
+  const greetingUi = parsedUi.ui || extractRoleCardUiHints(plainSource)
+  const uiPatch = roleCardUiToConversationPatch(parsedUi.content, greetingUi)
+  const regexDisplay = await applyRegexPipeline({
+    text: macroResolved,
+    characterId: character.value.id,
+    target: 'assistant-output',
+    userName,
+    characterName: character.value.name
+  })
+  const isRich = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text)
+  const displayText = isRich ? regexDisplay.text : normalizeCommunityPlainText(regexDisplay.text)
+  const richHtml = isRich ? normalizeRichHtml(displayText) : undefined
+  const preview = isRich
+    ? displayText.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280) || '角色卡 UI'
+    : displayText
+
   const now = new Date().toISOString()
   const message: Message = {
     id: crypto.randomUUID(),
     worldId: conversation.value.worldId,
     conversationId: conversation.value.id,
     senderId: character.value.id,
-    type: 'text',
-    content: greeting.trim(),
+    type: isRich ? 'rich' : 'text',
+    content: preview,
+    rawContent: rawGreeting,
+    richHtml,
+    richSource: isRich ? (regexDisplay.applied.length ? 'regex' : 'card-ui') : undefined,
+    roleCardUi: greetingUi,
     status: 'delivered',
     createdAt: now
   }
-  await db.transaction('rw', db.messages, db.conversations, async () => {
+  await db.transaction('rw', db.messages, db.conversations, db.conversationStates, async () => {
     await db.messages.add(message)
     await db.conversations.update(conversation.value!.id, { updatedAt: now })
+    if (Object.keys(uiPatch).length) {
+      conversationState.value = await patchConversationState(conversation.value!.id, uiPatch)
+    }
   })
   messages.value.push(message)
   activePanel.value = null

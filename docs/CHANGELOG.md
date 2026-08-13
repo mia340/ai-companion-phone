@@ -1,3 +1,38 @@
+## V0.4.3.6.1
+
+- 修复 `ChatRoom.vue` 构建错误：`lorebookPrompt` 未定义。
+- 用户事实支持上下文改用 `runtimeLorebookPrompt`。
+- IndexedDB V10 / backup V9 不变。
+
+## V0.4.3.6 · 社区 UI 输出接管
+
+- 社区 JSON 自带 UI / 状态栏 / 固定输出协议时自动接管回复格式。
+- assistant-output Regex 在 UI 模式改为处理模型原始输出。
+- UI 模式绕过默认动作/对白拆分、合并与私有协议注入。
+- 移除“动作与对白排版”手动选择；普通角色只按场景自动处理。
+- 完整 HTML document 适配 Shadow DOM Rich Runtime。
+- Prompt Debug 增加社区 UI 接管提示。
+- IndexedDB V10 / Backup V9 不变。
+
+## V0.4.3.5 · 初始状态与 User Persona 识别修复
+
+### Fixed
+- 移除新角色固定“刚刚来到这个世界 / 期待认识你”占位；有开场活动则提取，没有则留空。
+- 通讯录和聊天加载旧角色时懒迁移历史占位状态，并允许开场明确关系覆盖旧通用“朋友”。
+- 普通角色开场中的 `<br>` 归一为换行，不再作为字面标签显示。
+- alternate greeting 与首条消息统一处理 `{{user}} / {{char}}`、Regex、Rich HTML 和 Role Card UI 状态。
+
+### User Resolver
+- Character Card 除 description 外，也会扫描内嵌世界书的“user人设 / 用户人设 / user persona”条目。
+- 明确写出“我是洛梨 / 我叫…”的卡可生成并绑定角色专属 Persona。
+- 只有 `{{user}}` 占位、但没有安全可提取姓名/独立 Persona 的卡不会猜名字；当前聊天 Persona 负责名字与真实用户资料。
+- 角色卡 / 世界书里分散的“妻子、徒弟、旧职业”等剧情身份只作为当前角色世界观事实使用，不覆盖全局用户资料。
+
+### Compatibility
+- 墨清尘 Tavo V2 实测识别：关系“师徒”、专属 Persona“洛梨 / 20岁 / 墨清尘徒弟、筑基期剑修”、初始活动“负手立于田埂”。
+- “离婚的诱惑”V3 实测保留 `{{user}}` 剧情关系但不臆测用户姓名；多 alternate greetings 继续保留。
+- IndexedDB V10 / backup V9 不变。
+
 ## V0.4.3.4 · 可靠性与社区 JSON 兼容修复
 
 ### Fixed

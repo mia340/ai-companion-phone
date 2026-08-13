@@ -40,3 +40,15 @@ it('识别“把你圈进怀里 / 拍你的后背”为直接接触', () => {
   expect(result.resolvedPresence).toBe('together')
   expect(result.conflict).toBe(true)
 })
+
+it('识别 Tavo emoji 状态栏与 XML 日期地点提示', () => {
+  const emoji = extractRoleCardUiHints('📆太初历3824年7月18｜7:00｜晨光熹微 <br>🗺天枢山后山菜园<br>💛负手立于田埂<br>♥内心:看她刨地瓜')
+  expect(emoji?.date).toBe('太初历3824年7月18')
+  expect(emoji?.time).toBe('7:00')
+  expect(emoji?.location).toBe('天枢山后山菜园')
+
+  const xml = extractRoleCardUiHints('<日期>12月21日</日期><时间>05:45</时间><地点>军区大院主卧</地点>')
+  expect(xml?.date).toBe('12月21日')
+  expect(xml?.time).toBe('05:45')
+  expect(xml?.location).toBe('军区大院主卧')
+})

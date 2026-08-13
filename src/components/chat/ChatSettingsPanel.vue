@@ -218,7 +218,7 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-control">
-        <span><b>当前相处状态</b><small>决定动作与对白是同场景气泡还是远程手机模式</small></span>
+        <span><b>当前相处状态</b><small>用于场景与记忆判断；社区 UI 的排版与标签不会被这里改写</small></span>
         <select v-model="chatSettings.presenceMode" @change="emit('persist')">
           <option value="auto">自动 · 当前 {{ conversationState?.presence === 'together' ? '在身边' : '远程' }}</option>
           <option value="together">在身边 / 同一现场</option>
@@ -227,20 +227,11 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-control">
-        <span><b>角色动作视角</b><small>在身边时动作进括号；远程时可显示独立 Action</small></span>
+        <span><b>普通聊天动作</b><small>仅在角色没有社区 UI / 固定输出协议时生效</small></span>
         <select v-model="chatSettings.actionVisibility" @change="emit('persist')">
           <option value="always">始终显示</option>
           <option value="together">只在身边显示</option>
           <option value="off">关闭动作描写</option>
-        </select>
-      </label>
-
-      <label class="setting-control">
-        <span><b>动作与对白排版</b><small>自动：不在一起时分开；在一起时合并，且动作后直接接对白、不加换行</small></span>
-        <select v-model="chatSettings.actionTextLayout" @change="emit('persist')">
-          <option value="auto">自动 · 远程分开 / 同场合并</option>
-          <option value="separate">始终分开</option>
-          <option value="merged">始终合并</option>
         </select>
       </label>
 
@@ -265,7 +256,7 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-switch">
-        <span><b>小手机互动协议</b><small>按“动作与对白排版”决定独立 Action 或括号合并</small></span>
+        <span><b>小手机互动协议</b><small>普通角色使用；检测到社区 UI 时会自动让位，不覆盖原 JSON 格式</small></span>
         <input v-model="chatSettings.actionProtocolEnabled" type="checkbox" @change="emit('persist')" />
       </label>
 

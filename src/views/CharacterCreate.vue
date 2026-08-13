@@ -8,8 +8,10 @@ import { parseExampleDialogues, serializeExampleDialogues } from '../services/ch
 import { parseCharacterCardFile, type ImportedCharacterCard } from '../services/characterCardImportService'
 import { toPlainStorageValue } from '../services/storageSanitizer'
 import { extractRoleCardUiHints, parseRoleCardUi, roleCardUiToConversationPatch } from '../services/roleCardUiService'
-import { applyRegexScript, looksLikeRichHtml, normalizeRichHtml } from '../services/regexRuntime'
+import { applyRegexScript, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml } from '../services/regexRuntime'
 import { createDefaultChatSettings } from '../services/chatSettings'
+import { inferCardInitialActivity } from '../services/characterInitialStateService'
+import { ensureDefaultPersona } from '../services/personaService'
 import type { Character, CommunityResourceArchive, RegexScript, UserPersona } from '../types/domain'
 
 type CharacterGender = NonNullable<Character['gender']>
@@ -278,6 +280,7 @@ async function handleCharacterCardImport(event: Event) {
     importedCardFileName.value = file.name
     importedCardRawText.value = rawText
     applyImportedCardToForm(imported)
+    if (!imported.patch.relationship?.trim()) relationship.value = '未设定'
     createEmbeddedUserPersona.value = Boolean(imported.embeddedUser)
     embeddedPersonaName.value = imported.embeddedUser?.patch.name || `${imported.patch.name || '角色'} · 原卡用户`
     cardImportMessage.value = [
@@ -457,6 +460,7 @@ function parseList(value: string): string[] {
     .filter(Boolean)
 }
 
+
 async function resizeAvatar(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const image = new Image()
@@ -604,9 +608,17 @@ async function save() {
     const embeddedUser = importedSnapshot?.embeddedUser
     const shouldCreateEmbeddedPersona = Boolean(createEmbeddedUserPersona.value && embeddedUser)
     const embeddedPersonaId = shouldCreateEmbeddedPersona ? crypto.randomUUID() : undefined
+    // `{{user}}` 只是社区角色卡占位符。只有用户选择创建原卡专属 Persona 时才用原卡用户名；
+    // 否则用当前全局默认 Persona，绝不把占位符或卡内剧情身份猜成真实用户姓名。
+    const defaultPersona = shouldCreateEmbeddedPersona ? undefined : await ensureDefaultPersona()
+    const openingUserName = shouldCreateEmbeddedPersona
+      ? (embeddedUser?.patch.name?.trim() || defaultPersona?.name?.trim() || '你')
+      : (defaultPersona?.name?.trim() || '你')
     const parsedExamples = parseExampleDialogues(exampleDialoguesText.value)
     const createdImportedResourceIds: string[] = []
     const importedRawText = importedCardRawText.value
+    const openingMessage = firstMessage.value.trim() || importedPatch.firstMessage?.trim() || ''
+    const initialActivity = inferCardInitialActivity(openingMessage)
 
     await db.transaction(
       'rw',
@@ -689,8 +701,8 @@ async function save() {
           worldBookHint: importedPatch.worldBookHint,
           rawCardExtensions: importedPatch.rawCardExtensions,
           groupOnlyGreetings: importedPatch.groupOnlyGreetings || [],
-          mood: '期待认识你',
-          activity: '刚刚来到这个世界',
+          mood: '平静',
+          activity: initialActivity,
 
           groups: ['group-friends'],
           replySpeed: 'natural',
@@ -761,11 +773,13 @@ async function save() {
           }))
         }
 
-        const openingMessage = firstMessage.value.trim() || importedPatch.firstMessage?.trim() || ''
-
         if (openingMessage) {
-          const parsedOpening = parseRoleCardUi(openingMessage)
-          const openingUi = parsedOpening.ui || extractRoleCardUiHints(openingMessage)
+          const openingMacroResolved = openingMessage
+            .replace(/\{\{user\}\}/gi, openingUserName)
+            .replace(/\{\{char\}\}/gi, trimmedName)
+          const openingSource = normalizeCommunityPlainText(openingMacroResolved)
+          const parsedOpening = parseRoleCardUi(openingSource)
+          const openingUi = parsedOpening.ui || extractRoleCardUiHints(openingSource)
           const openingStatePatch = roleCardUiToConversationPatch(parsedOpening.content, openingUi)
           let renderedOpening = parsedOpening.content
           let openingRegexApplied = false
@@ -774,7 +788,7 @@ async function save() {
             if (script.placement.length && !script.placement.includes(2)) continue
             const nextOpening = applyRegexScript(renderedOpening, script as RegexScript, {
               char: trimmedName,
-              user: embeddedUser?.patch.name || '用户'
+              user: openingUserName
             })
             if (nextOpening !== renderedOpening) openingRegexApplied = true
             renderedOpening = nextOpening
@@ -794,7 +808,7 @@ async function save() {
             rawContent: openingMessage,
             richHtml: openingHtml,
             richSource: openingIsRich ? (openingRegexApplied ? 'regex' : 'worldbook-ui') : undefined,
-            roleCardUi: parsedOpening.ui,
+            roleCardUi: openingUi,
             status: 'delivered',
             createdAt: now
           }))
@@ -804,7 +818,7 @@ async function save() {
               summary: '',
               summaryMessageCount: 0,
               innerMood: '平静',
-              innerActivity: '正在与你互动',
+              innerActivity: initialActivity,
               innerThought: openingStatePatch.innerThought || '',
               location: openingStatePatch.location,
               presence: openingStatePatch.presence || 'remote',
@@ -1243,15 +1257,25 @@ async function save() {
 
       <label>
         与用户的初始关系
-        <select v-model="relationship">
-          <option>陌生人</option>
-          <option>朋友</option>
-          <option>挚友</option>
-          <option>恋人</option>
-          <option>家人</option>
-          <option>同学</option>
-          <option>同事</option>
-        </select>
+        <input
+          v-model="relationship"
+          list="relationship-options"
+          maxlength="30"
+          placeholder="可由角色卡识别，也可以自己填写，例如：师徒、夫妻、搭档"
+        />
+        <datalist id="relationship-options">
+          <option value="未设定"></option>
+          <option value="陌生人"></option>
+          <option value="朋友"></option>
+          <option value="挚友"></option>
+          <option value="师徒"></option>
+          <option value="恋人"></option>
+          <option value="夫妻"></option>
+          <option value="家人"></option>
+          <option value="同学"></option>
+          <option value="同事"></option>
+          <option value="搭档"></option>
+        </datalist>
       </label>
 
       <label>

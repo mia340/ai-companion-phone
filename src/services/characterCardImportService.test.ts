@@ -82,3 +82,25 @@ it('识别 data/root extensions、depth_prompt、talkativeness 与两处内嵌�
   expect(result.patch.avatar).toBeUndefined()
   expect(result.notes.some(note => note.includes('不会执行第三方 JS'))).toBe(true)
 })
+
+it('从内嵌世界书 user人设条目识别角色专属 Persona', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    spec_version: '2.0',
+    data: {
+      name: '墨清尘',
+      description: '{{char}}是墨清尘。',
+      character_book: {
+        entries: [
+          { id: 1, name: '世界观', comment: '世界观', keys: [], content: '{{user}}幼时生活在中境。', constant: true, enabled: true },
+          { id: 2, name: 'user人设', comment: 'user人设', keys: [], content: '{{user}}我是洛梨,墨清尘徒弟,筑基期剑修,20岁.喜欢种地瓜和写话本。', constant: true, enabled: true }
+        ]
+      }
+    }
+  }))
+  expect(result.embeddedUser?.patch.name).toBe('洛梨')
+  expect(result.embeddedUser?.patch.age).toBe('20')
+  expect(result.embeddedUser?.patch.identity).toContain('墨清尘徒弟')
+  expect(result.embeddedUser?.rawTemplate).toContain('{{user}}我是洛梨')
+  expect(result.notes.some(note => note.includes('内嵌世界书 user 人设条目'))).toBe(true)
+})
