@@ -42,7 +42,11 @@ const asNumber = (value: unknown, fallback = 0) => {
   const parsed = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
 }
-const asStringArray = (value: unknown) => Array.isArray(value) ? value.map(asText).filter(Boolean) : []
+const asStringArray = (value: unknown) => {
+  if (Array.isArray(value)) return value.map(asText).filter(Boolean)
+  const single = asText(value)
+  return single ? [single] : []
+}
 const cloneRecord = (value: unknown) => {
   const record = asRecord(value)
   return record ? JSON.parse(JSON.stringify(record)) as Record<string, unknown> : undefined
@@ -87,20 +91,35 @@ function parseLorebookEntry(raw: Record<string, unknown>, index: number) {
   const extensions = asRecord(raw.extensions) || {}
   const keys = asStringArray(raw.keys ?? raw.key)
   const secondaryKeys = asStringArray(raw.secondary_keys ?? raw.keysecondary ?? raw.secondaryKeys)
-  const insertionOrder = asNumber(raw.insertion_order, 100 - index)
+  const insertionOrder = asNumber(raw.insertion_order ?? raw.order, 100 - index)
   const probability = asNumber(raw.probability ?? extensions.probability, 100)
+  const caseSensitiveValue = raw.caseSensitive ?? raw.case_sensitive ?? extensions.caseSensitive ?? extensions.case_sensitive
+  const knownKeys = new Set([
+    'id', 'uid', 'name', 'comment', 'key', 'keys', 'keysecondary', 'secondary_keys', 'secondaryKeys', 'content',
+    'enabled', 'disable', 'constant', 'caseSensitive', 'case_sensitive', 'matchWholeWords', 'use_regex', 'useRegex',
+    'selective', 'selectiveLogic', 'selective_logic', 'priority', 'insertion_order', 'order', 'position', 'depth', 'role',
+    'probability', 'useProbability', 'sticky', 'cooldown', 'delay', 'group', 'groupOverride', 'group_override',
+    'groupWeight', 'group_weight', 'scanDepth', 'scan_depth', 'excludeRecursion', 'exclude_recursion',
+    'preventRecursion', 'prevent_recursion', 'delayUntilRecursion', 'delay_until_recursion', 'useGroupScoring',
+    'matchPersonaDescription', 'matchCharacterDescription', 'matchCharacterPersonality', 'matchCharacterDepthPrompt',
+    'matchScenario', 'matchCreatorNotes', 'extensions'
+  ])
+  const extraFields = Object.fromEntries(Object.entries(raw).filter(([key]) => !knownKeys.has(key)))
+  const rawExtensions = cloneRecord({ ...extensions, ...extraFields })
+
   return {
     characterId: undefined,
     title: asText(raw.name) || asText(raw.comment) || `条目 ${index + 1}`,
     keywords: keys,
     secondaryKeys,
     content: asText(raw.content),
-    enabled: asBoolean(raw.enabled, !asBoolean(raw.disable, false)),
+    enabled: typeof raw.enabled === 'boolean' ? raw.enabled : !asBoolean(raw.disable, false),
     constant: asBoolean(raw.constant, keys.length === 0),
-    caseSensitive: typeof raw.case_sensitive === 'boolean' ? raw.case_sensitive : asBoolean(extensions.case_sensitive, false),
-    useRegex: asBoolean(raw.use_regex, false),
+    caseSensitive: typeof caseSensitiveValue === 'boolean' ? caseSensitiveValue : false,
+    matchWholeWords: typeof raw.matchWholeWords === 'boolean' ? raw.matchWholeWords : undefined,
+    useRegex: asBoolean(raw.useRegex ?? raw.use_regex, false),
     selective: asBoolean(raw.selective, false),
-    selectiveLogic: raw.selective_logic as number | string | undefined ?? extensions.selectiveLogic as number | string | undefined,
+    selectiveLogic: raw.selectiveLogic as number | string | undefined ?? raw.selective_logic as number | string | undefined ?? extensions.selectiveLogic as number | string | undefined,
     priority: Math.max(0, Math.min(100, Math.round(asNumber(raw.priority, 50)))),
     insertionOrder,
     position: raw.position as number | string | undefined ?? extensions.position as number | string | undefined,
@@ -112,14 +131,21 @@ function parseLorebookEntry(raw: Record<string, unknown>, index: number) {
     cooldown: asNumber(raw.cooldown ?? extensions.cooldown, 0) || undefined,
     delay: asNumber(raw.delay ?? extensions.delay, 0) || undefined,
     group: asText(raw.group ?? extensions.group) || undefined,
-    groupOverride: asBoolean(raw.group_override ?? extensions.group_override, false),
-    groupWeight: asNumber(raw.group_weight ?? extensions.group_weight, 100),
-    scanDepth: asNumber(raw.scan_depth ?? extensions.scan_depth, 0) || undefined,
-    excludeRecursion: asBoolean(raw.exclude_recursion ?? extensions.exclude_recursion, false),
-    preventRecursion: asBoolean(raw.prevent_recursion ?? extensions.prevent_recursion, false),
-    delayUntilRecursion: asBoolean(raw.delay_until_recursion ?? extensions.delay_until_recursion, false),
-    sourceEntryId: raw.id as number | string | undefined,
-    rawExtensions: cloneRecord(extensions)
+    groupOverride: asBoolean(raw.groupOverride ?? raw.group_override ?? extensions.groupOverride ?? extensions.group_override, false),
+    groupWeight: asNumber(raw.groupWeight ?? raw.group_weight ?? extensions.groupWeight ?? extensions.group_weight, 100),
+    scanDepth: asNumber(raw.scanDepth ?? raw.scan_depth ?? extensions.scanDepth ?? extensions.scan_depth, 0) || undefined,
+    excludeRecursion: asBoolean(raw.excludeRecursion ?? raw.exclude_recursion ?? extensions.excludeRecursion ?? extensions.exclude_recursion, false),
+    preventRecursion: asBoolean(raw.preventRecursion ?? raw.prevent_recursion ?? extensions.preventRecursion ?? extensions.prevent_recursion, false),
+    delayUntilRecursion: asBoolean(raw.delayUntilRecursion ?? raw.delay_until_recursion ?? extensions.delayUntilRecursion ?? extensions.delay_until_recursion, false),
+    useGroupScoring: typeof raw.useGroupScoring === 'boolean' ? raw.useGroupScoring : undefined,
+    matchPersonaDescription: typeof raw.matchPersonaDescription === 'boolean' ? raw.matchPersonaDescription : undefined,
+    matchCharacterDescription: typeof raw.matchCharacterDescription === 'boolean' ? raw.matchCharacterDescription : undefined,
+    matchCharacterPersonality: typeof raw.matchCharacterPersonality === 'boolean' ? raw.matchCharacterPersonality : undefined,
+    matchCharacterDepthPrompt: typeof raw.matchCharacterDepthPrompt === 'boolean' ? raw.matchCharacterDepthPrompt : undefined,
+    matchScenario: typeof raw.matchScenario === 'boolean' ? raw.matchScenario : undefined,
+    matchCreatorNotes: typeof raw.matchCreatorNotes === 'boolean' ? raw.matchCreatorNotes : undefined,
+    sourceEntryId: raw.uid as number | string | undefined ?? raw.id as number | string | undefined,
+    rawExtensions
   }
 }
 
@@ -141,9 +167,9 @@ export function parseLorebookJson(text: string, fileName = '世界书.json'): Pa
       characterId: undefined,
       sourceFileName: fileName,
       sourceFormat: format,
-      scanDepth: asNumber(bookRecord.scan_depth, 0) || undefined,
-      tokenBudget: asNumber(bookRecord.token_budget, 0) || undefined,
-      recursiveScanning: asBoolean(bookRecord.recursive_scanning, true),
+      scanDepth: asNumber(bookRecord.scanDepth ?? bookRecord.scan_depth, 0) || undefined,
+      tokenBudget: asNumber(bookRecord.tokenBudget ?? bookRecord.token_budget, 0) || undefined,
+      recursiveScanning: asBoolean(bookRecord.recursiveScanning ?? bookRecord.recursive_scanning, true),
       rawExtensions: cloneRecord(bookRecord.extensions)
     },
     entries,
@@ -152,7 +178,7 @@ export function parseLorebookJson(text: string, fileName = '世界书.json'): Pa
       format: `${format} lorebook`,
       name,
       summary: [`${entries.length} 条世界书`, `${entries.filter(item => item.enabled).length} 条启用`],
-      supported: ['关键词/常驻', '正则关键词', '可选过滤', '插入顺序', '概率', '深度', '分组字段', '递归字段保留'],
+      supported: ['关键词/常驻', 'camelCase / snake_case 字段', '正则关键词', '可选过滤', 'order / 插入顺序', '概率', '深度', '整词匹配', '分组字段', 'Persona/角色字段扫描开关', '递归字段保留'],
       warnings: entries.some(item => item.cooldown || item.delay || item.sticky)
         ? ['sticky / cooldown / delay 已保留，并使用兼容近似行为；与原客户端的逐消息状态可能存在细微差异。']
         : []
@@ -160,22 +186,42 @@ export function parseLorebookJson(text: string, fileName = '世界书.json'): Pa
   }
 }
 
-function extractPromptOrder(root: Record<string, unknown>): Array<{ identifier: string; enabled: boolean }> {
-  const raw = root.prompt_order
-  const orders = Array.isArray(raw) ? raw : []
-  const first = orders.map(asRecord).find(Boolean)
-  const order = first && Array.isArray(first.order) ? first.order : []
-  return order.map(asRecord).filter(Boolean).map(item => ({
-    identifier: asText(item!.identifier),
-    enabled: asBoolean(item!.enabled, true)
-  })).filter(item => item.identifier)
+function extractPromptOrderGroups(root: Record<string, unknown>) {
+  const raw = Array.isArray(root.prompt_order) ? root.prompt_order : []
+  return raw.map(asRecord).filter(Boolean).map(group => ({
+    characterId: group!.character_id as number | string | undefined ?? group!.characterId as number | string | undefined,
+    order: (Array.isArray(group!.order) ? group!.order : [])
+      .map(asRecord)
+      .filter(Boolean)
+      .map(item => ({
+        identifier: asText(item!.identifier),
+        enabled: asBoolean(item!.enabled, true)
+      }))
+      .filter(item => item.identifier)
+  })).filter(group => group.order.length)
+}
+
+function choosePromptOrder(
+  groups: ReturnType<typeof extractPromptOrderGroups>,
+  promptIdentifiers: Set<string>
+): Array<{ identifier: string; enabled: boolean }> {
+  if (!groups.length) return []
+  const ranked = groups.map((group, index) => ({
+    group,
+    index,
+    coverage: group.order.filter(item => promptIdentifiers.has(item.identifier)).length,
+    length: group.order.length
+  })).sort((a, b) => b.coverage - a.coverage || b.length - a.length || a.index - b.index)
+  return ranked[0].group.order
 }
 
 export function parsePromptPresetJson(text: string, fileName = '预设.json'): ParsedPresetResource {
   const root = JSON.parse(text) as unknown
   const record = asRecord(root)
   if (!record || !Array.isArray(record.prompts)) throw new Error('这不是可识别的 Prompt 预设。')
-  const order = extractPromptOrder(record)
+  const promptIdentifiers = new Set(record.prompts.map(asRecord).filter(Boolean).map(item => asText(item!.identifier)).filter(Boolean))
+  const promptOrderGroups = extractPromptOrderGroups(record)
+  const order = choosePromptOrder(promptOrderGroups, promptIdentifiers)
   const orderMap = new Map(order.map(item => [item.identifier, item.enabled]))
   const prompts: PromptPresetPrompt[] = record.prompts.map(asRecord).filter(Boolean).map((item, index) => {
     const identifier = asText(item!.identifier) || `prompt-${index + 1}`
@@ -194,12 +240,13 @@ export function parsePromptPresetJson(text: string, fileName = '预设.json'): P
     }
   })
   const name = asText(record.name) || fileStem(fileName)
-  const rawConfig = Object.fromEntries(Object.entries(record).filter(([key]) => !['prompts', 'prompt_order'].includes(key)))
+  const rawConfig = Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'prompts'))
   return {
     preset: {
       name,
       prompts,
       promptOrder: order.length ? order : prompts.map(item => ({ identifier: item.identifier, enabled: item.enabled })),
+      promptOrderGroups,
       sourceFileName: fileName,
       sourceFormat: sourceFormat(fileName, record),
       rawConfig: JSON.parse(JSON.stringify(rawConfig))
@@ -208,9 +255,12 @@ export function parsePromptPresetJson(text: string, fileName = '预设.json'): P
       kind: 'preset',
       format: 'SillyTavern / Tavo preset',
       name,
-      summary: [`${prompts.length} 个 Prompt`, `${prompts.filter(item => item.enabled).length} 个启用`],
-      supported: ['Prompt 顺序', 'marker 插槽', '角色/Persona/世界书插槽', '自定义 system/user/assistant Prompt'],
-      warnings: ['模型参数仍以本 App 的模型设置为主；预设里的供应商专属采样参数会保存但不会强行覆盖。']
+      summary: [`${prompts.length} 个 Prompt`, `${prompts.filter(item => item.enabled).length} 个启用`, `${promptOrderGroups.length || 1} 组 Prompt Order`],
+      supported: ['多组 Prompt Order 自动择优', 'marker 插槽', '角色/Persona/世界书插槽', '{{char}} / {{user}} / 场景 Persona 宏', '自定义 system/user/assistant Prompt'],
+      warnings: [
+        ...(promptOrderGroups.length > 1 ? ['检测到多个 prompt_order 分组；运行时会选择与 prompts 覆盖率最高且最完整的一组，其余分组继续无损保存。'] : []),
+        '模型参数仍以本 App 的模型设置为主；预设里的供应商专属采样参数会保存但不会强行覆盖。'
+      ]
     }
   }
 }
@@ -304,7 +354,12 @@ export function parseCommunityResourceJson(text: string, fileName: string) {
 }
 
 function decodeFileName(bytes: Uint8Array, utf8: boolean) {
-  try { return new TextDecoder(utf8 ? 'utf-8' : 'gb18030').decode(bytes) } catch { return new TextDecoder().decode(bytes) }
+  // 社区 ZIP 经常漏写 UTF-8 flag。优先尝试严格 UTF-8，失败后再按 GB18030，
+  // 避免“紧急更新”被解成“绱ф€ユ洿鏂�”这类文件名乱码。
+  if (utf8) return new TextDecoder('utf-8').decode(bytes)
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch {
+    try { return new TextDecoder('gb18030').decode(bytes) } catch { return new TextDecoder().decode(bytes) }
+  }
 }
 
 async function inflateRaw(data: Uint8Array) {
@@ -336,7 +391,10 @@ export async function extractJsonFilesFromZip(file: File): Promise<Array<{ name:
     const nameBytes = bytes.slice(cursor + 46, cursor + 46 + nameLength)
     const name = decodeFileName(nameBytes, Boolean(flags & 0x800))
     cursor += 46 + nameLength + extraLength + commentLength
-    if (!/\.json$/i.test(name) || name.endsWith('/')) continue
+    const normalizedName = name.replace(/\\/g, '/')
+    const leafName = normalizedName.split('/').pop() || normalizedName
+    if (normalizedName.split('/').includes('__MACOSX') || leafName.startsWith('._')) continue
+    if (!/\.json$/i.test(normalizedName) || normalizedName.endsWith('/')) continue
     if (view.getUint32(localOffset, true) !== 0x04034b50) continue
     const localNameLength = view.getUint16(localOffset + 26, true)
     const localExtraLength = view.getUint16(localOffset + 28, true)
@@ -344,7 +402,7 @@ export async function extractJsonFilesFromZip(file: File): Promise<Array<{ name:
     const compressed = bytes.slice(dataStart, dataStart + compressedSize)
     const output = method === 0 ? compressed : method === 8 ? await inflateRaw(compressed) : undefined
     if (!output) continue
-    files.push({ name: name.split('/').pop() || name, text: new TextDecoder('utf-8').decode(output) })
+    files.push({ name: leafName, text: new TextDecoder('utf-8').decode(output) })
   }
   if (!files.length) throw new Error('ZIP 中没有找到可读取的 JSON 正则资源。')
   return files

@@ -1,3 +1,15 @@
+## V0.4.3.4 可靠性与社区 JSON 兼容修复
+
+- 模型最大输出旧默认 576 / 600 自动迁移到 2048，降低回复截断和半截协议概率。
+- 修复 Prompt Debug 将 Vue Proxy 写入 IndexedDB 导致的 `DataCloneError`。
+- `scene_action` 支持属性、额外空格、连字符写法和流式半截标签；XML 碎片不再作为普通聊天文本泄漏。
+- 新增“动作与对白排版”：自动（远程分开 / 同场合并）、始终分开、始终合并；合并时动作与对白直接相接，不插入换行。
+- 收紧场景身体接触判定，不再把普通“把你 / 将你”句式误判为 together。
+- 用真实社区资源回归：32 张 Character Card、10 本 / 211 条 Lorebook、7 份 Preset、2 个 Regex ZIP / 8 条 Regex JSON、GB18030 Persona。
+- 补齐 Tavo camelCase Lorebook 字段、多 `prompt_order`、`talkativeness / depth_prompt / world / root extensions`、常用 Preset 宏和 Regex ZIP 中文名兼容。
+- “我的资料”重新整理，角色专属 Persona 的 Data URL / base64 头像改为真实头像组件渲染。
+- 数据库仍为 V10，备份格式仍为 V9。
+
 ## V0.4.3.3 场景冲突与 Scene Action 解析修复
 
 - 同轮直接身体接触会覆盖错误的 `remote / 周围=独处`，立即按 together 渲染。
@@ -131,7 +143,7 @@
 
 # 虚拟手机 · AI 陪伴世界
 
-V0.4.2.10 可交互原型：Vue 3 + TypeScript + Vite + Pinia + Vue Router + Dexie + PWA。
+V0.4.3.4 可交互原型：Vue 3 + TypeScript + Vite + Pinia + Vue Router + Dexie + PWA。
 
 ## 本地运行
 

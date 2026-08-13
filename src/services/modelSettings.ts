@@ -12,7 +12,7 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   apiKey: '',
   model: 'mock',
   temperature: 0.8,
-  maxTokens: 600,
+  maxTokens: 2048,
   fallbackToMock: true,
   availableModels: ['mock'],
   visionMode: 'auto',
@@ -166,10 +166,17 @@ Promise<ModelSettings> {
     ...defaults.models
   ])
 
+  // 576/600 是早期版本的低默认值，长角色卡 + companion_packet 很容易被截断。
+  // 只迁移这两个历史默认值；用户主动设置的其它长度保持不变。
+  const migratedMaxTokens = [576, 600].includes(Math.round(saved.maxTokens ?? 0))
+    ? 2048
+    : saved.maxTokens
+
   const normalized: ModelSettings = {
     ...DEFAULT_MODEL_SETTINGS,
     ...saved,
     model,
+    maxTokens: migratedMaxTokens ?? DEFAULT_MODEL_SETTINGS.maxTokens,
     availableModels,
     visionMode: saved.visionMode ?? 'auto'
   }

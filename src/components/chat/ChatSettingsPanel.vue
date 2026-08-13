@@ -236,6 +236,15 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-control">
+        <span><b>动作与对白排版</b><small>自动：不在一起时分开；在一起时合并，且动作后直接接对白、不加换行</small></span>
+        <select v-model="chatSettings.actionTextLayout" @change="emit('persist')">
+          <option value="auto">自动 · 远程分开 / 同场合并</option>
+          <option value="separate">始终分开</option>
+          <option value="merged">始终合并</option>
+        </select>
+      </label>
+
+      <label class="setting-control">
         <span><b>我的 Persona</b><small>角色在本次聊天中认识的“你”</small></span>
         <select v-model="chatSettings.personaId" @change="emit('persist')">
           <option value="">使用默认人设</option>
@@ -256,7 +265,7 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-switch">
-        <span><b>小手机互动协议</b><small>远程拆多气泡；同场景把动作以括号合并进剧情气泡</small></span>
+        <span><b>小手机互动协议</b><small>按“动作与对白排版”决定独立 Action 或括号合并</small></span>
         <input v-model="chatSettings.actionProtocolEnabled" type="checkbox" @change="emit('persist')" />
       </label>
 

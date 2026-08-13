@@ -337,7 +337,7 @@ function formatMessageForPrompt(message: Message) {
     : message.type === 'voice'
       ? `<voice_message>${message.content}</voice_message>`
       : message.type === 'action'
-        ? `<scene_action perspective="remote">${message.content}</scene_action>`
+        ? `<scene_action>${message.content}</scene_action>`
       : message.type === 'emoji'
         ? `<emoji_message>${message.content}</emoji_message>`
         : /^(?:\/ooc\b|ooc\s*[：:])/i.test(promptContent.trim())
@@ -560,14 +560,14 @@ async function normalizeLegacySceneActionMessages(
   let latestPresencePatch: Partial<ConversationState> = {}
 
   for (const row of rows) {
-    if (row.senderId === 'user' || !/<scene_action\b/i.test(row.content)) {
+    if (row.senderId === 'user' || !/<\s*\/?\s*scene(?:[_-]?action)?/i.test(row.content)) {
       normalized.push(row)
       continue
     }
 
     const parsed = parseCompanionOutput(row.content)
     if (!parsed.messages.length) {
-      const clean = row.content.replace(/<\/?scene_action\b[^>]*>/gi, '').trim()
+      const clean = visibleStreamingText(row.content).trim()
       const next = { ...row, content: clean }
       await db.messages.update(row.id, { content: clean })
       normalized.push(next)
@@ -1252,7 +1252,9 @@ async function requestAssistantReply(options?: {
         worldId: activeConversation.worldId,
         characterId: activeCharacter.id,
         messages: messages.value,
-        latestText: [latestUserText, options?.musicPrompt || ''].filter(Boolean).join('\n')
+        latestText: [latestUserText, options?.musicPrompt || ''].filter(Boolean).join('\n'),
+        character: activeCharacter,
+        persona
       })
       : { prompt: '', activated: [] }
 
@@ -1330,7 +1332,15 @@ async function requestAssistantReply(options?: {
         hasImages: includeVision && Boolean(visualMessage),
         imageCount: includeVision && visualMessage ? getMessageImageUrls(visualMessage).length : 0,
         isAlternativeReply: Boolean(options?.alternativeTargetId)
-      }), activePreset)
+      }), activePreset, {
+        char: activeCharacter.name,
+        user: persona.name,
+        scenario: activeCharacter.scenario || '',
+        personality: activeCharacter.persona || '',
+        persona: persona.description || persona.identity || '',
+        description: activeCharacter.background || activeCharacter.identity || '',
+        lastChatMessage: latestUserText
+      })
       return activePromptRegex.length ? applyRegexScripts(base, activePromptRegex, regexMacros).text : base
     }
 

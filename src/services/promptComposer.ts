@@ -86,7 +86,7 @@ function roleCardUiRules(input: RoleplayPromptInput) {
     '{周围:独处/某人在场}（“独处”表示没有其他第三人在场；如果用户就在现场，应明确写“用户在场”或用户称呼在场）',
     '{待办:1.事项.2.事项，最多5项，完成后更新}',
     'UI 状态之后再输出角色动作与对白。界面会自动把这些字段解析为状态卡，不会把花括号原样显示在聊天气泡里。',
-    '如果 UI 的“周围”显示用户在场，或动作明显与用户发生现实接触，则双方视为同场景：presence 必须写 together，动作使用 scene_action，界面会把动作以中文括号合并进剧情气泡。不要一边写“独处/remote”，一边拥抱、亲吻、触碰用户。',
+    '如果 UI 的“周围”显示用户在场，或动作明显与用户发生现实接触，则双方视为同场景：presence 必须写 together，动作使用 scene_action，界面会按“动作与对白排版”设置决定把动作独立显示，或转成中文括号后直接接对白。不要一边写“独处/remote”，一边拥抱、亲吻、触碰用户。',
     '剧情日期与时间沿用角色卡自己的时间线并按事件合理推进。若角色卡已经从 2017 年开始，不要用设备当前年份强行覆盖剧情年份；设备时间只用于现实时间提问或角色卡没有独立剧情时间线时。'
   ].join('\\n')
 }
@@ -105,6 +105,9 @@ export function composeRoleplaySystemPrompt(input: RoleplayPromptInput): string 
     input.memoryWriteNotice ? `【本轮记忆写入结果】\n${input.memoryWriteNotice}` : '',
     input.currentSummary ? `【此前剧情摘要】\n${input.currentSummary}` : '',
     input.lorebookPrompt || '',
+    input.character.depthPrompt?.prompt?.trim()
+      ? `【角色卡 Depth Prompt · depth ${input.character.depthPrompt.depth ?? 4} · ${input.character.depthPrompt.role || 'system'}】\n${input.character.depthPrompt.prompt.trim()}`
+      : '',
     buildExampleDialoguePrompt(input.character.exampleDialogues),
     naturalnessRules(input.settings),
     visualRules(input),

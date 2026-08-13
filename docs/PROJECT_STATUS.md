@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-V0.4.3.3
+V0.4.3.4
 
 ## 当前阶段
 
@@ -58,6 +58,17 @@ V0.4.3.3
 - 主动消息来源、频率、最短间隔、安静时段和关系阶段控制
 - 输入停顿、撤回、消息回应表情和主动分享图片占位
 - Prompt 分区预算、截断风险、命中原因、规则影响和自然度评分
+
+### V0.4.3.4 可靠性与真实社区资源回归
+
+- 模型最大输出旧默认 576 / 600 自动迁移到 2048；其它用户自定义值不强改。
+- Prompt Debug 写入 IndexedDB 前移除 Vue Proxy / reactive 包装，修复 `DataCloneError`。
+- Scene Action 兼容属性、额外空格、`scene-action` 和流式半截标签，历史残缺标签也会清理。
+- 动作/对白排版支持自动、分开、合并；自动模式 remote 分开、together 合并，合并无额外换行。
+- 收紧“把你 / 将你”身体接触误判，只有明确接触动作才覆盖 remote。
+- 真实社区语料回归：32 张 Character Card、10 本 / 211 条 Lorebook、7 份 Preset、8 条 Regex JSON、GB18030 Persona。
+- Character Card 运行 `talkativeness / depth_prompt / world` 并保留 root/data extensions；Lorebook 兼容 Tavo camelCase；Preset 多 `prompt_order` 会择优运行。
+- “我的资料”区分手机基础身份、全局 Persona 和角色专属 Persona；Base64/Data URL 头像不再显示为文本。
 
 ### Tavo / SillyTavern 资源兼容
 
@@ -178,7 +189,7 @@ V0.4.3.3
 
 ### 数据
 
-IndexedDB 当前为 V8：
+IndexedDB 当前为 V10：
 
 - worlds
 - characters
@@ -198,7 +209,7 @@ IndexedDB 当前为 V8：
 - promptDebugTraces（本地调试，不进入备份）
 - conversationStateHistory
 
-备份格式为 V7，可选择是否包含图片，并兼容导入 V1～V6。
+备份格式为 V9，可选择是否包含图片，并继续兼容旧版备份导入。
 
 ## 当前限制
 
@@ -212,16 +223,15 @@ IndexedDB 当前为 V8：
 
 ## 下一里程碑
 
-V0.5.0 建议先建设 Companion OS 公共底座：
+V0.4.3.5 继续完成社区资源兼容核心，不先扩普通 App 功能：
 
-- 应用注册与桌面扩展机制
-- AI 工具动作和权限系统
-- 跨应用事件总线
-- 虚拟钱包、订单和礼物
-- 通知中心与任务调度
-- 为海龟汤、飞行棋、小说、笔记、购物、外卖和红包提供统一能力
+- WorldBook Engine V2：递归扫描、sticky / cooldown / delay、token budget、position / depth 更精确执行。
+- Preset Prompt Manager：多 order group、marker、启停、拖拽排序、宏变量与最终 Prompt 调试。
+- Regex 编辑器：placement、depth、display-only / prompt-only、排序、测试台和前后预览。
+- Theme Runtime V1：对独立 Theme JSON 做安全结构化映射，不执行社区 JavaScript。
+- 兼容报告 UI：明确“已运行 / 部分运行 / 仅保留 / 安全阻止”。
 
-先完成底座，再分版本加入小游戏和生活应用，避免把业务继续堆进 `ChatRoom.vue`。
+V0.5.0 的 Companion OS 公共底座仍保留为后续方向，但应在当前 Tavo / SillyTavern 兼容链路稳定后再推进。
 
 
 ### V0.4.2.4

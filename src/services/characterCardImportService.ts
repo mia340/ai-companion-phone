@@ -6,6 +6,7 @@ import { parsePersonaText } from './personaImportService'
 
 interface CardPayload {
   name?: unknown
+  avatar?: unknown
   description?: unknown
   personality?: unknown
   scenario?: unknown
@@ -20,6 +21,7 @@ interface CardPayload {
   character_version?: unknown
   extensions?: unknown
   character_book?: unknown
+  group_only_greetings?: unknown
 }
 
 
@@ -42,6 +44,47 @@ const asStringArray = (value: unknown) =>
   Array.isArray(value)
     ? Array.from(new Set(value.map(asText).filter(Boolean)))
     : []
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+
+const asNumber = (value: unknown) => {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function importableAvatar(value: unknown) {
+  const avatar = asText(value)
+  if (!avatar || avatar.toLowerCase() === 'none') return undefined
+  if (/^(?:data:image\/|blob:|https?:\/\/)/i.test(avatar)) return avatar
+  // 只把很短的文本当 Emoji/字符头像；Tavo 的 charaCard/xxx.jpg 路径没有随 JSON 一起提供文件，不能伪装成可用图片。
+  return avatar.length <= 12 && !/[\/\.]/.test(avatar) ? avatar : undefined
+}
+
+function extractDepthPrompt(...extensions: Record<string, unknown>[]) {
+  for (const ext of extensions) {
+    const raw = asRecord(ext.depth_prompt ?? ext.depthPrompt)
+    const direct = asText(raw.prompt)
+    if (direct) {
+      return { prompt: direct, depth: asNumber(raw.depth), role: asText(raw.role) || undefined }
+    }
+    const prompts = Array.isArray(raw.prompts) ? raw.prompts.map(asRecord) : []
+    for (const item of prompts) {
+      const prompt = asText(item.prompt)
+      if (prompt) return { prompt, depth: asNumber(item.depth), role: asText(item.role) || undefined }
+    }
+  }
+  return undefined
+}
+
+function inferInitiative(talkativeness?: number): Character['initiative'] | undefined {
+  if (talkativeness == null) return undefined
+  if (talkativeness <= 0.34) return 'low'
+  if (talkativeness >= 0.66) return 'high'
+  return 'natural'
+}
 
 
 const extractDialogue = (value: unknown): CharacterExampleDialogue[] => {
@@ -173,9 +216,13 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   const data = extractData(record)
   const description = asText(data.description)
   const personality = asText(data.personality)
-  const extensions = data.extensions && typeof data.extensions === 'object' && !Array.isArray(data.extensions)
-    ? data.extensions as Record<string, unknown>
-    : {}
+  const extensions = asRecord(data.extensions)
+  const rootExtensions = asRecord(record.extensions)
+  const talkativeness = asNumber(rootExtensions.talkativeness ?? extensions.talkativeness ?? record.talkativeness)
+  const depthPrompt = extractDepthPrompt(rootExtensions, extensions)
+  const worldBookHint = asText(rootExtensions.world ?? extensions.world) || undefined
+  const rootMetadata = Object.fromEntries(Object.entries(record).filter(([key]) => !['spec', 'spec_version', 'data', 'extensions'].includes(key)))
+  const rawCardExtensions = JSON.parse(JSON.stringify({ data: extensions, root: rootExtensions, rootMetadata })) as Record<string, unknown>
   const notes: string[] = []
 
   if (!asText(data.name) && !description && !personality) {
@@ -185,9 +232,20 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   const lorebookEntries = extractCharacterBook(data.character_book)
   const lorebookName = lorebookEntries.length ? extractCharacterBookName(data.character_book) : undefined
   let regexScripts: Array<Omit<RegexScript, 'id' | 'worldId' | 'createdAt' | 'updatedAt'>> = []
-  if (Array.isArray(extensions.regex_scripts) && extensions.regex_scripts.length) {
+  const embeddedRegexRows = [
+    ...(Array.isArray(extensions.regex_scripts) ? extensions.regex_scripts : []),
+    ...(Array.isArray(rootExtensions.regex_scripts) ? rootExtensions.regex_scripts : [])
+  ]
+  if (embeddedRegexRows.length) {
     try {
-      regexScripts = parseRegexJson(JSON.stringify({ regex_scripts: extensions.regex_scripts }), `${asText(data.name) || '角色'}-内嵌正则.json`).scripts
+      const parsed = parseRegexJson(JSON.stringify({ regex_scripts: embeddedRegexRows }), `${asText(data.name) || '角色'}-内嵌正则.json`).scripts
+      const seen = new Set<string>()
+      regexScripts = parsed.filter(script => {
+        const key = `${script.name}\u0000${script.findRegex}\u0000${script.replaceString}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
     } catch {
       regexScripts = []
     }
@@ -195,6 +253,7 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   const embeddedUser = buildEmbeddedUserPreview(description, asText(data.name) || '角色')
   const patch: Partial<Character> = {
     name: asText(data.name) || undefined,
+    avatar: importableAvatar(data.avatar ?? record.avatar),
     persona: [personality, description].filter(Boolean).join('\n\n') || undefined,
     scenario: asText(data.scenario) || undefined,
     firstMessage: asText(data.first_mes) || undefined,
@@ -203,11 +262,17 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
     creatorNotes: asText(data.creator_notes) || undefined,
     systemPrompt: asText(data.system_prompt) || undefined,
     postHistoryInstructions: asText(data.post_history_instructions) || undefined,
+    initiative: inferInitiative(talkativeness),
+    talkativeness,
+    depthPrompt,
+    worldBookHint,
+    rawCardExtensions,
+    groupOnlyGreetings: asStringArray(data.group_only_greetings),
     tags: asStringArray(data.tags),
     creator: asText(data.creator) || undefined,
     resourceVersion: asText(data.character_version) || undefined,
-    sourceUrl: asText(extensions.source_url ?? extensions.sourceUrl) || undefined,
-    license: asText(extensions.license) || undefined,
+    sourceUrl: asText(rootExtensions.source_url ?? rootExtensions.sourceUrl ?? extensions.source_url ?? extensions.sourceUrl) || undefined,
+    license: asText(rootExtensions.license ?? extensions.license) || undefined,
     allowDerivative: typeof extensions.allow_derivative === 'boolean'
       ? extensions.allow_derivative
       : undefined,
@@ -222,6 +287,13 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   if (lorebookEntries.length) notes.push(`检测到内嵌角色世界书 ${lorebookEntries.length} 条，将随角色一起导入。`)
   if (embeddedUser) notes.push(`检测到角色卡自带 {{user}} 用户模板，可直接生成角色专属 Persona 并自动绑定聊天。`)
   if (regexScripts.length) notes.push(`检测到内嵌正则 ${regexScripts.length} 条，将保存为角色专属正则并自动启用。`)
+  if (depthPrompt) notes.push('检测到 depth_prompt，将按角色卡扩展提示参与运行时 Prompt。')
+  if (talkativeness != null) notes.push(`检测到 talkativeness=${talkativeness}，已映射到角色主动程度。`)
+  if (worldBookHint) notes.push(`检测到角色卡 world 绑定提示“${worldBookHint}”，已保留供资源兼容与后续绑定。`)
+  if (asRecord(extensions.tavern_helper).scripts || asRecord(rootExtensions.tavern_helper).scripts) {
+    notes.push('检测到 tavern_helper / JavaScript 扩展：已无损归档，但不会执行第三方 JS。')
+  }
+  if (asText(data.avatar ?? record.avatar) && !patch.avatar) notes.push('角色卡头像是外部相对路径；JSON 未携带图片文件，已保留原路径但不会显示成损坏头像。')
 
   return { format, patch, lorebookEntries, lorebookName, regexScripts, embeddedUser, notes }
 }
@@ -234,11 +306,31 @@ export async function parseCharacterCardFile(file: File) {
 }
 
 export function exportCharacterAsSillyTavernV2(character: Character) {
+  const stored = asRecord(character.rawCardExtensions)
+  const storedDataExtensions = asRecord(stored.data)
+  const storedRootExtensions = asRecord(stored.root)
+  const extensions: Record<string, unknown> = {
+    ...storedDataExtensions,
+    source_url: character.sourceUrl || storedDataExtensions.source_url || '',
+    license: character.license || storedDataExtensions.license || '',
+    allow_derivative: character.allowDerivative ?? storedDataExtensions.allow_derivative ?? false,
+    ai_companion_embedded_user_template: character.embeddedUserTemplate || '',
+    ai_companion_root_extensions: Object.keys(storedRootExtensions).length ? storedRootExtensions : undefined
+  }
+  if (character.talkativeness != null) extensions.talkativeness = character.talkativeness
+  if (character.depthPrompt?.prompt) extensions.depth_prompt = {
+    prompt: character.depthPrompt.prompt,
+    depth: character.depthPrompt.depth,
+    role: character.depthPrompt.role
+  }
+  if (character.worldBookHint) extensions.world = character.worldBookHint
+
   return JSON.stringify({
     spec: 'chara_card_v2',
     spec_version: '2.0',
     data: {
       name: character.name,
+      avatar: character.avatar || '',
       description: [
         character.identity ? `身份：${character.identity}` : '',
         character.appearance ? `外貌：${character.appearance}` : '',
@@ -260,15 +352,11 @@ export function exportCharacterAsSillyTavernV2(character: Character) {
       system_prompt: character.systemPrompt || '',
       post_history_instructions: character.postHistoryInstructions || '',
       alternate_greetings: character.alternateGreetings || [],
+      group_only_greetings: character.groupOnlyGreetings || [],
       tags: character.tags || [],
       creator: character.creator || '',
-      character_version: character.resourceVersion || '0.4.2.7',
-      extensions: {
-        source_url: character.sourceUrl || '',
-        license: character.license || '',
-        allow_derivative: character.allowDerivative ?? false,
-        ai_companion_embedded_user_template: character.embeddedUserTemplate || ''
-      }
+      character_version: character.resourceVersion || '0.4.3.4',
+      extensions
     }
   }, null, 2)
 }

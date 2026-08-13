@@ -36,7 +36,7 @@ const form = ref<ModelSettings>({
   apiKey: '',
   model: 'mock',
   temperature: 0.8,
-  maxTokens: 600,
+  maxTokens: 2048,
   fallbackToMock: true,
   availableModels: ['mock'],
   visionMode: 'auto',
@@ -566,6 +566,7 @@ async function testVision() {
             max="8192"
             step="64"
           />
+          <small>建议 2048 起。旧版 576 / 600 的默认值会自动提升到 2048，避免角色卡协议和动作标签在输出末尾被截断。</small>
         </label>
 
         <label class="switch-row">

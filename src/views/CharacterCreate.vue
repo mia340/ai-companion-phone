@@ -235,6 +235,14 @@ function appendText(original: string, addition: string) {
 function applyImportedCardToForm(imported: ImportedCharacterCard) {
   const patch = imported.patch
   if (patch.name?.trim()) name.value = patch.name.trim()
+  if (patch.avatar?.trim()) {
+    if (/^(?:data:image\/|blob:|https?:\/\/)/i.test(patch.avatar.trim())) {
+      avatarImage.value = patch.avatar.trim()
+    } else {
+      avatarEmoji.value = patch.avatar.trim()
+      avatarImage.value = ''
+    }
+  }
   if (patch.nickname?.trim()) nickname.value = patch.nickname.trim()
   if (patch.identity?.trim()) identity.value = patch.identity.trim()
   if (patch.persona?.trim()) persona.value = patch.persona.trim()
@@ -676,6 +684,11 @@ async function save() {
           importFormat: importedPatch.importFormat || 'native',
           embeddedUserTemplate: embeddedUser?.rawTemplate || importedPatch.embeddedUserTemplate,
           embeddedUserPersonaId: embeddedPersonaId,
+          talkativeness: importedPatch.talkativeness,
+          depthPrompt: importedPatch.depthPrompt,
+          worldBookHint: importedPatch.worldBookHint,
+          rawCardExtensions: importedPatch.rawCardExtensions,
+          groupOnlyGreetings: importedPatch.groupOnlyGreetings || [],
           mood: '期待认识你',
           activity: '刚刚来到这个世界',
 
@@ -911,7 +924,9 @@ async function save() {
                 '原始 JSON 无损归档',
                 '角色卡自带 {{user}} Persona',
                 '内嵌 character_book',
-                '内嵌 regex_scripts'
+                'data/root extensions.regex_scripts',
+                'depth_prompt / talkativeness / world 扩展',
+                '安全保留第三方扩展（不执行 JavaScript）'
               ],
               warnings: [...(importedSnapshot.notes || [])]
             },

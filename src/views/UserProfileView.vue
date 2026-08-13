@@ -280,26 +280,18 @@ onMounted(loadProfile)
       </p>
 
       <template v-else>
-        <section class="profile-preview">
+        <section class="profile-hero">
           <CharacterAvatar
-            :avatar="
-              avatarImage ||
-              avatarEmoji ||
-              '🧑'
-            "
+            :avatar="avatarImage || avatarEmoji || '🧑'"
             :name="name || '我'"
-            :size="92"
+            :size="84"
           />
 
-          <div>
+          <div class="profile-hero-copy">
+            <span class="profile-kicker">手机基础身份</span>
             <h2>{{ name || '我' }}</h2>
-
-            <p>
-              {{
-                identity ||
-                '还没有填写身份'
-              }}
-            </p>
+            <p>{{ identity || '还没有填写身份' }}</p>
+            <small>{{ bio || '这里保存全局昵称和头像；进入角色世界时由 Persona 决定角色认识的“你”。' }}</small>
           </div>
         </section>
 
@@ -313,7 +305,7 @@ onMounted(loadProfile)
           </div>
 
           <article v-if="defaultPersona" class="persona-summary default">
-            <div class="persona-symbol">{{ defaultPersona.avatar || '🧑' }}</div>
+            <CharacterAvatar class="persona-symbol" :avatar="defaultPersona.avatar || '🧑'" :name="defaultPersona.name" :size="42" />
             <div>
               <b>{{ defaultPersona.name }}</b>
               <small>默认 Persona · {{ defaultPersona.identity || defaultPersona.occupation || '未填写身份' }}</small>
@@ -326,7 +318,7 @@ onMounted(loadProfile)
               <small>{{ characterPersonas.length }} 套</small>
             </div>
             <article v-for="persona in characterPersonas" :key="persona.id" class="persona-summary">
-              <div class="persona-symbol">{{ persona.avatar || '🧑' }}</div>
+              <CharacterAvatar class="persona-symbol" :avatar="persona.avatar || '🧑'" :name="persona.name" :size="42" />
               <div>
                 <b>{{ persona.name }}</b>
                 <small>{{ persona.boundCharacterName ? `仅用于 ${persona.boundCharacterName}` : '角色专属' }}</small>
@@ -343,74 +335,45 @@ onMounted(loadProfile)
           <p class="persona-note">角色卡里的 <span v-pre>{{user}}</span> 可以在导入角色时自动创建成专属 Persona；不会自动改写你的全局资料。</p>
         </section>
 
-        <section class="profile-card">
-          <h3>我的头像</h3>
+        <section class="profile-card profile-editor">
+          <div class="section-heading">
+            <div>
+              <h3>基础资料</h3>
+              <p>只影响这台小手机的全局展示，不会覆盖任何角色专属 Persona。</p>
+            </div>
+          </div>
 
-          <label>
-            表情头像
+          <div class="avatar-edit-row">
+            <CharacterAvatar :avatar="avatarImage || avatarEmoji || '🧑'" :name="name || '我'" :size="68" />
+            <div class="avatar-edit-actions">
+              <label class="emoji-field">
+                <span>表情头像</span>
+                <input v-model="avatarEmoji" maxlength="8" placeholder="例如：🧑" @input="useEmojiAvatar" />
+              </label>
+              <label class="upload-button">
+                选择本地照片
+                <input class="hidden-file-input" type="file" accept="image/*" @change="handleAvatarUpload" />
+              </label>
+              <button v-if="avatarImage" class="text-button" type="button" @click="useEmojiAvatar">改回表情头像</button>
+            </div>
+          </div>
 
-            <input
-              v-model="avatarEmoji"
-              maxlength="8"
-              placeholder="例如：🧑"
-              @input="useEmojiAvatar"
-            />
-          </label>
+          <div class="profile-fields">
+            <label>
+              我的昵称
+              <input v-model="name" maxlength="20" placeholder="例如：小满" />
+            </label>
 
-          <label class="upload-button">
-            选择本地照片
+            <label>
+              我的身份
+              <input v-model="identity" maxlength="50" placeholder="例如：大学生、设计师、旅行者" />
+            </label>
 
-            <input
-              class="hidden-file-input"
-              type="file"
-              accept="image/*"
-              @change="handleAvatarUpload"
-            />
-          </label>
-
-          <button
-            v-if="avatarImage"
-            class="text-button"
-            type="button"
-            @click="useEmojiAvatar"
-          >
-            移除照片，使用表情头像
-          </button>
-        </section>
-
-        <section class="profile-card">
-          <h3>基本资料</h3>
-
-          <label>
-            我的昵称
-
-            <input
-              v-model="name"
-              maxlength="20"
-              placeholder="例如：小满"
-            />
-          </label>
-
-          <label>
-            我的身份
-
-            <input
-              v-model="identity"
-              maxlength="50"
-              placeholder="例如：大学生、设计师、旅行者"
-            />
-          </label>
-
-          <label>
-            个人简介
-
-            <textarea
-              v-model="bio"
-              rows="4"
-              maxlength="300"
-              placeholder="可以写兴趣、性格，以及希望角色如何了解你。"
-            ></textarea>
-          </label>
+            <label>
+              个人简介
+              <textarea v-model="bio" rows="4" maxlength="300" placeholder="写你希望整个小手机知道的基础信息；具体世界身份请放 Persona。"></textarea>
+            </label>
+          </div>
         </section>
 
         <p
@@ -452,86 +415,79 @@ onMounted(loadProfile)
   padding-bottom: 36px;
 }
 
-.profile-preview {
+.profile-hero {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 18px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.58);
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid rgba(217, 111, 155, 0.1);
+  border-radius: 24px;
+  background: linear-gradient(145deg, rgba(255,255,255,.82), rgba(255,244,249,.64));
+  box-shadow: 0 12px 30px rgba(116, 66, 87, 0.06);
 }
 
-.profile-preview h2 {
-  margin: 0 0 6px;
-}
-
-.profile-preview p {
-  margin: 0;
-  opacity: 0.65;
-}
+.profile-hero-copy { min-width: 0; display: grid; gap: 3px; }
+.profile-kicker { width: max-content; padding: 4px 8px; border-radius: 999px; background: rgba(217,111,155,.1); color: #b8567f; font-size: 11px; font-weight: 800; }
+.profile-hero h2 { margin: 3px 0 0; font-size: 25px; }
+.profile-hero p { margin: 0; color: #8d6677; }
+.profile-hero small { margin-top: 4px; color: #a17d8d; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 .profile-card {
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.42);
+  padding: 17px;
+  border: 1px solid rgba(217, 111, 155, 0.08);
+  border-radius: 21px;
+  background: rgba(255, 255, 255, 0.58);
 }
 
-.profile-card h3 {
-  margin: 0;
+.profile-card h3 { margin: 0; }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.section-heading p { margin: 4px 0 0; color: #9b7183; font-size: 12px; line-height: 1.5; }
+
+.avatar-edit-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 13px;
+  border-radius: 17px;
+  background: rgba(255, 247, 251, .78);
 }
+.avatar-edit-actions { display: grid; gap: 8px; min-width: 0; }
+.emoji-field { display: grid; gap: 5px; }
+.emoji-field span { color: #7a5867; font-size: 12px; font-weight: 700; }
+.profile-fields { display: grid; gap: 12px; }
 
 .upload-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 11px 14px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.78);
-  cursor: pointer;
-}
-
-.hidden-file-input {
-  display: none;
-}
-
-.text-button {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  opacity: 0.7;
-}
-
-.status-message,
-.success-message,
-.error-message {
-  padding: 11px 13px;
+  padding: 10px 13px;
   border-radius: 13px;
-  text-align: center;
+  background: rgba(217,111,155,.1);
+  color: #b8567f;
+  font-weight: 800;
+  cursor: pointer;
 }
+.hidden-file-input { display: none; }
+.text-button { border: none; background: transparent; color: #9b7183; cursor: pointer; text-align: left; padding: 2px 0; }
 
-.status-message {
-  background: rgba(255, 255, 255, 0.52);
-}
-
-.success-message {
-  background: rgba(225, 255, 235, 0.82);
-}
-
-.error-message {
-  background: rgba(255, 225, 225, 0.88);
-}
+.status-message, .success-message, .error-message { padding: 11px 13px; border-radius: 13px; text-align: center; }
+.status-message { background: rgba(255, 255, 255, 0.52); }
+.success-message { background: rgba(225, 255, 235, 0.82); }
+.error-message { background: rgba(255, 225, 225, 0.88); }
 
 .persona-overview { gap: 10px; }
 .persona-overview-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .persona-overview-head h3 { margin:0 0 4px; }
 .persona-overview-head p { margin:0; color:#9b7183; font-size:12px; line-height:1.5; }
 .persona-manage-button { border:0; border-radius:12px; padding:9px 11px; background:rgba(217,111,155,.12); color:#b8567f; font-weight:800; white-space:nowrap; }
-.persona-summary { display:flex; gap:10px; align-items:flex-start; padding:11px; border-radius:14px; background:rgba(255,255,255,.72); }
+.persona-summary { display:flex; gap:10px; align-items:flex-start; padding:11px; border-radius:14px; background:rgba(255,255,255,.76); overflow:hidden; }
 .persona-summary.default { border:1px solid rgba(217,111,155,.16); }
-.persona-symbol { width:42px; height:42px; border-radius:13px; display:grid; place-items:center; background:rgba(255,221,235,.7); font-size:22px; flex:0 0 auto; }
-.persona-summary > div:last-child { display:grid; gap:3px; min-width:0; }
+.persona-symbol { flex: 0 0 auto; }
+.persona-summary > div:last-child { display:grid; gap:3px; min-width:0; overflow:hidden; }
+.persona-summary b, .persona-summary small, .persona-summary p { overflow-wrap:anywhere; }
 .persona-summary small { color:#9b7183; }
 .persona-summary p { margin:2px 0 0; color:#745b66; font-size:12px; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .character-persona-group { display:grid; gap:8px; }
@@ -540,4 +496,9 @@ onMounted(loadProfile)
 .persona-counts { display:flex; gap:8px; flex-wrap:wrap; }
 .persona-counts span { padding:5px 9px; border-radius:999px; background:rgba(217,111,155,.08); color:#a35c78; font-size:11px; }
 .persona-note { margin:0; color:#9b7183; font-size:12px; line-height:1.5; }
+
+@media (max-width: 420px) {
+  .profile-hero { align-items: flex-start; }
+  .avatar-edit-row { grid-template-columns: 1fr; }
+}
 </style>

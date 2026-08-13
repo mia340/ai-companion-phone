@@ -1,3 +1,24 @@
+## V0.4.3.4 · 可靠性与社区 JSON 兼容修复
+
+### Fixed
+- 模型输出旧默认 576 / 600 自动迁移到 2048，降低长回复被截断和协议只生成一半的问题。
+- Prompt Debug 写入 Dexie 前转为 plain storage value，修复 Vue Proxy 触发的 IndexedDB `DataCloneError`。
+- Scene Action 解析支持属性、异常空格、`scene-action`、未闭合与流式半截标签；历史泄漏标记也会清理。
+- 收紧直接身体接触正则，普通“把你介绍给……”和“将你说的话……”不再误判为 together。
+- “我的资料”中角色专属 Persona 的 Data URL / base64 头像改为头像组件渲染。
+
+### Added
+- 聊天新增动作/对白排版：自动、分开、合并。自动模式 remote 分开、together 合并；合并时不插入换行。
+- Character Card 兼容 `talkativeness`、`depth_prompt`、`world`、root/data extensions、root avatar 与 `group_only_greetings`。
+- Lorebook 兼容真实 Tavo camelCase 字段和 Persona / Character / Scenario 匹配来源。
+- Prompt Preset 支持多 `prompt_order` 择优以及常用 `setvar/getvar/random` 文本宏。
+
+### Compatibility
+- 真实资源回归：32/32 Character Card、10/10 Lorebook、211/211 entries、7/7 Preset、8/8 Regex JSON；原有 GB18030 Persona 解码链路也通过真实文件复核。
+- Regex ZIP 自动忽略 `__MACOSX` / `._*`，并兼容未标 UTF-8 flag 的中文文件名。
+- IndexedDB 保持 V10，完整备份保持 V9。
+- 第三方 JavaScript 继续只归档、不自动执行。
+
 ## V0.4.3.3 · 场景冲突与 Scene Action 解析修复
 
 - 新增场景冲突解析：直接身体接触 > 角色卡“独处”/模型 remote 报告。

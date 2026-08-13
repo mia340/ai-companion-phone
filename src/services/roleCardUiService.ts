@@ -102,7 +102,7 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
   return found >= 2 ? ui : undefined
 }
 
-const DIRECT_CONTACT_PATTERN = /(?:将你|把你|抱住你|抱着你|搂住你|搂着你|揽住你|揽着你|牵住你|牵着你|握住你|扣住你|环住你|圈住你|吻你|亲你|亲上你|吻上你|摸了摸你|抚过你|揉了揉你|贴着你|贴近你|靠在你|靠着你|埋进你|埋在你|蹭着你|蹭了蹭你|鼻尖蹭着你|额头抵着你|抵住你|压住你|扶住你|拉住你|拽住你|替你掖|给你掖|躺在你身边|睡在你身边|和你同床|与你同床|彼此的呼吸)/
+const DIRECT_CONTACT_PATTERN = /(?:把你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|将你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|抱住你|抱着你|搂住你|搂着你|揽住你|揽着你|牵住你|牵着你|握住你|握着你的手|扣住你|环住你|圈住你|吻你|亲你|亲上你|吻上你|摸了摸你|抚过你|揉了揉你|拍了拍你|拍了下你|轻拍你|贴着你|贴近你|靠在你|靠着你|埋进你|埋在你|蹭着你|蹭了蹭你|鼻尖蹭着你|额头抵着你|抵住你|压住你|扶住你|拉住你|拽住你|替你掖|给你掖|躺在你身边|睡在你身边|和你同床|与你同床|彼此的呼吸)/
 const CO_PRESENCE_PATTERN = /(?:走到你身边|坐到你身边|坐在你旁边|站在你面前|来到你面前|俯身看你|低头看你|看了你一眼|从你身边|递到你手里|放到你手边)/
 
 export function resolvePresenceFromRoleCardScene(
@@ -112,7 +112,7 @@ export function resolvePresenceFromRoleCardScene(
 ): PresenceResolution {
   const surroundings = ui?.surroundings?.trim() || ''
   const content = text
-    .replace(/<\/?scene_action\b[^>]*>/gi, '')
+    .replace(/<\s*\/?\s*scene[_-]?action\b[^>]*>/gi, '')
     .replace(/\s+/g, '')
   const hasDirectContact = DIRECT_CONTACT_PATTERN.test(content)
   const hasCoPresence = CO_PRESENCE_PATTERN.test(content)

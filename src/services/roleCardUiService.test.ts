@@ -29,3 +29,14 @@ describe('role card UI compatibility', () => {
   })
 
 })
+
+it('不会把普通“把你/将你”语句误判为身体接触', () => {
+  expect(resolvePresenceFromRoleCardScene('我会把你介绍给导演。', undefined, 'remote').resolvedPresence).toBe('remote')
+  expect(resolvePresenceFromRoleCardScene('我将你说的话记下来了。', undefined, 'remote').resolvedPresence).toBe('remote')
+})
+
+it('识别“把你圈进怀里 / 拍你的后背”为直接接触', () => {
+  const result = resolvePresenceFromRoleCardScene('把你圈进怀里，轻轻拍了下你的后背。', undefined, 'remote')
+  expect(result.resolvedPresence).toBe('together')
+  expect(result.conflict).toBe(true)
+})

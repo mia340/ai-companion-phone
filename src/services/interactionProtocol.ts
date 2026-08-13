@@ -133,6 +133,28 @@ export function resolvePresenceMode(settings: ChatSettings, state?: Conversation
   return state?.presence === 'together' ? 'together' : 'remote'
 }
 
+export function resolveActionTextLayout(
+  settings: ChatSettings,
+  state?: ConversationState
+): 'separate' | 'merged' {
+  if (settings.actionTextLayout === 'separate' || settings.actionTextLayout === 'merged') {
+    return settings.actionTextLayout
+  }
+  return resolvePresenceMode(settings, state) === 'together' ? 'merged' : 'separate'
+}
+
+const SCENE_ACTION_FULL_PATTERN = /<\s*scene[_-]?action\b[^>]*>([\s\S]*?)<\s*\/\s*scene[_-]?action\s*>/gi
+const SCENE_ACTION_OPEN_PATTERN = /<\s*scene[_-]?action\b[^>]*>/gi
+const SCENE_ACTION_CLOSE_PATTERN = /<\s*\/\s*scene[_-]?action\s*>/gi
+const SCENE_ACTION_PARTIAL_PATTERN = /<\s*\/?\s*scene(?:[_-]?action)?[^>]*$/i
+
+function cleanSceneActionMarkup(value: string) {
+  return value
+    .replace(SCENE_ACTION_OPEN_PATTERN, '')
+    .replace(SCENE_ACTION_CLOSE_PATTERN, '')
+    .replace(SCENE_ACTION_PARTIAL_PATTERN, '')
+}
+
 export function buildInteractionProtocolPrompt(
   settings: ChatSettings,
   character: Character,
@@ -144,21 +166,29 @@ export function buildInteractionProtocolPrompt(
   const restrained = /克制|冷静|简短|寡言|清冷|毒舌/.test(`${character.persona} ${character.speakingStyle || ''}`)
   const presence = resolvePresenceMode(settings, state)
   const actionVisibility = settings.actionVisibility ?? 'always'
+  const actionTextLayout = resolveActionTextLayout(settings, state)
+  const layoutRule = actionTextLayout === 'merged'
+    ? '动作与对白使用同一个剧情气泡：动作转成中文全角括号后直接接对白，中间不要插入换行。'
+    : '动作与对白分开显示：scene_action 是独立动作消息，对白保持 text；不要把动作复制进对白。'
 
   const sceneRule = presence === 'together'
     ? [
       '当前相处状态：你与用户在同一现场。',
       actionVisibility === 'off'
         ? '当前关闭动作视角：不要输出 scene_action，只输出角色说的话。'
-        : '你可以使用 scene_action 描写用户能直接看到的动作、表情、视线、距离变化和环境互动。界面会把 scene_action 自动转成中文全角括号，并与对白合并在同一个剧情气泡中。',
-      '同场景时不要为了“小手机感”强行把一句完整互动拆成很多气泡；动作与对白可以构成一个完整气泡。'
+        : '你可以使用 scene_action 描写用户能直接看到的动作、表情、视线、距离变化和环境互动。',
+      layoutRule,
+      '同场景时不要为了“小手机感”强行把一句完整互动拆成很多气泡。'
     ]
     : [
       '当前相处状态：你与用户不在同一现场，正在通过手机联系。',
       actionVisibility === 'always'
         ? '必须至少输出 1 条 scene_action，描写角色此刻在另一边真正发生的、有情绪或情境价值的动作，界面会把它显示成玩家可见的独立 Action。通常 1～2 条，不写眨眼、呼吸之类流水账。'
         : '当前动作视角不显示远程动作：不要输出 scene_action。',
-      '远程对白必须像真实手机聊天：一个完整句子对应一个 text 消息；两个完整句子不要放进同一个 text。不要把角色身体动作塞进 text 的括号里。'
+      layoutRule,
+      actionTextLayout === 'separate'
+        ? '远程对白必须像真实手机聊天：一个完整句子对应一个 text 消息；两个完整句子不要放进同一个 text。不要把角色身体动作塞进 text 的括号里。'
+        : '当前手动选择了动作与对白合并；仍要保持手机聊天口吻，但不要额外插入换行来分隔动作与对白。'
     ]
 
   return [
@@ -189,10 +219,20 @@ export function visibleStreamingText(raw: string): string {
     const index = raw.lastIndexOf(marker)
     if (index >= 0) return raw.slice(0, index).trimEnd()
   }
-  return raw
-    .replace(/<scene_action\b[^>]*>([\s\S]*?)<\/scene_action\s*>/gi, '（$1）')
-    .replace(/<\/?scene_action\b[^>]*>/gi, '')
-    .replace(/<scene_action[^>]*$/i, '')
+
+  let visible = raw.replace(SCENE_ACTION_FULL_PATTERN, (_whole, body: string) => {
+    const action = cleanSceneActionMarkup(String(body)).trim()
+    return action ? `（${action}）` : ''
+  })
+
+  // 流式输出可能在开标签、闭标签甚至标签名中间被截断。
+  // 未闭合动作仍可显示动作正文，但任何 XML 碎片都不能泄漏到聊天气泡。
+  visible = visible.replace(/<\s*scene[_-]?action\b[^>]*>([\s\S]*)$/i, (_whole, body: string) => {
+    const action = cleanSceneActionMarkup(String(body)).trim()
+    return action ? `（${action}）` : ''
+  })
+
+  return cleanSceneActionMarkup(visible)
 }
 
 export function parseCompanionOutput(raw: string): ParsedCompanionOutput {
@@ -258,7 +298,7 @@ export function parseCompanionOutput(raw: string): ParsedCompanionOutput {
       row.content = parsed.content
     }
     const taggedExpanded = messages.flatMap(row =>
-      row.kind === 'text' && /<scene_action\b/i.test(row.content)
+      row.kind === 'text' && /<\s*scene[_-]?action\b/i.test(row.content)
         ? extractInlineSceneActions(row.content).map(item => ({ ...item, delayMs: item.delayMs ?? row.delayMs }))
         : [row]
     )
@@ -309,10 +349,7 @@ export function parseCompanionOutput(raw: string): ParsedCompanionOutput {
 }
 
 function stripActionBrackets(value: string) {
-  return value.trim()
-    .replace(/^<scene_action\b[^>]*>([\s\S]*?)<\/scene_action\s*>$/i, '$1')
-    .replace(/^<scene_action\b[^>]*>/i, '')
-    .replace(/<\/scene_action\s*>$/i, '')
+  return cleanSceneActionMarkup(value.trim())
     .replace(/^（([\s\S]*)）$/, '$1')
     .replace(/^\(([\s\S]*)\)$/, '$1')
     .replace(/^\*([\s\S]*)\*$/, '$1')
@@ -344,34 +381,34 @@ function extractBracketSceneActions(text: string): CompanionActionMessage[] {
 export function extractInlineSceneActions(text: string): CompanionActionMessage[] {
   const value = text.replace(/\r\n/g, '\n').trim()
   if (!value) return []
-  const tagPattern = /<scene_action\b[^>]*>([\s\S]*?)<\/scene_action\s*>/gi
+  const tagPattern = new RegExp(SCENE_ACTION_FULL_PATTERN.source, 'gi')
   const result: CompanionActionMessage[] = []
   let cursor = 0
   let match: RegExpExecArray | null
   let foundTag = false
   while ((match = tagPattern.exec(value))) {
     foundTag = true
-    const before = value.slice(cursor, match.index)
+    const before = cleanSceneActionMarkup(value.slice(cursor, match.index))
     result.push(...extractBracketSceneActions(before))
     const action = stripActionBrackets(match[0])
     if (action) result.push({ kind: 'scene_action', content: action })
     cursor = match.index + match[0].length
   }
   if (foundTag) {
-    result.push(...extractBracketSceneActions(value.slice(cursor)))
+    result.push(...extractBracketSceneActions(cleanSceneActionMarkup(value.slice(cursor))))
     return result.filter(item => item.content.trim())
   }
 
-  const orphanOpen = value.match(/<scene_action\b[^>]*>([\s\S]*)$/i)
+  const orphanOpen = value.match(/<\s*scene[_-]?action\b[^>]*>([\s\S]*)$/i)
   if (orphanOpen) {
-    const before = value.slice(0, orphanOpen.index || 0)
+    const before = cleanSceneActionMarkup(value.slice(0, orphanOpen.index || 0))
     result.push(...extractBracketSceneActions(before))
-    const action = stripActionBrackets(orphanOpen[0])
+    const action = stripActionBrackets(orphanOpen[1] || '')
     if (action) result.push({ kind: 'scene_action', content: action })
     return result.filter(item => item.content.trim())
   }
 
-  return extractBracketSceneActions(value.replace(/<\/?scene_action\b[^>]*>/gi, ''))
+  return extractBracketSceneActions(cleanSceneActionMarkup(value))
 }
 
 function splitNaturalText(text: string, _maxParts: number) {
@@ -407,7 +444,7 @@ function mergeTogetherActions(actions: CompanionActionMessage[], showSceneAction
   let firstDelay: number | undefined
   const flush = () => {
     if (!buffer.length) return
-    result.push({ kind: 'text', content: buffer.join('\n').trim(), delayMs: firstDelay })
+    result.push({ kind: 'text', content: buffer.join('').trim(), delayMs: firstDelay })
     buffer = []
     firstDelay = undefined
   }
@@ -436,8 +473,8 @@ function splitRemoteTextActions(
   settings: ChatSettings
 ) {
   const source = `${character.persona} ${character.speakingStyle || ''}`
-  const restrained = /克制|清冷|寡言|简短|冷静|毒舌/.test(source)
-  const expressive = /活泼|外向|黏人|元气|直率|话多/.test(source)
+  const restrained = (character.talkativeness != null && character.talkativeness <= 0.34) || /克制|清冷|寡言|简短|冷静|毒舌/.test(source)
+  const expressive = (character.talkativeness != null && character.talkativeness >= 0.66) || /活泼|外向|黏人|元气|直率|话多/.test(source)
   const maxParts = restrained ? 5 : expressive ? 8 : 7
   const pause = expressive ? 360 : restrained ? 760 : 540
   const result: CompanionActionMessage[] = []
@@ -477,14 +514,21 @@ export function shapeCompanionActions(
 ): CompanionActionMessage[] {
   const presence = resolvePresenceMode(settings, state)
   const actionVisibility = settings.actionVisibility ?? 'always'
+  const actionTextLayout = resolveActionTextLayout(settings, state)
+  const showSceneActions = actionVisibility === 'always' || (actionVisibility === 'together' && presence === 'together')
   const expanded = expandInlineActions(actions)
 
-  if (presence === 'together') {
-    return mergeTogetherActions(expanded, actionVisibility !== 'off')
+  if (actionTextLayout === 'merged') {
+    return mergeTogetherActions(expanded, showSceneActions)
   }
 
-  let remoteActions = expanded.filter(action => action.kind !== 'scene_action' || actionVisibility === 'always')
-  if (actionVisibility === 'always' && !remoteActions.some(action => action.kind === 'scene_action')) {
+  // “分开”模式：同场景也保留独立 scene_action，不再强制合并。
+  if (presence === 'together') {
+    return expanded.filter(action => action.kind !== 'scene_action' || showSceneActions)
+  }
+
+  let remoteActions = expanded.filter(action => action.kind !== 'scene_action' || showSceneActions)
+  if (showSceneActions && !remoteActions.some(action => action.kind === 'scene_action')) {
     remoteActions = [buildFallbackRemoteSceneAction(character, state), ...remoteActions]
   }
   return splitRemoteTextActions(remoteActions, character, settings)

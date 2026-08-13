@@ -1,6 +1,6 @@
 import { db } from '../db/database'
 import { getCharacterResourceIds } from './resourceBindingService'
-import type { LorebookEntry, LorebookResource, Message } from '../types/domain'
+import type { Character, LorebookEntry, LorebookResource, Message, UserPersona } from '../types/domain'
 
 function normalizeText(value: string, caseSensitive: boolean) {
   return caseSensitive ? value : value.toLocaleLowerCase()
@@ -26,6 +26,14 @@ function keywordMatches(entry: LorebookEntry, keyword: string, source: string) {
     const regex = compileRegex(value, entry.caseSensitive)
     return regex ? regex.test(source) : false
   }
+  if (entry.matchWholeWords && /^[A-Za-z0-9_][A-Za-z0-9_ .'-]*$/.test(value)) {
+    const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    try {
+      return new RegExp(`(^|[^A-Za-z0-9_])${escaped}(?=$|[^A-Za-z0-9_])`, entry.caseSensitive ? '' : 'i').test(source)
+    } catch {
+      // 非法边界表达式退回普通包含匹配。
+    }
+  }
   return normalizeText(source, entry.caseSensitive).includes(normalizeText(value, entry.caseSensitive))
 }
 
@@ -41,15 +49,35 @@ function optionalFilterMatches(entry: LorebookEntry, source: string) {
   return hits.some(Boolean)
 }
 
-function entryMatchDetails(entry: LorebookEntry, messages: Message[], latestText = '') {
+function entryMatchDetails(
+  entry: LorebookEntry,
+  messages: Message[],
+  latestText = '',
+  character?: Character,
+  persona?: UserPersona
+) {
   const scanDepth = Math.max(1, entry.scanDepth || 16)
   const sticky = Math.max(0, entry.sticky || 0)
   const delay = Math.max(0, entry.delay || 0)
   const relevant = messages.filter(message => !message.recalledAt).slice(-(scanDepth + sticky + delay + 2))
   const chunks = [...relevant.map(message => message.content), latestText].filter(Boolean)
   const activeChunks = delay > 0 ? chunks.slice(0, Math.max(0, chunks.length - delay)) : chunks
-  const source = activeChunks.slice(-scanDepth).join('\n')
-  const stickySource = activeChunks.slice(-(scanDepth + sticky)).join('\n')
+  const contextualSources = [
+    entry.matchPersonaDescription
+      ? [persona?.description, persona?.identity, persona?.occupation, persona?.personality, persona?.background].filter(Boolean).join('\n')
+      : '',
+    entry.matchCharacterDescription
+      ? [character?.identity, character?.appearance, character?.background, character?.persona].filter(Boolean).join('\n')
+      : '',
+    entry.matchCharacterPersonality ? character?.persona || '' : '',
+    entry.matchCharacterDepthPrompt
+      ? [character?.depthPrompt?.prompt, character?.postHistoryInstructions].filter(Boolean).join('\n')
+      : '',
+    entry.matchScenario ? character?.scenario || '' : '',
+    entry.matchCreatorNotes ? character?.creatorNotes || '' : ''
+  ].filter(Boolean)
+  const source = [...activeChunks.slice(-scanDepth), ...contextualSources].join('\n')
+  const stickySource = [...activeChunks.slice(-(scanDepth + sticky)), ...contextualSources].join('\n')
 
   if (entry.constant && !entry.useRegex) return { matched: true, reason: '常驻条目', source }
   if (!entry.keywords.length) return { matched: false, reason: '', source }
@@ -168,6 +196,7 @@ export async function saveLorebookEntry(
     enabled: input.enabled ?? existing?.enabled ?? true,
     constant: input.constant ?? existing?.constant ?? false,
     caseSensitive: input.caseSensitive ?? existing?.caseSensitive ?? false,
+    matchWholeWords: input.matchWholeWords ?? existing?.matchWholeWords,
     useRegex: input.useRegex ?? existing?.useRegex ?? false,
     selective: input.selective ?? existing?.selective ?? false,
     selectiveLogic: input.selectiveLogic ?? existing?.selectiveLogic,
@@ -188,6 +217,13 @@ export async function saveLorebookEntry(
     excludeRecursion: input.excludeRecursion ?? existing?.excludeRecursion,
     preventRecursion: input.preventRecursion ?? existing?.preventRecursion,
     delayUntilRecursion: input.delayUntilRecursion ?? existing?.delayUntilRecursion,
+    useGroupScoring: input.useGroupScoring ?? existing?.useGroupScoring,
+    matchPersonaDescription: input.matchPersonaDescription ?? existing?.matchPersonaDescription,
+    matchCharacterDescription: input.matchCharacterDescription ?? existing?.matchCharacterDescription,
+    matchCharacterPersonality: input.matchCharacterPersonality ?? existing?.matchCharacterPersonality,
+    matchCharacterDepthPrompt: input.matchCharacterDepthPrompt ?? existing?.matchCharacterDepthPrompt,
+    matchScenario: input.matchScenario ?? existing?.matchScenario,
+    matchCreatorNotes: input.matchCreatorNotes ?? existing?.matchCreatorNotes,
     sourceEntryId: input.sourceEntryId ?? existing?.sourceEntryId,
     rawExtensions: input.rawExtensions ?? existing?.rawExtensions,
     createdAt: existing?.createdAt || now,
@@ -211,6 +247,8 @@ export async function buildLorebookPrompt(options: {
   characterId?: string
   messages: Message[]
   latestText?: string
+  character?: Character
+  persona?: UserPersona
   maxEntries?: number
 }): Promise<{ prompt: string; beforePrompt: string; afterPrompt: string; activated: Array<LorebookEntry & { activationReason: string }> }> {
   const activeIds = await activeLorebookIds(options.characterId)
@@ -227,7 +265,7 @@ export async function buildLorebookPrompt(options: {
   let activated = entries
     .filter(item => item.enabled)
     .flatMap(item => {
-      const details = entryMatchDetails(item, options.messages, options.latestText)
+      const details = entryMatchDetails(item, options.messages, options.latestText, options.character, options.persona)
       return details.matched && probabilityPasses(item) ? [{ ...item, activationReason: details.reason }] : []
     })
   activated = applyGroups(activated)

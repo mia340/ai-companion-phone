@@ -1515,7 +1515,7 @@ implements ModelProvider {
     )
     this.apiKey = options.apiKey.trim()
     this.model = options.model.trim()
-    this.maxTokens = options.maxTokens ?? 600
+    this.maxTokens = options.maxTokens ?? 2048
   }
 
   private validateEndpointConfig() {

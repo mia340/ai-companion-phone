@@ -85,6 +85,8 @@ export function buildCharacterCardPrompt(
     `当前心情：${character.mood}`,
     `当前活动：${character.activity}`,
     compact(character.scenario) ? `当前场景：${character.scenario}` : '',
+    character.talkativeness != null ? `角色卡 talkativeness：${character.talkativeness}（用于主动程度与远程消息节奏）` : '',
+    compact(character.worldBookHint) ? `角色卡关联世界书提示：${character.worldBookHint}` : '',
     modeRule,
     narrationRule,
     initiativeRule,

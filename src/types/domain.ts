@@ -16,6 +16,7 @@ export type QuestionFrequency = 'low' | 'natural' | 'high'
 export type MessagePacing = 'off' | 'quick' | 'natural' | 'slow'
 export type PresenceMode = 'auto' | 'together' | 'remote'
 export type ActionVisibility = 'off' | 'together' | 'always'
+export type ActionTextLayout = 'auto' | 'separate' | 'merged'
 export type CompanionMessageKind = 'text' | 'emoji' | 'voice' | 'scene_action'
 export type CompanionActionKind = CompanionMessageKind | 'typing_pause' | 'recall_message' | 'react_to_message' | 'image_placeholder'
 export type ProactiveFrequency = 'low' | 'natural' | 'high'
@@ -80,6 +81,13 @@ export interface Character {
   importFormat?: 'native' | 'sillytavern-v2' | 'sillytavern-v3' | 'legacy-json'
   embeddedUserTemplate?: string
   embeddedUserPersonaId?: UUID
+
+  // V0.4.3.4 社区角色卡扩展兼容（安全读取，不执行第三方 JS）
+  talkativeness?: number
+  depthPrompt?: { prompt: string; depth?: number; role?: string }
+  worldBookHint?: string
+  rawCardExtensions?: Record<string, unknown>
+  groupOnlyGreetings?: string[]
 
   groups: UUID[]
   replySpeed: 'instant' | 'natural' | 'slow' | 'custom'
@@ -182,6 +190,7 @@ export interface LorebookEntry {
   enabled: boolean
   constant: boolean
   caseSensitive: boolean
+  matchWholeWords?: boolean
   useRegex?: boolean
   selective?: boolean
   selectiveLogic?: number | string
@@ -202,6 +211,13 @@ export interface LorebookEntry {
   excludeRecursion?: boolean
   preventRecursion?: boolean
   delayUntilRecursion?: boolean
+  useGroupScoring?: boolean
+  matchPersonaDescription?: boolean
+  matchCharacterDescription?: boolean
+  matchCharacterPersonality?: boolean
+  matchCharacterDepthPrompt?: boolean
+  matchScenario?: boolean
+  matchCreatorNotes?: boolean
   sourceEntryId?: number | string
   rawExtensions?: Record<string, unknown>
   createdAt: string
@@ -228,6 +244,7 @@ export interface PromptPreset {
   name: string
   prompts: PromptPresetPrompt[]
   promptOrder: Array<{ identifier: string; enabled: boolean }>
+  promptOrderGroups?: Array<{ characterId?: number | string; order: Array<{ identifier: string; enabled: boolean }> }>
   sourceFileName?: string
   sourceFormat?: ResourceSourceFormat
   rawConfig?: Record<string, unknown>
@@ -442,6 +459,7 @@ export interface ChatSettings {
   // V0.4.2.1 场景距离与动作视角
   presenceMode: PresenceMode
   actionVisibility: ActionVisibility
+  actionTextLayout: ActionTextLayout
   updatedAt: string
 }
 

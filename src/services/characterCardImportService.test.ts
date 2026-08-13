@@ -52,3 +52,33 @@ it('normalizes Tavo null optional collections to clone-safe empty arrays', () =>
   expect(result.embeddedUser?.rawTemplate).toContain('职业: 娱乐圈新人女演员')
   expect(() => structuredClone(result)).not.toThrow()
 })
+
+it('识别 data/root extensions、depth_prompt、talkativeness 与两处内嵌正则', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v3',
+    data: {
+      name: '扩展角色',
+      description: '设定',
+      avatar: 'charaCard/avatar.jpg',
+      group_only_greetings: ['群聊开场'],
+      extensions: {
+        talkativeness: '0.8',
+        world: '测试世界书',
+        regex_scripts: [{ scriptName: 'data正则', findRegex: 'a', replaceString: 'b', placement: [2] }],
+        tavern_helper: { scripts: [{ type: 'script', content: 'import("https://example.com/x.js")' }] }
+      }
+    },
+    extensions: {
+      depth_prompt: { prompts: [{ prompt: '深度约束', depth: 4, role: 'system' }] },
+      regex_scripts: [{ scriptName: 'root正则', findRegex: 'c', replaceString: 'd', placement: [2] }]
+    }
+  }))
+  expect(result.patch.talkativeness).toBe(0.8)
+  expect(result.patch.initiative).toBe('high')
+  expect(result.patch.depthPrompt?.prompt).toBe('深度约束')
+  expect(result.patch.worldBookHint).toBe('测试世界书')
+  expect(result.patch.groupOnlyGreetings).toEqual(['群聊开场'])
+  expect(result.regexScripts).toHaveLength(2)
+  expect(result.patch.avatar).toBeUndefined()
+  expect(result.notes.some(note => note.includes('不会执行第三方 JS'))).toBe(true)
+})

@@ -1,4 +1,5 @@
 import { db } from '../db/database'
+import { toPlainStorageValue } from './storageSanitizer'
 import type {
   PromptDebugMessage,
   PromptDebugTrace
@@ -14,7 +15,7 @@ export async function savePromptDebugTrace(
     id: input.id || crypto.randomUUID(),
     createdAt: input.createdAt || new Date().toISOString()
   }
-  await db.promptDebugTraces.put(trace)
+  await db.promptDebugTraces.put(toPlainStorageValue(trace))
   const rows = await db.promptDebugTraces.where('conversationId').equals(trace.conversationId).sortBy('createdAt')
   const overflow = rows.length - MAX_TRACES_PER_CONVERSATION
   if (overflow > 0) await db.promptDebugTraces.bulkDelete(rows.slice(0, overflow).map(item => item.id))
@@ -22,7 +23,7 @@ export async function savePromptDebugTrace(
 }
 
 export async function patchPromptDebugTrace(id: string, patch: Partial<PromptDebugTrace>) {
-  await db.promptDebugTraces.update(id, patch)
+  await db.promptDebugTraces.update(id, toPlainStorageValue(patch))
 }
 
 export async function listPromptDebugTraces(conversationId: string) {
