@@ -491,6 +491,9 @@ export interface ConversationState {
   lastProviderNotice?: string
   location?: string
   presence?: 'together' | 'remote'
+  reportedPresence?: 'together' | 'remote'
+  presenceResolutionReason?: string
+  presenceResolutionSource?: 'manual' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
   relationshipNote?: string
   timePeriod?: string
   energy?: string
@@ -596,5 +599,13 @@ export interface PromptDebugTrace {
   rawOutput?: string
   visibleOutput?: string
   actionSummary?: string
+  presenceResolution?: {
+    reportedPresence?: 'together' | 'remote'
+    resolvedPresence?: 'together' | 'remote'
+    source: 'manual' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
+    reason: string
+    conflict?: boolean
+    uiSurroundings?: string
+  }
   naturalnessWarnings?: string[]
 }

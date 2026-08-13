@@ -137,6 +137,11 @@ export function buildPromptDebugReport(trace: PromptDebugTrace) {
     ...(trace.naturalnessWarnings?.length ? trace.naturalnessWarnings.map(item => `- ${item}`) : ['- 未命中已知 AI 腔规则']),
     trace.naturalnessScore ? `- 综合评分：${trace.naturalnessScore.total}/100` : '',
     '',
+    '## 场景判定',
+    trace.presenceResolution
+      ? `- ${trace.presenceResolution.resolvedPresence === 'together' ? '同场景' : trace.presenceResolution.resolvedPresence === 'remote' ? '远程' : '未确定'}：${trace.presenceResolution.reason}${trace.presenceResolution.conflict ? '（已解决冲突）' : ''}`
+      : '- 未记录',
+    '',
     '## 互动动作',
     trace.actionSummary || '尚未解析',
     '',

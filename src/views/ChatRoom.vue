@@ -548,6 +548,62 @@ async function recoverInterruptedMessages(
 }
 
 
+async function normalizeLegacySceneActionMessages(
+  rows: Message[],
+  conversationId: string,
+  activeCharacter: Character | undefined,
+  settings: ChatSettings,
+  state: ConversationState
+) {
+  const lastAssistantId = [...rows].reverse().find(row => row.senderId !== 'user')?.id
+  const normalized: Message[] = []
+  let latestPresencePatch: Partial<ConversationState> = {}
+
+  for (const row of rows) {
+    if (row.senderId === 'user' || !/<scene_action\b/i.test(row.content)) {
+      normalized.push(row)
+      continue
+    }
+
+    const parsed = parseCompanionOutput(row.content)
+    if (!parsed.messages.length) {
+      const clean = row.content.replace(/<\/?scene_action\b[^>]*>/gi, '').trim()
+      const next = { ...row, content: clean }
+      await db.messages.update(row.id, { content: clean })
+      normalized.push(next)
+      continue
+    }
+
+    const renderState = parsed.status?.presence
+      ? ({ ...state, presence: parsed.status.presence } as ConversationState)
+      : state
+    const shaped = activeCharacter
+      ? shapeCompanionActions(parsed.messages, activeCharacter, settings, Boolean(parsed.rawPacket), renderState)
+      : parsed.messages
+    const visible = shaped.filter(action => action.kind !== 'typing_pause' && action.kind !== 'recall_message' && action.kind !== 'react_to_message')
+    const content = visible.map(action => action.kind === 'scene_action' ? `（${action.content}）` : action.content).filter(Boolean).join('\n')
+    const type: Message['type'] = visible.length === 1 && visible[0].kind === 'scene_action' ? 'action' : 'text'
+    const roleCardUi = row.roleCardUi || parsed.roleCardUi
+    const next = { ...row, content, type, roleCardUi }
+    await db.messages.update(row.id, { content, type, roleCardUi })
+    normalized.push(next)
+
+    if (row.id === lastAssistantId && parsed.status?.presence) {
+      latestPresencePatch = {
+        presence: parsed.status.presence,
+        reportedPresence: parsed.presenceResolution?.reportedPresence,
+        presenceResolutionReason: parsed.presenceResolution?.reason,
+        presenceResolutionSource: parsed.presenceResolution?.source
+      }
+    }
+  }
+
+  const nextState = Object.keys(latestPresencePatch).length
+    ? await patchConversationState(conversationId, latestPresencePatch)
+    : undefined
+  return { rows: normalized, state: nextState }
+}
+
 async function normalizeLegacyRoleCardUiMessages(rows: Message[], conversationId: string) {
   let latestStatePatch: Partial<ConversationState> = {}
   const normalized: Message[] = []
@@ -618,8 +674,10 @@ async function loadConversation(conversationId: string) {
       listPersonas()
     ])
 
-    const legacyNormalized = await normalizeLegacyRoleCardUiMessages(messageRows, conversationId)
-    const effectiveStateRow = legacyNormalized.state || stateRow
+    const legacySceneNormalized = await normalizeLegacySceneActionMessages(messageRows, conversationId, characterRow, settingsRow, stateRow)
+    const sceneStateRow = legacySceneNormalized.state || stateRow
+    const legacyNormalized = await normalizeLegacyRoleCardUiMessages(legacySceneNormalized.rows, conversationId)
+    const effectiveStateRow = legacyNormalized.state || sceneStateRow
     const recoveredMessageRows =
       await recoverInterruptedMessages(legacyNormalized.rows)
 
@@ -1454,7 +1512,7 @@ async function requestAssistantReply(options?: {
     let richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? normalizeRichHtml(regexDisplay.text) : ''
     if (!richReplyHtml && regexDisplay.applied.length) {
       const transformed = parseCompanionOutput(regexDisplay.text)
-      parsedOutput = { ...parsedOutput, messages: transformed.messages, visibleText: transformed.visibleText, actionSummary: transformed.actionSummary, roleCardUi: transformed.roleCardUi || parsedOutput.roleCardUi }
+      parsedOutput = { ...parsedOutput, messages: transformed.messages, visibleText: transformed.visibleText, actionSummary: transformed.actionSummary, status: transformed.status || parsedOutput.status, roleCardUi: transformed.roleCardUi || parsedOutput.roleCardUi, presenceResolution: transformed.presenceResolution?.resolvedPresence ? transformed.presenceResolution : parsedOutput.presenceResolution }
     }
     if (!parsedOutput.messages.length && !richReplyHtml) throw new Error('模型没有返回可显示的角色回复。')
 
@@ -1489,18 +1547,36 @@ async function requestAssistantReply(options?: {
         richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? normalizeRichHtml(regexDisplay.text) : ''
         if (!richReplyHtml && regexDisplay.applied.length) {
           const transformed = parseCompanionOutput(regexDisplay.text)
-          parsedOutput = { ...parsedOutput, messages: transformed.messages, visibleText: transformed.visibleText, actionSummary: transformed.actionSummary, roleCardUi: transformed.roleCardUi || parsedOutput.roleCardUi }
+          parsedOutput = { ...parsedOutput, messages: transformed.messages, visibleText: transformed.visibleText, actionSummary: transformed.actionSummary, status: transformed.status || parsedOutput.status, roleCardUi: transformed.roleCardUi || parsedOutput.roleCardUi, presenceResolution: transformed.presenceResolution?.resolvedPresence ? transformed.presenceResolution : parsedOutput.presenceResolution }
         }
       } catch {
         parsedOutput.warnings.push('检测到无依据的用户事实，但自动纠偏请求失败。')
       }
     }
+    if (settings.presenceMode === 'together' || settings.presenceMode === 'remote') {
+      const forcedPresence = settings.presenceMode
+      const inferred = parsedOutput.presenceResolution
+      parsedOutput = {
+        ...parsedOutput,
+        status: { ...(parsedOutput.status || {}), presence: forcedPresence },
+        presenceResolution: {
+          reportedPresence: inferred?.reportedPresence,
+          resolvedPresence: forcedPresence,
+          source: 'manual',
+          conflict: Boolean(inferred?.resolvedPresence && inferred.resolvedPresence !== forcedPresence),
+          uiSurroundings: inferred?.uiSurroundings,
+          reason: `聊天设置手动指定为${forcedPresence === 'together' ? '同场景' : '远程'}，优先于自动场景推断。`
+        }
+      }
+    }
+
     if (debugTrace) await patchPromptDebugTrace(debugTrace.id, {
       provider: providerId,
       model: usedModel,
       rawOutput: response.text,
       visibleOutput: richReplyHtml || parsedOutput.visibleText,
       actionSummary: parsedOutput.actionSummary,
+      presenceResolution: parsedOutput.presenceResolution,
       naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(parsedOutput.visibleText)],
       naturalnessScore: scoreNaturalness({
         text: parsedOutput.visibleText,
@@ -1513,7 +1589,7 @@ async function requestAssistantReply(options?: {
     })
     if (!options?.alternativeTargetId && parsedOutput.status && conversationState.value) {
       const beforeState = conversationState.value
-      const statePatch = mergeStatusIntoConversationState(beforeState, parsedOutput.status)
+      const statePatch = mergeStatusIntoConversationState(beforeState, parsedOutput.status, parsedOutput.presenceResolution)
       const nextState = await patchConversationState(activeConversation.id, { ...statePatch, lastActionSummary: parsedOutput.actionSummary })
       await recordConversationStateChanges({
         conversationId: activeConversation.id,

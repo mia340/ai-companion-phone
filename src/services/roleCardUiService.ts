@@ -9,6 +9,15 @@ export interface RoleCardUiState {
   todos?: string[]
 }
 
+export interface PresenceResolution {
+  reportedPresence?: 'together' | 'remote'
+  resolvedPresence?: 'together' | 'remote'
+  source: 'manual' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
+  reason: string
+  conflict?: boolean
+  uiSurroundings?: string
+}
+
 const UI_MARKERS = ['{日期:', '{时间:', '{地点:', '{内心:', '{周围:', '{待办:']
 
 function clean(value?: string) {
@@ -93,15 +102,83 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
   return found >= 2 ? ui : undefined
 }
 
+const DIRECT_CONTACT_PATTERN = /(?:将你|把你|抱住你|抱着你|搂住你|搂着你|揽住你|揽着你|牵住你|牵着你|握住你|扣住你|环住你|圈住你|吻你|亲你|亲上你|吻上你|摸了摸你|抚过你|揉了揉你|贴着你|贴近你|靠在你|靠着你|埋进你|埋在你|蹭着你|蹭了蹭你|鼻尖蹭着你|额头抵着你|抵住你|压住你|扶住你|拉住你|拽住你|替你掖|给你掖|躺在你身边|睡在你身边|和你同床|与你同床|彼此的呼吸)/
+const CO_PRESENCE_PATTERN = /(?:走到你身边|坐到你身边|坐在你旁边|站在你面前|来到你面前|俯身看你|低头看你|看了你一眼|从你身边|递到你手里|放到你手边)/
+
+export function resolvePresenceFromRoleCardScene(
+  text: string,
+  ui?: RoleCardUiState,
+  reportedPresence?: 'together' | 'remote'
+): PresenceResolution {
+  const surroundings = ui?.surroundings?.trim() || ''
+  const content = text
+    .replace(/<\/?scene_action\b[^>]*>/gi, '')
+    .replace(/\s+/g, '')
+  const hasDirectContact = DIRECT_CONTACT_PATTERN.test(content)
+  const hasCoPresence = CO_PRESENCE_PATTERN.test(content)
+  const uiTogether = Boolean(surroundings && /(?:(?:用户|\{\{user\}\}|你|对方)在场|(?:和|与)(?:用户|\{\{user\}\}|你|对方)(?:同处|一起)|(?:用户|\{\{user\}\}|你|对方)(?:就在)?身边)/.test(surroundings))
+  const uiAlone = /独处|独自|只有自己|无人/.test(surroundings)
+
+  if (hasDirectContact) {
+    const conflict = reportedPresence === 'remote' || uiAlone
+    return {
+      reportedPresence,
+      resolvedPresence: 'together',
+      source: 'direct-contact',
+      conflict,
+      uiSurroundings: surroundings || undefined,
+      reason: conflict
+        ? '检测到角色与用户发生直接身体接触，覆盖“远程/独处”冲突状态。'
+        : '检测到角色与用户发生直接身体接触，判定双方处于同一现场。'
+    }
+  }
+
+  if (uiTogether) {
+    return {
+      reportedPresence,
+      resolvedPresence: 'together',
+      source: 'ui-surroundings',
+      conflict: reportedPresence === 'remote',
+      uiSurroundings: surroundings,
+      reason: '角色卡“周围”字段明确表示用户在场，判定双方处于同一现场。'
+    }
+  }
+
+  if (hasCoPresence) {
+    return {
+      reportedPresence,
+      resolvedPresence: 'together',
+      source: 'co-presence',
+      conflict: reportedPresence === 'remote' || uiAlone,
+      uiSurroundings: surroundings || undefined,
+      reason: '回复包含只能在同一空间自然发生的近距离互动，判定双方处于同一现场。'
+    }
+  }
+
+  if (reportedPresence) {
+    return {
+      reportedPresence,
+      resolvedPresence: reportedPresence,
+      source: 'reported-status',
+      uiSurroundings: surroundings || undefined,
+      reason: `采用模型结构化状态：${reportedPresence === 'together' ? '同场景' : '远程'}。`
+    }
+  }
+
+  if (uiAlone) {
+    return {
+      resolvedPresence: 'remote',
+      source: 'ui-surroundings',
+      uiSurroundings: surroundings,
+      reason: '没有发现用户在场或直接接触证据，角色卡“周围”字段为独处，判定远程。'
+    }
+  }
+
+  return { source: 'unknown', reason: '本轮没有足够场景证据，保持上一轮相处状态。', uiSurroundings: surroundings || undefined }
+}
+
 export function inferPresenceFromRoleCardScene(text: string, ui?: RoleCardUiState): 'together'|'remote'|undefined {
-  const surroundings = ui?.surroundings || ''
-  const content = text.replace(/\s+/g, '')
-  // 明确发生在用户身上的现实动作优先级最高。部分社区卡会把“周围:独处”
-  // 用作“无第三人在场”，即使用户其实就在角色身边，不能因此误判远程。
-  if (/(看了你一眼|看着你|望着你|将你|把你|抱住你|抱着你|搂住你|搂着你|牵住你|牵着你|吻你|亲你|摸了摸你|替你|靠近你|贴着你|彼此的呼吸|你身边|你怀里|你的怀里|和你同床|与你同床|躺在你|睡在你)/.test(content)) return 'together'
-  if (surroundings && /在场|同处|一起|身边/.test(surroundings)) return 'together'
-  if (/独处|独自|只有自己/.test(surroundings)) return 'remote'
-  return undefined
+  return resolvePresenceFromRoleCardScene(text, ui).resolvedPresence
 }
 
 export function roleCardUiToConversationPatch(text: string, ui?: RoleCardUiState): Partial<ConversationState> {

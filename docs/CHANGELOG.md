@@ -1,3 +1,11 @@
+## V0.4.3.3 · 场景冲突与 Scene Action 解析修复
+
+- 新增场景冲突解析：直接身体接触 > 角色卡“独处”/模型 remote 报告。
+- scene_action XML 支持任意属性和不完整开标签兜底，不再原样显示。
+- together 本轮即时生效，动作与对白继续合并为剧情气泡；remote 才保留独立 Action。
+- ConversationState 记录 reportedPresence、presenceResolutionReason、presenceResolutionSource。
+- Prompt Debugger 展示场景判定与冲突原因。
+
 # Changelog
 
 ## V0.4.3.2 · 社区资源导入构建修复

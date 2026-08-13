@@ -64,6 +64,8 @@ describe('interaction protocol V2', () => {
 
   it('hides partial protocol while streaming', () => {
     expect(visibleStreamingText('先等等。<companion_')).toBe('先等等。')
+    expect(visibleStreamingText('<scene_action perspective="remote">靠近你</scene_action>')).toBe('（靠近你）')
+    expect(visibleStreamingText('<scene_action perspective="remote">靠近')).not.toContain('scene_action')
   })
 
   it('detects assistant phrasing and scores a natural reply higher', () => {
@@ -82,6 +84,28 @@ describe('interaction protocol V2', () => {
     expect(shaped.filter(item => item.kind === 'text').map(item => item.content)).toEqual([
       '训练结束了。', '刚拿到手机。', '你十二点下班对吧？', '我等你。'
     ])
+  })
+
+
+  it('parses scene_action tags with attributes and never leaks the XML tag', () => {
+    const parsed = parseCompanionOutput('<scene_action perspective="remote">撑起身子，把脸埋进你颈窝里，低低地笑</scene_action>')
+    expect(parsed.messages).toEqual([{ kind: 'scene_action', content: '撑起身子，把脸埋进你颈窝里，低低地笑' }])
+    expect(parsed.visibleText).not.toContain('scene_action')
+    expect(parsed.status?.presence).toBe('together')
+    expect(parsed.presenceResolution?.conflict).toBe(false)
+  })
+
+  it('overrides reported remote when the current reply directly touches the user', () => {
+    const raw = '<companion_packet>{"messages":[{"kind":"scene_action","content":"翻过身，将你捞进怀里。"},{"kind":"text","content":"我也没睡。"}],"status":{"presence":"remote"}}</companion_packet>'
+    const parsed = parseCompanionOutput(raw)
+    expect(parsed.status?.presence).toBe('together')
+    expect(parsed.presenceResolution?.conflict).toBe(true)
+    const settings = createDefaultChatSettings('c')
+    const renderState = { ...createDefaultConversationState('c'), presence: parsed.status?.presence || 'remote' }
+    const shaped = shapeCompanionActions(parsed.messages, character, settings, true, renderState)
+    expect(shaped).toHaveLength(1)
+    expect(shaped[0].kind).toBe('text')
+    expect(shaped[0].content).toContain('（翻过身，将你捞进怀里。）')
   })
 
   it('detects invented user habits when history and memory do not support them', () => {

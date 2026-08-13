@@ -1,3 +1,11 @@
+## V0.4.3.3 场景冲突与 Scene Action 解析修复
+
+- 同轮直接身体接触会覆盖错误的 `remote / 周围=独处`，立即按 together 渲染。
+- 支持 `<scene_action perspective="remote">...</scene_action>` 等带属性标签，标签不再泄漏到聊天正文。
+- 自动场景推断增加冲突原因；手动“在身边/远程”保持最高优先级。
+- Prompt 调试器显示模型报告状态、最终场景判定和冲突解决原因。
+- 数据库仍为 V10，备份格式仍为 V9。
+
 # AI Companion Phone
 
 ## V0.4.3.2 社区资源导入构建修复

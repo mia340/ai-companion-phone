@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractRoleCardUiHints, inferPresenceFromRoleCardScene, parseRoleCardUi, roleCardUiToConversationPatch } from './roleCardUiService'
+import { extractRoleCardUiHints, inferPresenceFromRoleCardScene, parseRoleCardUi, resolvePresenceFromRoleCardScene, roleCardUiToConversationPatch } from './roleCardUiService'
 
 describe('role card UI compatibility', () => {
   it('parses brace UI and scene presence', () => {
@@ -18,4 +18,14 @@ describe('role card UI compatibility', () => {
     expect(hints?.location).toBe('府邸·卧室')
     expect(inferPresenceFromRoleCardScene('（把你抱进怀里）', hints)).toBe('together')
   })
+
+  it('lets direct physical contact override a remote/alone conflict', () => {
+    const source = '{地点:清溪别墅主卧}\n{周围:独处}\n<scene_action perspective="remote">撑起身子，把脸埋进你颈窝里，低低地笑</scene_action>'
+    const parsed = parseRoleCardUi(source)
+    const resolution = resolvePresenceFromRoleCardScene(parsed.content, parsed.ui, 'remote')
+    expect(resolution.resolvedPresence).toBe('together')
+    expect(resolution.conflict).toBe(true)
+    expect(resolution.source).toBe('direct-contact')
+  })
+
 })

@@ -1,4 +1,4 @@
-import { extractRoleCardUiHints, inferPresenceFromRoleCardScene, parseRoleCardUi, roleCardUiToConversationPatch, type RoleCardUiState } from './roleCardUiService'
+import { extractRoleCardUiHints, parseRoleCardUi, resolvePresenceFromRoleCardScene, roleCardUiToConversationPatch, type PresenceResolution, type RoleCardUiState } from './roleCardUiService'
 import type {
   Character,
   ChatSettings,
@@ -37,6 +37,7 @@ export interface ParsedCompanionOutput {
   actionSummary: string
   warnings: string[]
   roleCardUi?: RoleCardUiState
+  presenceResolution?: PresenceResolution
 }
 
 interface RawPacket {
@@ -173,7 +174,7 @@ export function buildInteractionProtocolPrompt(
     voiceAllowed ? '可以偶尔使用 voice，内容必须是角色真正会说的话。' : '当前没有开启角色声音，通常不要使用 voice。',
     expressive ? '这个角色情绪明显时，远程模式可以更自然地拆成 2～4 条短消息。' : '',
     restrained ? '这个角色更克制，可以少说几句，但只要输出了多个完整句子，仍然必须一完整句子一个 text 消息。' : '',
-    `角色是“${character.name}”。presence 只有双方真正见面或分开时才改变，不要仅因为“我去找你”“我快到了”就提前切换。`,
+    `角色是“${character.name}”。presence 只有双方真正见面或分开时才改变，不要仅因为“我去找你”“我快到了”就提前切换；但只要本轮发生拥抱、亲吻、牵手、贴近、把用户搂进怀里等直接身体接触，presence 必须是 together。`,
     '状态只更新这一轮确实发生变化的字段，不要为了戏剧性突然改变地点、关系或事件。',
     '隐藏数据块必须放在回复最后，不要使用 Markdown 代码块，不要向用户解释协议。正文与 messages 不要重复；有 messages 时界面优先使用 messages。'
   ].filter(Boolean).join('\n')
@@ -189,6 +190,9 @@ export function visibleStreamingText(raw: string): string {
     if (index >= 0) return raw.slice(0, index).trimEnd()
   }
   return raw
+    .replace(/<scene_action\b[^>]*>([\s\S]*?)<\/scene_action\s*>/gi, '（$1）')
+    .replace(/<\/?scene_action\b[^>]*>/gi, '')
+    .replace(/<scene_action[^>]*$/i, '')
 }
 
 export function parseCompanionOutput(raw: string): ParsedCompanionOutput {
@@ -244,25 +248,40 @@ export function parseCompanionOutput(raw: string): ParsedCompanionOutput {
 
   if (messages.length) {
     for (const row of messages) {
+      if (row.kind === 'scene_action') {
+        row.content = stripActionBrackets(row.content)
+        continue
+      }
       if (row.kind !== 'text') continue
       const parsed = parseRoleCardUi(row.content)
       if (parsed.ui && !roleCardUi) roleCardUi = parsed.ui
       row.content = parsed.content
     }
+    const taggedExpanded = messages.flatMap(row =>
+      row.kind === 'text' && /<scene_action\b/i.test(row.content)
+        ? extractInlineSceneActions(row.content).map(item => ({ ...item, delayMs: item.delayMs ?? row.delayMs }))
+        : [row]
+    )
+    messages.splice(0, messages.length, ...taggedExpanded)
   }
-  if (!messages.length && visibleText) messages.push({ kind: 'text', content: visibleText })
+  if (!messages.length && visibleText) messages.push(...extractInlineSceneActions(visibleText))
   if (!messages.length) {
     const recovered = raw.replace(/<companion_packet>[\s\S]*$/i, '').replace(/<role_status>[\s\S]*$/i, '').trim()
-    if (recovered) messages.push({ kind: 'text', content: recovered })
+    if (recovered) messages.push(...extractInlineSceneActions(recovered))
   }
 
   let status = normalizeStatus(packet?.status)
+  const reportedPresence = status?.presence
   if (roleCardUi) {
     const uiPatch = roleCardUiToConversationPatch(visibleText || messages.map(item => item.content).join(' '), roleCardUi)
     status = { ...(status || {}), ...uiPatch, innerThought: uiPatch.innerThought || status?.innerThought, location: uiPatch.location || status?.location, timePeriod: uiPatch.timePeriod || status?.timePeriod, presence: uiPatch.presence || status?.presence, shortTermGoals: uiPatch.shortTermGoals || status?.shortTermGoals }
   }
-  const inferredPresence = inferPresenceFromRoleCardScene(raw, roleCardUi)
-  if (inferredPresence && !status?.presence) status = { ...(status || {}), presence: inferredPresence }
+  const sceneEvidenceText = [raw, ...messages.map(item => item.content)].filter(Boolean).join('\n')
+  const presenceResolution = resolvePresenceFromRoleCardScene(sceneEvidenceText, roleCardUi, reportedPresence)
+  if (presenceResolution.resolvedPresence) {
+    status = { ...(status || {}), presence: presenceResolution.resolvedPresence }
+    if (presenceResolution.conflict) warnings.push(presenceResolution.reason)
+  }
   const visibleActions = messages.filter(item => !['typing_pause', 'recall_message', 'react_to_message'].includes(item.kind))
   const actionKinds = Array.from(new Set(messages.map(item => item.kind)))
   const actionSummary = [
@@ -284,12 +303,16 @@ export function parseCompanionOutput(raw: string): ParsedCompanionOutput {
     rawPacket: rawPacket || undefined,
     actionSummary,
     warnings,
-    roleCardUi
+    roleCardUi,
+    presenceResolution
   }
 }
 
 function stripActionBrackets(value: string) {
   return value.trim()
+    .replace(/^<scene_action\b[^>]*>([\s\S]*?)<\/scene_action\s*>$/i, '$1')
+    .replace(/^<scene_action\b[^>]*>/i, '')
+    .replace(/<\/scene_action\s*>$/i, '')
     .replace(/^（([\s\S]*)）$/, '$1')
     .replace(/^\(([\s\S]*)\)$/, '$1')
     .replace(/^\*([\s\S]*)\*$/, '$1')
@@ -297,27 +320,58 @@ function stripActionBrackets(value: string) {
     .trim()
 }
 
-/**
- * 兼容没有按协议输出、而是直接把动作写进括号或星号的模型。
- * 只有完整的括号/星号片段会转换为 scene_action，普通正文保持 text。
- */
-export function extractInlineSceneActions(text: string): CompanionActionMessage[] {
-  const value = text.replace(/\r\n/g, '\n').trim()
-  if (!value) return []
+function extractBracketSceneActions(text: string): CompanionActionMessage[] {
   const pattern = /（([^（）\n]{1,180})）|\(([^()\n]{1,180})\)|\*([^*\n]{2,180})\*|【([^【】\n]{1,180})】/g
   const result: CompanionActionMessage[] = []
   let cursor = 0
   let match: RegExpExecArray | null
-  while ((match = pattern.exec(value))) {
-    const before = value.slice(cursor, match.index).trim()
+  while ((match = pattern.exec(text))) {
+    const before = text.slice(cursor, match.index).trim()
     if (before) result.push({ kind: 'text', content: before })
     const action = stripActionBrackets(match[0])
     if (action) result.push({ kind: 'scene_action', content: action })
     cursor = match.index + match[0].length
   }
-  const after = value.slice(cursor).trim()
+  const after = text.slice(cursor).trim()
   if (after) result.push({ kind: 'text', content: after })
-  return result.length ? result : [{ kind: 'text', content: value }]
+  return result.length ? result : text.trim() ? [{ kind: 'text', content: text.trim() }] : []
+}
+
+/**
+ * 兼容社区卡常见的 scene_action XML 标签，以及没有按协议输出、直接使用括号/星号的动作。
+ * scene_action 可带 perspective 等任意属性，标签永远不会作为普通聊天文字泄漏。
+ */
+export function extractInlineSceneActions(text: string): CompanionActionMessage[] {
+  const value = text.replace(/\r\n/g, '\n').trim()
+  if (!value) return []
+  const tagPattern = /<scene_action\b[^>]*>([\s\S]*?)<\/scene_action\s*>/gi
+  const result: CompanionActionMessage[] = []
+  let cursor = 0
+  let match: RegExpExecArray | null
+  let foundTag = false
+  while ((match = tagPattern.exec(value))) {
+    foundTag = true
+    const before = value.slice(cursor, match.index)
+    result.push(...extractBracketSceneActions(before))
+    const action = stripActionBrackets(match[0])
+    if (action) result.push({ kind: 'scene_action', content: action })
+    cursor = match.index + match[0].length
+  }
+  if (foundTag) {
+    result.push(...extractBracketSceneActions(value.slice(cursor)))
+    return result.filter(item => item.content.trim())
+  }
+
+  const orphanOpen = value.match(/<scene_action\b[^>]*>([\s\S]*)$/i)
+  if (orphanOpen) {
+    const before = value.slice(0, orphanOpen.index || 0)
+    result.push(...extractBracketSceneActions(before))
+    const action = stripActionBrackets(orphanOpen[0])
+    if (action) result.push({ kind: 'scene_action', content: action })
+    return result.filter(item => item.content.trim())
+  }
+
+  return extractBracketSceneActions(value.replace(/<\/?scene_action\b[^>]*>/gi, ''))
 }
 
 function splitNaturalText(text: string, _maxParts: number) {
@@ -441,7 +495,7 @@ export function estimateVoiceDuration(text: string) {
   return Math.max(2, Math.min(60, Math.round(count / 4.2)))
 }
 
-export function mergeStatusIntoConversationState(state: ConversationState, patch?: CompanionStatusPatch): Partial<ConversationState> {
+export function mergeStatusIntoConversationState(state: ConversationState, patch?: CompanionStatusPatch, presenceResolution?: PresenceResolution): Partial<ConversationState> {
   if (!patch) return {}
   return {
     innerMood: patch.mood || state.innerMood,
@@ -449,6 +503,9 @@ export function mergeStatusIntoConversationState(state: ConversationState, patch
     innerThought: patch.innerThought || state.innerThought,
     location: patch.location || state.location,
     presence: patch.presence || state.presence || 'remote',
+    reportedPresence: presenceResolution?.reportedPresence ?? state.reportedPresence,
+    presenceResolutionReason: presenceResolution?.reason || state.presenceResolutionReason,
+    presenceResolutionSource: presenceResolution?.source || state.presenceResolutionSource,
     relationshipNote: patch.relationshipNote || state.relationshipNote,
     timePeriod: patch.timePeriod || state.timePeriod,
     energy: patch.energy || state.energy,
