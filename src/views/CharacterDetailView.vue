@@ -18,6 +18,7 @@ import {
   deleteCharacterSafely,
   getOrCreateSingleConversation
 } from '../services/characterService'
+import { listResourceBindings } from '../services/resourceBindingService'
 
 import type {
   Character
@@ -33,6 +34,16 @@ const isLoading = ref(true)
 const isDeleting = ref(false)
 
 const errorMessage = ref('')
+
+const resourceStats = ref({ lorebookEntries: 0, regexScripts: 0, presets: 0, hasDepthPrompt: false })
+
+const isResourceDrivenCard = computed(() => Boolean(
+  character.value &&
+  !character.value.persona?.trim() &&
+  !character.value.speakingStyle?.trim() &&
+  !character.value.background?.trim() &&
+  (resourceStats.value.lorebookEntries > 0 || resourceStats.value.regexScripts > 0 || resourceStats.value.hasDepthPrompt)
+))
 
 const showDeletePanel = ref(false)
 const deleteConfirmName = ref('')
@@ -85,6 +96,14 @@ function showList(
   return values.join('、')
 }
 
+function showResourceBackedField(value: string | undefined, field: 'persona' | 'speaking' | 'background') {
+  if (value?.trim()) return value
+  if (!isResourceDrivenCard.value) return '未填写'
+  if (field === 'persona') return `这是一张资源型 / 多角色社区卡，主要人物设定存放在内嵌世界书中（当前 ${resourceStats.value.lorebookEntries} 条），聊天运行时会自动加载。`
+  if (field === 'speaking') return '说话方式由内嵌世界书、Depth Prompt、Preset / Regex 等社区资源共同约束，不会因为这里为空而失效。'
+  return `背景与剧情主要来自社区资源；当前已绑定世界书条目 ${resourceStats.value.lorebookEntries} 条${resourceStats.value.regexScripts ? `、Regex ${resourceStats.value.regexScripts} 个` : ''}。`
+}
+
 async function loadCharacter() {
   isLoading.value = true
   errorMessage.value = ''
@@ -102,6 +121,16 @@ async function loadCharacter() {
     }
 
     character.value = result
+    const [lorebookEntries, bindings] = await Promise.all([
+      db.lorebookEntries.where('characterId').equals(result.id).count(),
+      listResourceBindings(result.id)
+    ])
+    resourceStats.value = {
+      lorebookEntries,
+      regexScripts: bindings.filter(item => item.enabled && item.resourceType === 'regex').length,
+      presets: bindings.filter(item => item.enabled && item.resourceType === 'preset').length,
+      hasDepthPrompt: Boolean(result.depthPrompt?.prompt?.trim())
+    }
   } catch (error) {
     console.error(
       '读取角色详情失败：',
@@ -311,10 +340,21 @@ onMounted(loadCharacter)
           </button>
         </section>
 
+        <section v-if="isResourceDrivenCard" class="info-card community-resource-card">
+          <h2>社区资源已接管设定</h2>
+          <p>这张卡不是传统“单角色字段全写满”的类型。空白基础字段不会覆盖原卡；聊天时继续使用它的世界书、Regex、Depth Prompt 与其它绑定资源。</p>
+          <div class="resource-tags">
+            <span>世界书 {{ resourceStats.lorebookEntries }}</span>
+            <span v-if="resourceStats.regexScripts">Regex {{ resourceStats.regexScripts }}</span>
+            <span v-if="resourceStats.presets">Preset {{ resourceStats.presets }}</span>
+            <span v-if="resourceStats.hasDepthPrompt">Depth Prompt</span>
+          </div>
+        </section>
+
         <section class="info-card">
           <h2>人物性格</h2>
           <p>
-            {{ showValue(character.persona) }}
+            {{ showResourceBackedField(character.persona, 'persona') }}
           </p>
         </section>
 
@@ -322,8 +362,9 @@ onMounted(loadCharacter)
           <h2>说话方式</h2>
           <p>
             {{
-              showValue(
-                character.speakingStyle
+              showResourceBackedField(
+                character.speakingStyle,
+                'speaking'
               )
             }}
           </p>
@@ -333,8 +374,9 @@ onMounted(loadCharacter)
           <h2>背景故事</h2>
           <p>
             {{
-              showValue(
-                character.background
+              showResourceBackedField(
+                character.background,
+                'background'
               )
             }}
           </p>
@@ -709,4 +751,14 @@ onMounted(loadCharacter)
     grid-template-columns: 1fr;
   }
 }
+
+.community-resource-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(217, 111, 155, 0.16);
+}
+.community-resource-card p { margin: 0; line-height: 1.65; }
+.resource-tags { display: flex; flex-wrap: wrap; gap: 7px; }
+.resource-tags span { padding: 5px 9px; border-radius: 999px; background: #fff0f6; color: #a85d7a; font-size: 12px; font-weight: 700; }
+
 </style>

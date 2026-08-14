@@ -1,4 +1,5 @@
 import { db } from '../db/database'
+import { toPlainStorageValue } from './storageSanitizer'
 import type {
   ChatSettings,
   ConversationState,
@@ -77,7 +78,7 @@ export async function getChatSettings(
 export async function saveChatSettings(
   value: ChatSettings
 ): Promise<void> {
-  await db.chatSettings.put({
+  await db.chatSettings.put(toPlainStorageValue({
     ...value,
     id: value.conversationId,
     proactiveEnabled: value.proactiveEnabled ?? true,
@@ -96,7 +97,7 @@ export async function saveChatSettings(
       Math.max(6, Math.round(value.recentMessageLimit))
     ),
     updatedAt: new Date().toISOString()
-  })
+  }))
 }
 
 export function createDefaultConversationState(
@@ -149,7 +150,7 @@ export async function patchConversationState(
     updatedAt: new Date().toISOString()
   }
 
-  await db.conversationStates.put(next)
+  await db.conversationStates.put(toPlainStorageValue(next))
   return next
 }
 
@@ -180,7 +181,7 @@ export async function getMusicState(
 export async function saveMusicState(
   value: MusicState
 ): Promise<void> {
-  await db.musicStates.put({
+  await db.musicStates.put(toPlainStorageValue({
     ...value,
     id: value.id,
     currentTime: Number.isFinite(value.currentTime)
@@ -191,5 +192,5 @@ export async function saveMusicState(
       : 0,
     volume: Math.min(1, Math.max(0, value.volume)),
     updatedAt: new Date().toISOString()
-  })
+  }))
 }

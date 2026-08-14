@@ -1,3 +1,45 @@
+## V0.4.3.7.5 干净初始数据与真实锁屏通知
+
+- 新安装不再创建林夏 / 顾言演示角色、演示会话和伪未读消息。
+- IndexedDB 升级到 V11，一次性清理旧数据库中的林夏 / 顾言 / 苏晚及其关联聊天数据；迁移完成后仍可自行创建同名角色。
+- 锁屏通知、桌面聊天角标和欢迎卡全部改为读取真实 IndexedDB。
+- 创建角色页不再使用“苏晚”作为示例占位。
+- 删除历史版本化 AI 交接说明 / 新对话说明；以后只在真正开启新对话时生成最新一份。
+- Backup V9 不变。
+
+## V0.4.3.7.3 多开场分支与 Regex 契约修复
+
+- 多开场角色首次进入聊天先选择开场，创建时不再预先把默认 first_mes 写入消息历史。
+- 设置里切换开场改为“重置当前剧情分支”，会清掉本会话旧消息/记忆/状态后再写入所选 opening。
+- Safe Rich UI 安全识别 `triggerStory(n)` 与 `setChatMessages(...swipe_id...)`，让社区开场主页可以切换 alternate greetings，而无需执行第三方 JS。
+- 同时存在“开场白 HTML Regex”和“状态栏 HTML Regex”时，每轮 UI 校验只认真正的状态栏 contract；开场主页不能再冒充正常回合 UI。
+- IndexedDB V10 / backup V9，不迁移数据。
+
+## V0.4.3.7.2 社区 UI 模板注入与检测可靠性修复
+
+- 社区 HTML UI 不再只给模型一句“请按 UI 输出”：会提取原卡 HTML 模板，并在最高优先级 Prompt 与自动纠偏 Prompt 中原样提供。
+- Regex UI 会从 findRegex 自动生成 XML/状态栏输入骨架；即使对应世界书格式条目本轮未进入 Prompt，只要 Regex 本身明确是多字段“状态栏/UI”，仍会接管每轮输出。
+- UI 校验同时核对关键 HTML 结构与栏目标题，避免普通单层 div 冒充原卡 UI。
+- UI 两次失败时 Prompt Debug 会保存模型真实原始输出，便于定位，而不是只显示“原始输出：无”。
+- 修复创建角色页内嵌 {{user}} Persona 区域在窄屏被 flex 规则挤成竖排的问题。
+- SillyTavern V2/V3 只要实际绑定世界书 / Regex / Preset / Depth Prompt / 专属 Persona，角色卡编辑器显示“社区资源已载入”，不再用自建字段完整度误导。
+- IndexedDB V10 / backup V9，不迁移数据。
+
+## V0.4.3.7.1 IndexedDB 克隆安全与 Prompt Debug 旁路修复
+
+- IndexedDB 写入统一增强 clone-safe：ChatSettings / ConversationState / MusicState 不再直接保存 Vue 嵌套 Proxy。
+- storage sanitizer 递归保留 Date / Blob / Map / Set / TypedArray 等可克隆类型。
+- Prompt Debug 写库失败只降级调试能力，不再中断正常聊天。
+- IndexedDB V10 / backup V9，不迁移数据。
+
+## V0.4.3.7 社区 UI 可靠执行与资源型角色卡修复
+
+- 社区 UI 每轮输出增加合规校验与一次自动格式纠偏；仍不合规则拒绝保存错误纯文本。
+- 旧角色开场 `<br>` 自动转换为真实换行。
+- Rich UI 增加安全 Tab / 关注 / 点击揭开交互，第三方 JS 仍不执行。
+- V3 / 多角色资源卡详情显示世界书、Regex、Depth Prompt 等实际资源，不再误报“未填写 / V2 / 22%”。
+- IndexedDB V10 / backup V9。
+
 ## V0.4.3.6.1 构建修复
 
 修复 V0.4.3.6 Windows `vue-tsc -b` 报错：`ChatRoom.vue` 中残留旧变量名 `lorebookPrompt`，已改为 `runtimeLorebookPrompt`。功能行为沿用 V0.4.3.6，IndexedDB V10 / backup V9 不变。

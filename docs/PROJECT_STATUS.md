@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-V0.4.3.6.1
+V0.4.3.7.5
 
 ## 当前阶段
 
@@ -20,6 +20,14 @@ V0.4.3.6.1
 - Mock、DeepSeek 与 OpenAI 兼容 Provider
 
 ## 已完成
+
+### V0.4.3.7.5 干净初始数据与文档去重
+
+- 新安装不再自动创建林夏 / 顾言等演示角色，也不再创建伪未读消息。
+- IndexedDB V11 一次性清理旧演示角色林夏 / 顾言 / 苏晚及其关联会话数据；迁移完成后不会持续按姓名拦截，用户未来仍可创建同名角色。
+- 锁屏与桌面均读取真实数据库状态；无未读消息时锁屏不显示通知。
+- 历史版本化 AI 交接说明 / 新对话说明已去重；只有真正开启新对话时才重新生成最新两份文件。
+- Backup V9 不变。
 
 ### Phone OS 与基础页面
 
@@ -58,6 +66,45 @@ V0.4.3.6.1
 - 主动消息来源、频率、最短间隔、安静时段和关系阶段控制
 - 输入停顿、撤回、消息回应表情和主动分享图片占位
 - Prompt 分区预算、截断风险、命中原因、规则影响和自然度评分
+
+### V0.4.3.7.4 Community Persona Extractor V2
+
+- 角色卡 `{{user}}` Persona 从单一格式识别升级为多来源、多语法、带反误判的统一提取器。
+- 支持 description 自然语言内联 Persona、YAML 风格 user block、世界书 user 人设/设定/基本情况、HTML user 档案和扩展字段。
+- `user_personal_room`、座驾、衣橱、NPC、单位等只作为世界资料，不会误建用户 Persona。
+- 无法安全确认姓名时不猜名字，但仍保留原卡用户设定并可建立角色专属 Persona。
+- 所有 Markdown 文档集中到 `docs/`。
+- 数据版本保持 IndexedDB V10 / backup V9。
+
+### V0.4.3.7.3 多开场分支与 Regex 契约
+
+- 多开场卡首次聊天先选择 default / alternate greeting；默认 first_mes 不再提前污染上下文。
+- 切换开场按剧情分支重置消息、记忆、ConversationState、状态历史和 Prompt Debug。
+- Safe Rich UI 把 `triggerStory(n)` / `setChatMessages swipe_id` 转为本地安全开场切换。
+- per-reply UI contract 区分“开场白 Rich Regex”和“状态栏 Rich Regex”，避免错误格式被接受。
+- 数据版本保持 IndexedDB V10 / backup V9。
+
+### V0.4.3.7.2 社区 UI 模板注入与检测可靠性
+
+- HTML contract 会提取原卡完整 UI 骨架并在最终高优先级 Prompt 中再次注入。
+- Regex HTML contract 自动生成原始标签骨架，并可识别“状态栏/UI”类多字段 Regex 作为每轮协议。
+- 合规校验同时检查关键 HTML 标签与栏目标题；失败输出会写入 Prompt Debug。
+- 创建角色的专属 Persona 预览完成移动端布局修复；社区资源型 V2/V3 编辑器统一显示资源已载入。
+- 数据版本保持 IndexedDB V10 / backup V9。
+
+### V0.4.3.7.1 IndexedDB 克隆安全与 Prompt Debug 旁路修复
+
+- Vue reactive / Proxy 数据写 ChatSettings、ConversationState、MusicState 前统一 clone-safe。
+- Prompt Debug 记录属于旁路诊断，写库失败不再阻塞聊天主链路。
+- 数据版本保持 IndexedDB V10 / backup V9。
+
+### V0.4.3.7 社区 UI 可靠执行与资源型角色卡
+
+- 社区 UI 最终输出按 html-contract / regex-html / structured-contract 验证。
+- 不合规自动重写一次，仍失败则拒绝保存错误回复。
+- 旧普通消息 `<br>` 自动迁移为真实换行。
+- Safe Rich UI 支持白名单 Tab / follow / reveal 交互。
+- V3 / 多角色资源卡详情与编辑器按实际资源展示并保留 cardVersion。
 
 ### V0.4.3.6.1 构建修复
 

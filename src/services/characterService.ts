@@ -1,4 +1,6 @@
 import { db } from '../db/database'
+import { normalizeCommunityPlainText } from './regexRuntime'
+import { hasMultipleCharacterGreetings } from './characterGreetingService'
 
 import type {
   Character,
@@ -74,14 +76,18 @@ export async function getOrCreateSingleConversation(
 
   await db.transaction('rw', db.conversations, db.messages, async () => {
     await db.conversations.add(conversation)
-    if (character.firstMessage?.trim()) {
+    const hasGreetingChoices = hasMultipleCharacterGreetings(character.firstMessage, character.alternateGreetings)
+    if (character.firstMessage?.trim() && !hasGreetingChoices) {
       await db.messages.add({
         id: crypto.randomUUID(),
         worldId: character.worldId,
         conversationId: conversation.id,
         senderId: character.id,
         type: 'text',
-        content: character.firstMessage.trim(),
+        content: normalizeCommunityPlainText(character.firstMessage.trim()),
+        rawContent: character.firstMessage.trim(),
+        isGreetingSeed: true,
+        greetingIndex: 0,
         status: 'delivered',
         createdAt: now
       })

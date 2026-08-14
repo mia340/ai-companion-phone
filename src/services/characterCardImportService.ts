@@ -89,7 +89,7 @@ function inferInitiative(talkativeness?: number): Character['initiative'] | unde
 function inferRelationshipFromCard(firstMessage: string, embeddedUser?: ImportedPersonaPreview) {
   const normalized = firstMessage.replace(/<br\s*\/?\s*>/gi, '\n')
   const explicit = normalized.match(/(?:^|\n)\s*[▪•·-]?\s*关系\s*[:：]\s*([^\n<]{1,24})/i)?.[1]?.trim()
-  if (explicit && !/^(?:无|未知|待定|未设定)$/i.test(explicit)) return explicit
+  if (explicit && !/^(?:无|未知|待定|未设定)$/i.test(explicit)) return explicit.replace(/^人(?=陌生人$)/, '')
 
   const identity = [embeddedUser?.patch.identity, embeddedUser?.patch.relationshipNote, embeddedUser?.patch.description]
     .filter(Boolean)
@@ -112,74 +112,193 @@ const extractDialogue = (value: unknown): CharacterExampleDialogue[] => {
 }
 
 
-export function extractEmbeddedUserTemplate(description: string): string {
-  const lines = description.replace(/\r/g, '').split('\n')
-  for (let markerIndex = 0; markerIndex < lines.length; markerIndex++) {
-    const marker = lines[markerIndex]?.match(/^(\s*)\{\{user\}\}\s*[:：]\s*(.*)$/i)
-    if (!marker) continue
+function stripPersonaMarkup(value: string) {
+  return value
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/(?:p|div|li|tr|td|th|h[1-6]|section|article)>/gi, '\n')
+    .replace(/<li\b[^>]*>/gi, '- ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
 
-    const baseIndent = marker[1]?.length ?? 0
-    const collected: string[] = []
-    const inlineValue = marker[2]?.trim()
-    if (inlineValue) collected.push(inlineValue)
+function stripUserMarker(value: string) {
+  return stripPersonaMarkup(value)
+    .replace(/^\s*(?:[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]|\d+[.)、]|[-*•·#>]+)\s*/u, '')
+    .replace(/^\s*\[(?:我的设定|用户设定[^\]]*|user设定[^\]]*|用户人设[^\]]*|user人设[^\]]*|用户|user)\]\s*/i, '')
+    .replace(/^\s*(?:\[(?:用户|user)\]\s*)?\{\{user\}\}\s*(?:\[(?:用户|user)\]\s*)?/i, '')
+    .replace(/^\s*\[(?:我的设定|用户设定[^\]]*|user设定[^\]]*|用户人设[^\]]*|user人设[^\]]*|用户|user)\]\s*/i, '')
+    .replace(/^\s*[:：]\s*/, '')
+    .trim()
+}
 
-    for (let index = markerIndex + 1; index < lines.length; index++) {
-      const line = lines[index] ?? ''
-      if (!line.trim()) {
-        if (collected.length) collected.push('')
-        continue
-      }
-      const indent = line.match(/^\s*/)?.[0].length ?? 0
-      const trimmed = line.trim()
-      if (indent <= baseIndent) break
-      if (/^\{\{char\}\}\s*[:：]?/i.test(trimmed)) break
-      collected.push(line.slice(Math.min(line.length, baseIndent + 2)))
+function personaSignalCount(value: string) {
+  const head = value.slice(0, 320)
+  const signals = [
+    /(?:^|[,，。；;\s])(男|女)(?:[,，。；;\s]|$)/,
+    /\d{1,3}\s*岁/,
+    /\d{2,3}(?:\.\d+)?\s*(?:cm|厘米)/i,
+    /(?:学生|新生|研究生|本科生|徒弟|弟子|剑修|杀手|记者|幼师|插画师|演员|导演|助理|医生|教师|律师|老板|店主|妻子|丈夫|老公|老婆|继承人|军人|警察|女将|将军|修士|少爷|小姐|职业|身份|家庭|学校|住校|寝室)/
+  ]
+  return signals.filter(pattern => pattern.test(head)).length
+}
+
+function looksLikeNaturalPersona(value: string) {
+  return personaSignalCount(value) >= 2
+}
+
+function looksLikeDirectPersonaLine(value: string) {
+  return personaSignalCount(value) >= 1
+}
+
+function looksLikePersonaTemplateContent(value: string) {
+  const readable = stripPersonaMarkup(value)
+  if (looksLikeNaturalPersona(readable)) return true
+  return /(?:^|\n)\s*(?:[-*•·]\s*)?(?:姓名|名字|年龄|性别|生日|身高|职业|工作|身份|外貌|性格|背景|经历|爱好|兴趣|习惯|边界)\s*[:：]/u.test(readable)
+}
+
+function looksLikePersonaNameToken(value: string) {
+  const token = value.trim().replace(/^[\[{（【]|[}\]）】]$/g, '')
+  if (!token || token.length > 30) return false
+  if (/^(?:用户|user|我|你)$/i.test(token)) return false
+  if (/(?:要求|身份|关系|故事|网恋|年龄|状态|内心|外观|计划|好感|工作|职业|已经|已发生|希望|可以|应该|不能|不高|自卑|唯一|秘密|例外|们|的|被|让|对于|关于|作为|为“|为")/u.test(token)) return false
+  if (/^[A-Za-z][A-Za-z ._'’\-]{0,29}$/u.test(token)) return true
+  if (/^[\p{Script=Han}·]{2,8}(?:\([A-Za-z][A-Za-z ._'’\-]{0,20}\))?$/u.test(token)) return true
+  return false
+}
+
+function inferNaturalPersonaName(value: string) {
+  const raw = stripUserMarker(value)
+    .replace(/^\s*(?:\[(?:用户|user)\]\s*)/i, '')
+    .replace(/^\s*[\[{（【]\s*/, '')
+  const labeled = raw.match(/(?:^|\n)\s*(?:姓名|名字|本名|现代名|穿越后身份名)\s*[:：]\s*(?!\{\{user\}\})([^,，。；;\n<]{1,30})/iu)?.[1]?.trim()
+  if (labeled) return labeled
+  const explicit = raw.match(/^\s*(?:我(?:是|叫|名为)|是)\s*[\[{（【]?\s*([^,，。；;\n}\]）】]{1,30})/u)?.[1]?.trim()
+  if (explicit && !/^\{\{user\}\}$/i.test(explicit)) return explicit
+  const first = raw.match(/^\s*([^,，。；;\n:：{}\[\]（）【】]{1,30})\s*[,，]/u)?.[1]?.trim()
+  if (first && looksLikePersonaNameToken(first) && looksLikeDirectPersonaLine(raw)) return first
+  return ''
+}
+
+function inferNaturalPersonaIdentity(value: string, explicitName = '') {
+  const raw = stripUserMarker(value)
+  const firstLine = raw.split('\n')[0] || raw
+  const segments = firstLine
+    .replace(/^\s*(?:我(?:是|叫|名为)|是)\s*/u, '')
+    .replace(/^\s*[\[{（【]|[}\]）】]\s*$/g, '')
+    .split(/[,，。；;.]/)
+    .map(item => item.trim())
+    .filter(Boolean)
+  const identitySignals = /(?:学生|新生|研究生|本科生|徒弟|弟子|剑修|杀手|记者|幼师|插画师|演员|导演|助理|医生|教师|律师|老板|店主|妻子|丈夫|老公|老婆|继承人|军人|警察|少爷|小姐|家主|修士|身份|职业)/
+  return segments
+    .filter(item => item !== explicitName)
+    .filter(item => !/^(?:男|女)$/.test(item))
+    .filter(item => !/^\d{1,3}\s*岁$/.test(item))
+    .filter(item => !/^\d{2,3}(?:\.\d+)?\s*(?:cm|厘米)$/i.test(item))
+    .filter(item => !/\{\{user\}\}/i.test(item))
+    .filter(item => !/(?:提供|因为|所以|已经|曾经|当前|现在|希望|要求|不可|不能|为了)/u.test(item))
+    .filter(item => identitySignals.test(item))
+    .slice(0, 3)
+    .join('、')
+}
+
+function extractIndentedUserBlock(lines: string[], markerIndex: number, baseIndent: number, inlineValue = '') {
+  const collected: string[] = []
+  if (inlineValue.trim()) collected.push(inlineValue.trim())
+
+  for (let index = markerIndex + 1; index < lines.length; index++) {
+    const line = lines[index] ?? ''
+    const trimmed = line.trim()
+    if (!trimmed) {
+      if (collected.length) collected.push('')
+      continue
     }
-
-    return collected.join('\n').trim()
+    if (/^(?:[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]|\d+[.)、]|[-*•·#>]*)?\s*\{\{char\}\}\s*[:：]?/iu.test(trimmed)) break
+    const indent = line.match(/^\s*/)?.[0].length ?? 0
+    const looksLikeField = /^(?:[-*•·]\s*)?(?:姓名|名字|年龄|性别|生日|身高|体重|职业|工作|身份|外貌|性格|背景|经历|关系|爱好|兴趣|习惯|边界|住址|住所)\s*[:：]/u.test(trimmed)
+    if (indent <= baseIndent && !looksLikeField) break
+    collected.push(indent > baseIndent ? line.slice(Math.min(line.length, baseIndent + 1)).trimEnd() : trimmed)
   }
 
-  return ''
+  return collected.join('\n').trim()
+}
+
+/**
+ * 从任意社区角色卡文本字段中寻找“独立 {{user}} Persona”。
+ * 这里只接受明确的人设声明，不把普通剧情里的 {{user}} 行为句误当 Persona。
+ */
+export function extractEmbeddedUserTemplate(sourceText: string): string {
+  const lines = sourceText.replace(/\r/g, '').split('\n')
+  const candidates: Array<{ raw: string; score: number }> = []
+
+  for (let markerIndex = 0; markerIndex < lines.length; markerIndex++) {
+    const line = lines[markerIndex] ?? ''
+    const markerAt = line.search(/\{\{user\}\}/i)
+    if (markerAt < 0) continue
+    const tail = line.slice(markerAt)
+    const indent = line.match(/^\s*/)?.[0].length ?? 0
+
+    const block = tail.match(/^\{\{user\}\}\s*[:：]\s*(.*)$/i)
+    if (block) {
+      const raw = `{{user}}:${block[1]?.trim() ? ` ${block[1].trim()}` : ''}${extractIndentedUserBlock(lines, markerIndex, indent, '').replace(/^/, block[1]?.trim() ? '\n' : '')}`.trim()
+      if (raw && raw !== '{{user}}:' && looksLikePersonaTemplateContent(stripUserMarker(raw))) {
+        candidates.push({ raw, score: 120 })
+      }
+      continue
+    }
+
+    const direct = tail.replace(/^\{\{user\}\}\s*(?:\[(?:用户|user)\]\s*)?/i, '').trim()
+    const explicitDeclaration = /^(?:我(?:是|叫|名为)|姓名\s*[:：]|名字\s*[:：])/u.test(direct)
+    const structuredIsDeclaration = /^是\s*[\[{（【]/u.test(direct) && looksLikeDirectPersonaLine(direct)
+    const bareMatch = direct.match(/^(?:是\s*)?([^,，。；;\n]{1,30})[,，]/u)
+    const directNameProfile = Boolean(bareMatch?.[1] && looksLikePersonaNameToken(bareMatch[1]) && looksLikeDirectPersonaLine(direct.slice(0, 180)))
+    if (explicitDeclaration || structuredIsDeclaration || directNameProfile) {
+      candidates.push({ raw: tail.trim(), score: explicitDeclaration ? 140 : structuredIsDeclaration ? 135 : 125 })
+    }
+  }
+
+  return candidates.sort((a, b) => b.score - a.score)[0]?.raw || ''
 }
 
 export function parseEmbeddedUserPersonaTemplate(rawTemplate: string, characterName = '角色'): (ImportedPersonaPreview & { rawTemplate: string }) | undefined {
   const cleanTemplate = rawTemplate.trim()
   if (!cleanTemplate) return undefined
 
-  // 社区卡并不总使用“{{user}}:”这种 YAML 风格。
-  // 常见写法还有“{{user}}我是洛梨,……”。先移除占位符，再做文本 Persona 解析。
-  const personaText = cleanTemplate
-    .replace(/^\s*\{\{user\}\}\s*(?:[:：]\s*)?/i, '')
-    .trim()
-  const preview = parsePersonaText(personaText || cleanTemplate, `${characterName} · 原卡用户.txt`)
+  const personaText = stripUserMarker(cleanTemplate)
+  const readablePersonaText = personaText || stripPersonaMarkup(cleanTemplate)
+  const preview = parsePersonaText(readablePersonaText || cleanTemplate, `${characterName} · 原卡用户.txt`)
   const fallbackName = `${characterName} · 原卡用户`
 
-  // 自然语言首句中的“我是/我叫/我名为”优先于文件名回退。
-  const explicitName = (personaText || cleanTemplate).match(/^(?:我(?:是|叫|名为)\s*|姓名\s*[:：]\s*)([^,，。；;\n]{1,30})/u)?.[1]?.trim()
+  const explicitName = inferNaturalPersonaName(cleanTemplate)
   if (explicitName) preview.patch.name = explicitName
   else if (!preview.patch.name || preview.patch.name === '导入的人设' || preview.patch.name === `${characterName} · 原卡用户`) {
     preview.patch.name = fallbackName
   }
 
   if (!preview.patch.age) {
-    const age = (personaText || cleanTemplate).match(/(?:^|[,，。；;.\s])(\d{1,3})\s*岁(?:[,，。；;.\s]|$)/)?.[1]
+    const age = readablePersonaText.match(/(?:^|[,，。；;.\s])(?:年龄\s*[:：]\s*)?(\d{1,3})\s*岁(?:[,，。；;.\s]|$)/u)?.[1]
     if (age) preview.patch.age = age
   }
-
-  if (!preview.patch.identity && explicitName) {
-    const firstLine = (personaText || cleanTemplate).split('\n')[0] || ''
-    const afterName = firstLine.slice(firstLine.indexOf(explicitName) + explicitName.length)
-    const identitySource = afterName.split(/\d{1,3}\s*岁/)[0] || afterName
-    const segments = identitySource
-      .split(/[,，。；;.]/)
-      .map(item => item.trim())
-      .filter(Boolean)
-      .filter(item => !/^\d{1,3}\s*岁$/.test(item))
-      .slice(0, 3)
-    if (segments.length) preview.patch.identity = segments.join('、')
+  if (!preview.patch.gender) {
+    const gender = readablePersonaText.match(/(?:^|[,，。；;\s])(?:性别\s*[:：]\s*)?(男|女)(?:[,，。；;\s]|$)/u)?.[1]
+    if (gender) preview.patch.gender = gender
+  }
+  if (!preview.patch.height) {
+    const height = readablePersonaText.match(/(?:^|[,，。；;.\s])(?:身高\s*[:：]\s*)?(\d{2,3}(?:\.\d+)?)\s*(cm|厘米)(?:[,，。；;.\s]|$)/iu)
+    if (height) preview.patch.height = `${height[1]}${height[2].toLowerCase() === 'cm' ? 'cm' : '厘米'}`
   }
 
-  preview.patch.description = preview.patch.description || personaText || cleanTemplate
+  const inferredIdentity = inferNaturalPersonaIdentity(cleanTemplate, explicitName)
+  if (!preview.patch.identity && inferredIdentity) preview.patch.identity = inferredIdentity
+
+  preview.patch.description = readablePersonaText || cleanTemplate
   preview.patch.title = preview.patch.title || `${characterName}角色卡自带 {{user}}`
   preview.patch.personaScope = 'character'
   preview.patch.isCardTemplate = true
@@ -195,8 +314,8 @@ export function parseEmbeddedUserPersonaTemplate(rawTemplate: string, characterN
   return { ...preview, rawTemplate: cleanTemplate }
 }
 
-export function buildEmbeddedUserPreview(description: string, characterName = '角色'): (ImportedPersonaPreview & { rawTemplate: string }) | undefined {
-  const rawTemplate = extractEmbeddedUserTemplate(description)
+export function buildEmbeddedUserPreview(sourceText: string, characterName = '角色'): (ImportedPersonaPreview & { rawTemplate: string }) | undefined {
+  const rawTemplate = extractEmbeddedUserTemplate(sourceText)
   return parseEmbeddedUserPersonaTemplate(rawTemplate, characterName)
 }
 
@@ -210,22 +329,64 @@ function characterBookEntryRows(value: unknown): Record<string, unknown>[] {
 
 function userPersonaEntryScore(entry: Record<string, unknown>): number {
   const label = [asText(entry.name), asText(entry.comment), asText(entry.title)].filter(Boolean).join(' ').toLowerCase()
+  const compactLabel = label.replace(/[\s_\-<>/\\]+/g, '')
   const content = asText(entry.content)
+
+  // “user 的房间 / 座驾 / 衣橱 / NPC”等是世界资料，不是 Persona。
+  if (/(?:personalroom|房间|住址|住所|居住|座驾|车辆|出行|衣橱|穿搭|单位|公司|npc|联系人|手机|相册|日记)/i.test(compactLabel)) return -100
+
   let score = 0
-  if (/^(?:user|用户|\{\{user\}\}).{0,8}(?:人设|设定|persona|profile)$/i.test(label.replace(/\s+/g, ''))) score += 100
-  if (/(?:user人设|用户人设|userpersona|user设定|用户设定|\{\{user\}\}人设)/i.test(label.replace(/\s+/g, ''))) score += 80
-  if (/^\s*\{\{user\}\}/i.test(content)) score += 30
-  if (/^\s*\{\{user\}\}\s*(?:我(?:是|叫|名为)|姓名\s*[:：])/i.test(content)) score += 40
+  if (/^(?:user|用户|\{\{user\}\})(?:人设|设定|persona|profile|人物设定|人物档案|基本情况|基本信息|档案)$/i.test(compactLabel)) score += 130
+  if (/(?:user人设|用户人设|userpersona(?![a-z])|user设定|用户设定|user人物设定|用户人物设定|user基本情况|用户基本情况|user基本信息|用户基本信息|用户档案|\{\{user\}\}人设)/i.test(compactLabel)) score += 110
+  if (/(?:user人设辅助|用户人设辅助|userprofile(?![a-z])|关于user$|关于用户$)/i.test(compactLabel)) score += 85
+  if (/^\s*\{\{user\}\}/i.test(content)) score += 35
+  if (/^\s*(?:\[(?:用户|user)\]\s*)?\{\{user\}\}\s*(?:\[(?:用户|user)\]\s*)?(?:我(?:是|叫|名为)|是|姓名\s*[:：])/i.test(content)) score += 45
+  if (looksLikeNaturalPersona(stripPersonaMarkup(content))) score += 25
+  if (/(?:姓名|年龄|性别|身高|职业|身份)\s*[:：]/u.test(stripPersonaMarkup(content))) score += 15
   return score
 }
 
 export function buildEmbeddedUserPreviewFromCharacterBook(value: unknown, characterName = '角色'): (ImportedPersonaPreview & { rawTemplate: string }) | undefined {
   const candidates = characterBookEntryRows(value)
     .map(entry => ({ entry, score: userPersonaEntryScore(entry) }))
-    .filter(item => item.score >= 60)
+    .filter(item => item.score >= 80)
     .sort((a, b) => b.score - a.score)
   const content = candidates.length ? asText(candidates[0].entry.content) : ''
   return parseEmbeddedUserPersonaTemplate(content, characterName)
+}
+
+function objectPersonaTemplate(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (!value || typeof value !== 'object') return ''
+  if (Array.isArray(value)) return value.map(item => objectPersonaTemplate(item)).filter(Boolean).join('\n')
+  return Object.entries(asRecord(value))
+    .map(([key, item]) => {
+      if (item == null || item === '') return ''
+      if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') return `${key}: ${String(item)}`
+      return `${key}: ${objectPersonaTemplate(item)}`
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function buildEmbeddedUserPreviewFromExtensions(extensions: Record<string, unknown>[], characterName: string) {
+  const keys = [
+    'ai_companion_embedded_user_template',
+    'embedded_user_template',
+    'embeddedUserTemplate',
+    'user_persona',
+    'userPersona',
+    'user_profile',
+    'userProfile'
+  ]
+  for (const ext of extensions) {
+    for (const key of keys) {
+      const raw = objectPersonaTemplate(ext[key])
+      const preview = parseEmbeddedUserPersonaTemplate(raw, characterName)
+      if (preview) return preview
+    }
+  }
+  return undefined
 }
 
 function inferFormat(root: Record<string, unknown>) {
@@ -325,16 +486,28 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
     }
   }
   const characterName = asText(data.name) || '角色'
-  const embeddedUserFromBook = buildEmbeddedUserPreviewFromCharacterBook(data.character_book, characterName)
-  const embeddedUserFromDescription = buildEmbeddedUserPreview(description, characterName)
-  // “user人设/用户人设”这类专门世界书条目比 description 中的模糊模板更明确。
-  const embeddedUser = embeddedUserFromBook || embeddedUserFromDescription
+  const embeddedUserSources = [
+    { label: '角色扩展 user Persona', preview: buildEmbeddedUserPreviewFromExtensions([rootExtensions, extensions], characterName) },
+    { label: '内嵌世界书 user 人设条目', preview: buildEmbeddedUserPreviewFromCharacterBook(data.character_book, characterName) },
+    { label: '角色 description', preview: buildEmbeddedUserPreview(description, characterName) },
+    { label: '角色 scenario', preview: buildEmbeddedUserPreview(asText(data.scenario), characterName) },
+    { label: '角色 creator_notes', preview: buildEmbeddedUserPreview(asText(data.creator_notes), characterName) },
+    { label: '角色 system_prompt', preview: buildEmbeddedUserPreview(asText(data.system_prompt), characterName) },
+    { label: '角色 post_history_instructions', preview: buildEmbeddedUserPreview(asText(data.post_history_instructions), characterName) }
+  ]
+  const embeddedUserCandidate = embeddedUserSources.find(item => Boolean(item.preview))
+  const embeddedUser = embeddedUserCandidate?.preview
   const hasUserPlaceholder = [
     description,
     asText(data.scenario),
     asText(data.first_mes),
     asText(data.mes_example),
-    JSON.stringify(data.character_book || {})
+    asText(data.creator_notes),
+    asText(data.system_prompt),
+    asText(data.post_history_instructions),
+    JSON.stringify(data.character_book || {}),
+    JSON.stringify(extensions || {}),
+    JSON.stringify(rootExtensions || {})
   ].some(value => /\{\{user\}\}/i.test(value))
   const inferredRelationship = inferRelationshipFromCard(asText(data.first_mes), embeddedUser)
   const patch: Partial<Character> = {
@@ -374,8 +547,8 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   if (inferredRelationship) notes.push(`从角色卡明确状态/用户设定识别到与用户关系：${inferredRelationship}。`)
   if (lorebookEntries.length) notes.push(`检测到内嵌角色世界书 ${lorebookEntries.length} 条，将随角色一起导入。`)
   if (embeddedUser) {
-    const sourceLabel = embeddedUserFromBook ? '内嵌世界书 user 人设条目' : '角色 description'
-    notes.push(`检测到${sourceLabel}中的 {{user}} 用户模板，可直接生成角色专属 Persona 并自动绑定聊天。`)
+    const sourceLabel = embeddedUserCandidate?.label || '角色卡'
+    notes.push(`检测到${sourceLabel}中的独立 {{user}} 用户模板，可直接生成角色专属 Persona 并自动绑定聊天。`)
   } else if (hasUserPlaceholder) {
     notes.push('检测到 {{user}} 剧情占位，但没有可安全提取的独立用户姓名/Persona：不会猜名字；运行时使用当前聊天 Persona，角色卡与世界书中的剧情关系仍按本会话设定生效。')
   }

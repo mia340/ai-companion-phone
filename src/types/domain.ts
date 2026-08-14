@@ -410,6 +410,10 @@ export interface Message {
   reactionToMessageId?: UUID
   proactiveSource?: ProactiveSource
   placeholderImagePrompt?: string
+
+  // 角色卡开场分支。用于切换开场时识别并替换旧的 seed 消息，避免多个开场叠在同一上下文。
+  isGreetingSeed?: boolean
+  greetingIndex?: number
 }
 
 export type MemoryStrength = 'light' | 'standard' | 'deep'

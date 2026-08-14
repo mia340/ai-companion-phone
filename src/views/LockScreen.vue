@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import CharacterAvatar from '../components/CharacterAvatar.vue'
 import PhoneFrame from '../components/PhoneFrame.vue'
+import { db } from '../db/database'
 
 const router = useRouter()
 
-// 当前时间
 const now = ref(new Date())
 let timer: number | undefined
+
+type LockNotice = {
+  avatar: string
+  name: string
+  unread: number
+}
+
+const notice = ref<LockNotice | null>(null)
 
 const time = computed(() =>
   now.value.toLocaleTimeString('zh-CN', {
@@ -25,8 +34,38 @@ const date = computed(() =>
   })
 )
 
-// 每分钟更新时间
-onMounted(() => {
+async function loadLatestUnreadNotice() {
+  const conversations = (await db.conversations.toArray())
+    .filter(conversation => Number(conversation.unread || 0) > 0)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+
+  const latest = conversations[0]
+  if (!latest) {
+    notice.value = null
+    return
+  }
+
+  let name = latest.title || '新消息'
+  let avatar = '💬'
+
+  if (latest.type === 'single' && latest.memberIds[0]) {
+    const character = await db.characters.get(latest.memberIds[0])
+    if (character) {
+      name = character.name
+      avatar = character.avatar || '🙂'
+    }
+  }
+
+  notice.value = {
+    avatar,
+    name,
+    unread: Number(latest.unread || 0)
+  }
+}
+
+onMounted(async () => {
+  await loadLatestUnreadNotice()
+
   timer = window.setInterval(() => {
     now.value = new Date()
   }, 1000)
@@ -38,7 +77,6 @@ onBeforeUnmount(() => {
   }
 })
 
-// 滑动解锁
 const startY = ref(0)
 
 function startSwipe(event: PointerEvent) {
@@ -48,7 +86,6 @@ function startSwipe(event: PointerEvent) {
 function endSwipe(event: PointerEvent) {
   const distance = startY.value - event.clientY
 
-  // 向上滑动超过 80 像素，进入桌面
   if (distance > 80) {
     router.push('/home')
   }
@@ -66,16 +103,21 @@ function endSwipe(event: PointerEvent) {
 
       <div class="lock-date">{{ date }}</div>
 
-      <div class="notice-card">
-        <span class="notice-icon">🌸</span>
+      <div v-if="notice" class="notice-card">
+        <CharacterAvatar
+          class="notice-avatar"
+          :avatar="notice.avatar"
+          :name="notice.name"
+          :size="40"
+        />
 
         <div>
-          <b>林夏</b>
-          <p>刚刚给你发来了 2 条消息</p>
+          <b>{{ notice.name }}</b>
+          <p>刚刚给你发来了 {{ notice.unread }} 条消息</p>
         </div>
       </div>
 
-      <div class="unlock-tip">
+      <div class="unlock-tip" :class="{ 'without-notice': !notice }">
         <span class="unlock-arrow">⌃</span>
         <span>向上滑动解锁</span>
       </div>
@@ -94,11 +136,19 @@ function endSwipe(event: PointerEvent) {
   cursor: grabbing;
 }
 
+.notice-avatar {
+  flex: 0 0 auto;
+}
+
 .unlock-tip {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+
+.unlock-tip.without-notice {
+  margin-top: 260px;
 }
 
 .unlock-arrow {

@@ -16,6 +16,7 @@ import {
 } from '../services/characterCardImportService'
 import { savePersona } from '../services/personaService'
 import { getChatSettings, saveChatSettings } from '../services/chatSettings'
+import { listResourceBindings } from '../services/resourceBindingService'
 import type {
   Character,
   EmojiFrequency,
@@ -66,6 +67,7 @@ const embeddedUserPreview = computed(() => {
 })
 
 const embeddedPersonaMessage = ref('')
+const resourceStats = ref({ lorebookEntries: 0, regexScripts: 0, presets: 0 })
 
 const completeness = computed(() => {
   const values = [
@@ -82,6 +84,21 @@ const completeness = computed(() => {
   return Math.round(values.filter(value => value?.trim()).length / values.length * 100)
 })
 
+const isResourceDrivenCard = computed(() => Boolean(
+  character.value &&
+  (character.value.importFormat === 'sillytavern-v2' || character.value.importFormat === 'sillytavern-v3') &&
+  (
+    resourceStats.value.lorebookEntries > 0 ||
+    resourceStats.value.regexScripts > 0 ||
+    resourceStats.value.presets > 0 ||
+    character.value.depthPrompt?.prompt?.trim() ||
+    character.value.embeddedUserTemplate?.trim()
+  )
+))
+
+const scorePercent = computed(() => isResourceDrivenCard.value ? 100 : completeness.value)
+const scoreLabel = computed(() => isResourceDrivenCard.value ? '社区资源已载入' : `完整度 ${completeness.value}%`)
+
 function parseList(value: string) {
   return Array.from(new Set(value.split(/[,，、\n]+/).map(item => item.trim()).filter(Boolean)))
 }
@@ -92,6 +109,15 @@ async function load() {
     const row = await db.characters.get(characterId.value)
     if (!row) throw new Error('没有找到这个角色。')
     character.value = row
+    const [lorebookEntries, bindings] = await Promise.all([
+      db.lorebookEntries.where('characterId').equals(row.id).count(),
+      listResourceBindings(row.id)
+    ])
+    resourceStats.value = {
+      lorebookEntries,
+      regexScripts: bindings.filter(item => item.enabled && item.resourceType === 'regex').length,
+      presets: bindings.filter(item => item.enabled && item.resourceType === 'preset').length
+    }
     form.appearance = row.appearance || ''
     form.values = row.values || ''
     form.habits = row.habits || ''
@@ -157,7 +183,7 @@ async function save() {
       license: form.license.trim() || undefined,
       allowDerivative: form.allowDerivative,
       importFormat: character.value.importFormat || 'native',
-      cardVersion: 2
+      cardVersion: character.value.cardVersion || 2
     })
 
     character.value = await db.characters.get(character.value.id)
@@ -277,9 +303,16 @@ function exportCard() {
       <p v-if="isLoading" class="state">正在读取角色卡……</p>
       <template v-else-if="character">
         <section class="score-card">
-          <div><b>角色卡 V2</b><span>完整度 {{ completeness }}%</span></div>
-          <p>基础性格仍在“编辑角色”中管理；这里负责场景、示例对话、行为习惯和沉浸表达。</p>
-          <div class="score-track"><i :style="{ width: `${completeness}%` }"></i></div>
+          <div><b>角色卡 V{{ character.cardVersion || 2 }}</b><span>{{ scoreLabel }}</span></div>
+          <p v-if="isResourceDrivenCard">这是一张资源型 / 多角色社区卡：基础角色字段可以为空，原卡设定主要由世界书、Regex、Depth Prompt 等资源驱动，聊天时仍会正常加载。</p>
+          <p v-else>基础性格仍在“编辑角色”中管理；这里负责场景、示例对话、行为习惯和沉浸表达。</p>
+          <div v-if="isResourceDrivenCard" class="resource-score-tags">
+            <span>世界书 {{ resourceStats.lorebookEntries }}</span>
+            <span v-if="resourceStats.regexScripts">Regex {{ resourceStats.regexScripts }}</span>
+            <span v-if="resourceStats.presets">Preset {{ resourceStats.presets }}</span>
+            <span v-if="character.depthPrompt?.prompt">Depth Prompt</span>
+          </div>
+          <div class="score-track"><i :style="{ width: `${scorePercent}%` }"></i></div>
         </section>
 
         <section class="import-card">
@@ -366,7 +399,7 @@ function exportCard() {
           </div>
 
           <p v-if="message" class="message">{{ message }}</p>
-          <button class="save-button" type="submit" :disabled="isSaving">{{ isSaving ? '正在保存…' : '保存角色卡 V2' }}</button>
+          <button class="save-button" type="submit" :disabled="isSaving">{{ isSaving ? '正在保存…' : '保存角色卡 V' + (character.cardVersion || 2) }}</button>
         </form>
       </template>
       <p v-else class="state error">{{ message || '角色不存在。' }}</p>
@@ -386,4 +419,7 @@ function exportCard() {
 .embedded-user-section pre { white-space:pre-wrap; word-break:break-word; max-height:260px; overflow:auto; padding:10px; border-radius:12px; background:rgba(255,255,255,.72); font:inherit; font-size:12px; line-height:1.55; }
 .embedded-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 @media (max-width:390px){ .embedded-actions{grid-template-columns:1fr;} }
+
+.resource-score-tags{display:flex!important;justify-content:flex-start!important;gap:7px;flex-wrap:wrap;margin:2px 0 4px}.resource-score-tags span{padding:4px 8px;border-radius:999px;background:#fff0f6;color:#a85d7a;font-size:11px;font-weight:800}
+
 </style>

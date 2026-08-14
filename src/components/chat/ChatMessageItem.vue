@@ -22,6 +22,7 @@ const emit = defineEmits<{
   stopSpeech: []
   retryMessage: [message: Message]
   selectAlternative: [message: Message, offset: number]
+  selectGreeting: [index: number]
 }>()
 
 const timer = ref<number>()
@@ -103,7 +104,7 @@ onBeforeUnmount(cancel)
           @pointercancel="cancel"
           @contextmenu.prevent="openMenu"
         >
-          <SafeRichHtml :html="message.richHtml" />
+          <SafeRichHtml :html="message.richHtml" @select-greeting="emit('selectGreeting', $event)" />
         </div>
         <button
           v-else
@@ -219,7 +220,7 @@ onBeforeUnmount(cancel)
         <span v-else-if="message.type==='image'" class="missing-image missing-image--mine">图片未包含在这份备份中<small v-if="message.content">{{ message.content }}</small></span>
         <template v-else-if="message.type==='emoji'"><span class="emoji-message">{{ message.content }}</span></template>
         <template v-else-if="message.type==='voice'"><span class="voice-message-icon">▶</span><span class="voice-message-main"><b>语音消息 · {{ message.voiceDurationSeconds || 2 }}″</b><small>{{ message.content }}</small></span></template>
-        <SafeRichHtml v-else-if="message.type==='rich' && message.richHtml" :html="message.richHtml" />
+        <SafeRichHtml v-else-if="message.type==='rich' && message.richHtml" :html="message.richHtml" @select-greeting="emit('selectGreeting', $event)" />
         <template v-else>{{ message.content }}</template>
       </button>
       <span v-if="message.reactionEmoji" class="message-reaction message-reaction--mine">{{ message.reactionEmoji }}</span>

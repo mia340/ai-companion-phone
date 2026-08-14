@@ -18,4 +18,20 @@ describe('storage sanitizer', () => {
     })
     expect(() => structuredClone(plain)).not.toThrow()
   })
+
+  it('keeps IndexedDB-native cloneable values while removing nested proxies', () => {
+    const source = reactive({
+      updatedAt: new Date('2026-08-13T00:00:00.000Z'),
+      allowedSources: ['care', 'daily-share'],
+      nested: { values: [1, 2, 3] },
+      lookup: new Map([['mood', { value: '平静' }]]),
+      flags: new Set(['a', 'b'])
+    })
+
+    const plain = toPlainStorageValue(source)
+    expect(plain.updatedAt).toBeInstanceOf(Date)
+    expect(plain.lookup).toBeInstanceOf(Map)
+    expect(plain.flags).toBeInstanceOf(Set)
+    expect(() => structuredClone(plain)).not.toThrow()
+  })
 })

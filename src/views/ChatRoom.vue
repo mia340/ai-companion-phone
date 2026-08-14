@@ -11,6 +11,7 @@ import ChatActionSheet from '../components/chat/ChatActionSheet.vue'
 import ChatImagePreview from '../components/chat/ChatImagePreview.vue'
 import ChatThoughtPanel from '../components/chat/ChatThoughtPanel.vue'
 import ChatMusicPanel from '../components/chat/ChatMusicPanel.vue'
+import ChatGreetingPicker from '../components/chat/ChatGreetingPicker.vue'
 import { useBottomPanel } from '../composables/useBottomPanel'
 import { useChatScroll, type ChatMessageListHandle } from '../composables/useChatScroll'
 import { useChatSpeech } from '../composables/useChatSpeech'
@@ -40,6 +41,7 @@ import { getMessageImages, getMessageImageUrls } from '../services/messageImageS
 import {
   getChatSettings,
   getConversationState,
+  createDefaultConversationState,
   getMusicState,
   patchConversationState,
   saveChatSettings,
@@ -59,7 +61,8 @@ import {
   selectMemoryHitsDetailed
 } from '../services/memoryService'
 import { generateVisibleCharacterState } from '../services/characterStateService'
-import { normalizeLegacyCharacterInitialState } from '../services/characterInitialStateService'
+import { inferCardInitialActivity, inferCardInitialRelationship, normalizeLegacyCharacterInitialState } from '../services/characterInitialStateService'
+import { collectCharacterGreetings } from '../services/characterGreetingService'
 import {
   getRelationship,
   maybeCreateProactiveMessage,
@@ -73,7 +76,7 @@ import { buildLorebookPrompt } from '../services/lorebookService'
 import { composeRoleplaySystemPrompt } from '../services/promptComposer'
 import { applyRegexPipeline, applyRegexScripts, listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml } from '../services/regexRuntime'
 import { composeWithPromptPreset, getActivePromptPreset } from '../services/presetRuntime'
-import { buildCommunityUiPriorityPrompt, detectCommunityUiContract, sanitizeCommunityUiText } from '../services/communityUiRuntime'
+import { buildCommunityUiPriorityPrompt, buildCommunityUiRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, sanitizeCommunityUiText } from '../services/communityUiRuntime'
 import { estimateVoiceDuration, findUnsupportedUserFactClaims, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
 import { extractRoleCardUiHints, parseRoleCardUi, roleCardUiToConversationPatch } from '../services/roleCardUiService'
 import { analyzePromptSections, buildRuleInfluences, buildTruncationNotes, estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
@@ -116,7 +119,7 @@ const errorMessage = ref('')
 const noticeMessage = ref('')
 const newMemoryText = ref('')
 const settingsTab = ref<'chat' | 'roleplay' | 'memory' | 'advanced'>('chat')
-const activePanel = ref<'thought' | 'music' | 'settings' | 'message' | null>(null)
+const activePanel = ref<'thought' | 'music' | 'settings' | 'message' | 'greeting' | null>(null)
 const selectedMessage = ref<Message>()
 const replyTarget = ref<Message>()
 const previewImages = ref<string[]>([])
@@ -168,12 +171,17 @@ const displayUserProfile = computed<UserProfile | undefined>(() => {
     updatedAt: persona.updatedAt
   }
 })
-const availableGreetings = computed(() => {
-  const rows = [character.value?.firstMessage, ...(character.value?.alternateGreetings || [])]
-    .map(item => item?.trim() || '')
-    .filter(Boolean)
-  return Array.from(new Set(rows))
-})
+const availableGreetings = computed(() => collectCharacterGreetings(
+  character.value?.firstMessage,
+  character.value?.alternateGreetings
+))
+const requiresInitialGreetingChoice = computed(() => Boolean(
+  conversation.value &&
+  character.value &&
+  availableGreetings.value.length > 1 &&
+  messages.value.length <= 1 &&
+  messages.value.every(item => item.senderId !== 'user')
+))
 const currentTrackLabel = computed(() => {
   const music = musicState.value
   if (!music?.title) return ''
@@ -550,6 +558,33 @@ async function recoverInterruptedMessages(
 }
 
 
+async function normalizeLegacyCommunityPlainMessages(rows: Message[]) {
+  const normalized: Message[] = []
+  for (const row of rows) {
+    if (
+      row.senderId === 'user' ||
+      row.type === 'rich' ||
+      row.richHtml ||
+      !/<br\s*\/?\s*>/i.test(row.content)
+    ) {
+      normalized.push(row)
+      continue
+    }
+
+    const content = normalizeCommunityPlainText(row.content)
+    if (content === row.content) {
+      normalized.push(row)
+      continue
+    }
+
+    const next = { ...row, content }
+    await db.messages.update(row.id, { content })
+    normalized.push(next)
+  }
+  return normalized
+}
+
+
 async function normalizeLegacySceneActionMessages(
   rows: Message[],
   conversationId: string,
@@ -685,7 +720,8 @@ async function loadConversation(conversationId: string) {
       }
     }
 
-    const legacySceneNormalized = await normalizeLegacySceneActionMessages(messageRows, conversationId, characterRow, settingsRow, stateRow)
+    const legacyPlainNormalized = await normalizeLegacyCommunityPlainMessages(messageRows)
+    const legacySceneNormalized = await normalizeLegacySceneActionMessages(legacyPlainNormalized, conversationId, characterRow, settingsRow, stateRow)
     const sceneStateRow = legacySceneNormalized.state || stateRow
     const legacyNormalized = await normalizeLegacyRoleCardUiMessages(legacySceneNormalized.rows, conversationId)
     const effectiveStateRow = legacyNormalized.state || sceneStateRow
@@ -745,6 +781,11 @@ async function loadConversation(conversationId: string) {
 
     await restoreScrollPosition(conversationId)
     await nextTick()
+    const greetingRows = collectCharacterGreetings(characterRow?.firstMessage, characterRow?.alternateGreetings)
+    const hasMultipleGreetings = greetingRows.length > 1
+    const hasUserHistory = recoveredMessageRows.some(item => item.senderId === 'user')
+    const looksLikeOnlySeed = recoveredMessageRows.length <= 1 && !hasUserHistory
+    if (hasMultipleGreetings && looksLikeOnlySeed) activePanel.value = 'greeting'
     chatComposerRef.value?.resize()
     updateScrollButton()
     applyAudioState()
@@ -1414,24 +1455,30 @@ async function requestAssistantReply(options?: {
         const systemPrompt = chatTurnContentText(request.messages[0]?.content || '')
         const recentMessages = request.messages.slice(1).map(turn => ({ role: turn.role, content: chatTurnContentText(turn.content) }))
         const promptSections = analyzePromptSections(systemPrompt, recentMessages)
-        debugTrace = await savePromptDebugTrace({
-          conversationId: activeConversation.id,
-          characterId: activeCharacter.id,
-          provider: activeProvider.id,
-          model: request.model,
-          roleplayMode: settings.roleplayMode,
-          personaName: persona.name,
-          systemPrompt,
-          recentMessages,
-          activatedLorebook: lorebook.activated.map(item => ({ id: item.id, title: item.title, reason: item.activationReason })),
-          memoryHits: memoryHitDetails.map(item => ({ id: item.memory.id, content: item.memory.content, importance: item.memory.importance, layer: item.memory.layer, score: item.score, reason: item.reasons.join('；') })),
-          imageCount: includeVisionCount(request),
-          estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages),
-          protocolEnabled: settings.actionProtocolEnabled && !communityUiContract.active,
-          promptSections,
-          truncations: buildTruncationNotes({ allMessageCount: messages.value.length, includedMessageCount: recentMessages.length, systemPrompt, sections: promptSections }),
-          ruleInfluences: buildRuleInfluences(systemPrompt)
-        })
+        try {
+          debugTrace = await savePromptDebugTrace({
+            conversationId: activeConversation.id,
+            characterId: activeCharacter.id,
+            provider: activeProvider.id,
+            model: request.model,
+            roleplayMode: settings.roleplayMode,
+            personaName: persona.name,
+            systemPrompt,
+            recentMessages,
+            activatedLorebook: lorebook.activated.map(item => ({ id: item.id, title: item.title, reason: item.activationReason })),
+            memoryHits: memoryHitDetails.map(item => ({ id: item.memory.id, content: item.memory.content, importance: item.memory.importance, layer: item.memory.layer, score: item.score, reason: item.reasons.join('；') })),
+            imageCount: includeVisionCount(request),
+            estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages),
+            protocolEnabled: settings.actionProtocolEnabled && !communityUiContract.active,
+            promptSections,
+            truncations: buildTruncationNotes({ allMessageCount: messages.value.length, includedMessageCount: recentMessages.length, systemPrompt, sections: promptSections }),
+            ruleInfluences: buildRuleInfluences(systemPrompt)
+          })
+        } catch (debugError) {
+          // Prompt 调试是旁路诊断能力，写库失败绝不能中断正常聊天。
+          console.warn('保存 Prompt 调试记录失败：', debugError)
+          debugTrace = undefined
+        }
       }
       streamSession.provider = activeProvider.id
       streamSession.model = request.model
@@ -1543,6 +1590,58 @@ async function requestAssistantReply(options?: {
     })
     let richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? normalizeRichHtml(regexDisplay.text) : ''
     let communityUiText = communityUiContract.active && !richReplyHtml ? sanitizeCommunityUiText(regexDisplay.text) : ''
+
+    const communityUiConforms = () => communityUiOutputConforms({
+      contract: communityUiContract,
+      rawText: response.text,
+      renderedText: richReplyHtml || communityUiText || regexDisplay.text,
+      appliedRegex: regexDisplay.applied
+    })
+
+    if (communityUiContract.active && !communityUiConforms() && !signal.aborted) {
+      const uiRepairRequest = createRequest(visionUsed)
+      uiRepairRequest.temperature = Math.min(uiRepairRequest.temperature ?? 0.8, 0.35)
+      uiRepairRequest.messages = [
+        ...uiRepairRequest.messages,
+        { role: 'system', content: buildCommunityUiRepairPrompt(communityUiContract, response.text) }
+      ]
+      try {
+        response = await finalProvider.chat(uiRepairRequest)
+        parsedOutput = parseCompanionOutput(response.text)
+        regexDisplay = await applyRegexPipeline({
+          text: communityUiContract.active ? response.text : parsedOutput.visibleText,
+          characterId: activeCharacter.id,
+          target: 'assistant-output',
+          userName: persona.name,
+          characterName: activeCharacter.name
+        })
+        richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? normalizeRichHtml(regexDisplay.text) : ''
+        communityUiText = communityUiContract.active && !richReplyHtml ? sanitizeCommunityUiText(regexDisplay.text) : ''
+      } catch (uiRepairError) {
+        parsedOutput.warnings.push(uiRepairError instanceof Error ? `社区 UI 自动纠偏失败：${uiRepairError.message}` : '社区 UI 自动纠偏失败。')
+      }
+    }
+
+    if (communityUiContract.active && !communityUiConforms()) {
+      if (debugTrace) {
+        try {
+          await patchPromptDebugTrace(debugTrace.id, {
+            provider: providerId,
+            model: usedModel,
+            rawOutput: response.text,
+            visibleOutput: '',
+            naturalnessWarnings: [
+              ...parsedOutput.warnings,
+              '社区 UI 校验失败：模型连续两次未按原卡协议输出，因此本轮没有写入聊天。请查看“原始输出”定位模型实际返回了什么。'
+            ]
+          })
+        } catch (debugError) {
+          console.warn('记录社区 UI 失败输出时，Prompt 调试写库失败：', debugError)
+        }
+      }
+      throw new Error('角色卡要求使用社区 UI / 固定输出格式，但模型连续两次没有按原卡协议输出。为避免把错误的普通文本写进聊天，本轮已停止保存；请点击重试。')
+    }
+
     if (!communityUiContract.active && !richReplyHtml && regexDisplay.applied.length) {
       const transformed = parseCompanionOutput(regexDisplay.text)
       parsedOutput = { ...parsedOutput, messages: transformed.messages, visibleText: transformed.visibleText, actionSummary: transformed.actionSummary, status: transformed.status || parsedOutput.status, roleCardUi: transformed.roleCardUi || parsedOutput.roleCardUi, presenceResolution: transformed.presenceResolution?.resolvedPresence ? transformed.presenceResolution : parsedOutput.presenceResolution }
@@ -1592,6 +1691,31 @@ async function requestAssistantReply(options?: {
         parsedOutput.warnings.push('检测到无依据的用户事实，但自动纠偏请求失败。')
       }
     }
+    if (communityUiContract.active && !communityUiOutputConforms({
+      contract: communityUiContract,
+      rawText: response.text,
+      renderedText: richReplyHtml || communityUiText || regexDisplay.text,
+      appliedRegex: regexDisplay.applied
+    })) {
+      if (debugTrace) {
+        try {
+          await patchPromptDebugTrace(debugTrace.id, {
+            provider: providerId,
+            model: usedModel,
+            rawOutput: response.text,
+            visibleOutput: '',
+            naturalnessWarnings: [
+              ...parsedOutput.warnings,
+              '社区 UI 在事实纠偏重写后再次失配，因此本轮没有写入聊天。'
+            ]
+          })
+        } catch (debugError) {
+          console.warn('记录社区 UI 二次失败输出时，Prompt 调试写库失败：', debugError)
+        }
+      }
+      throw new Error('角色卡的社区 UI 在自动纠偏后仍未满足原卡格式。为避免保存损坏的回复，本轮已停止；请重试。')
+    }
+
     if (settings.presenceMode === 'together' || settings.presenceMode === 'remote') {
       const forcedPresence = settings.presenceMode
       const inferred = parsedOutput.presenceResolution
@@ -1609,23 +1733,30 @@ async function requestAssistantReply(options?: {
       }
     }
 
-    if (debugTrace) await patchPromptDebugTrace(debugTrace.id, {
-      provider: providerId,
-      model: usedModel,
-      rawOutput: response.text,
-      visibleOutput: richReplyHtml || communityUiText || parsedOutput.visibleText,
-      actionSummary: parsedOutput.actionSummary,
-      presenceResolution: parsedOutput.presenceResolution,
-      naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(parsedOutput.visibleText)],
-      naturalnessScore: scoreNaturalness({
-        text: parsedOutput.visibleText,
-        character: activeCharacter,
-        latestUserText,
-        relationshipNote: conversationState.value?.relationshipNote,
-        imageCount: visualMessage ? getMessageImageUrls(visualMessage).length : 0,
-        recentAssistantMessages: messages.value.filter(item => item.senderId !== 'user')
-      })
-    })
+    if (debugTrace) {
+      try {
+        await patchPromptDebugTrace(debugTrace.id, {
+          provider: providerId,
+          model: usedModel,
+          rawOutput: response.text,
+          visibleOutput: richReplyHtml || communityUiText || parsedOutput.visibleText,
+          actionSummary: parsedOutput.actionSummary,
+          presenceResolution: parsedOutput.presenceResolution,
+          naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(parsedOutput.visibleText)],
+          naturalnessScore: scoreNaturalness({
+            text: parsedOutput.visibleText,
+            character: activeCharacter,
+            latestUserText,
+            relationshipNote: conversationState.value?.relationshipNote,
+            imageCount: visualMessage ? getMessageImageUrls(visualMessage).length : 0,
+            recentAssistantMessages: messages.value.filter(item => item.senderId !== 'user')
+          })
+        })
+      } catch (debugError) {
+        // 更新调试记录失败同样只降级调试能力，不影响角色回复与消息入库。
+        console.warn('更新 Prompt 调试记录失败：', debugError)
+      }
+    }
     if (!options?.alternativeTargetId && parsedOutput.status && conversationState.value) {
       const beforeState = conversationState.value
       const statePatch = mergeStatusIntoConversationState(beforeState, parsedOutput.status, parsedOutput.presenceResolution)
@@ -1997,9 +2128,23 @@ function openSettings(tab: 'chat' | 'roleplay' | 'memory' | 'advanced' = 'chat')
   activePanel.value = 'settings'
 }
 
-async function insertCharacterGreeting(greeting: string) {
+function isOnlyOpeningSeed() {
+  if (!messages.value.length) return true
+  if (messages.value.some(item => item.senderId === 'user')) return false
+  if (messages.value.length === 1) return true
+  return messages.value.every(item => item.isGreetingSeed)
+}
+
+async function applyCharacterGreeting(greeting: string, greetingIndex: number, source: 'picker' | 'settings' | 'community-ui' = 'settings') {
   if (!conversation.value || !character.value || !greeting.trim()) return
-  if (messages.value.length && !window.confirm('把这个开场白作为角色的新消息插入当前聊天吗？')) return
+
+  const resetNeeded = messages.value.length > 0
+  if (resetNeeded && !isOnlyOpeningSeed()) {
+    const confirmed = window.confirm(
+      '切换开场白会清空当前聊天记录、本会话记忆和剧情状态，并从所选开场重新开始。角色卡、Persona、世界书和 Regex 不会删除。\n\n确定切换吗？'
+    )
+    if (!confirmed) return
+  }
 
   const rawGreeting = greeting.trim()
   const userName = activePersona.value?.name?.trim() || '你'
@@ -2010,6 +2155,8 @@ async function insertCharacterGreeting(greeting: string) {
   const parsedUi = parseRoleCardUi(plainSource)
   const greetingUi = parsedUi.ui || extractRoleCardUiHints(plainSource)
   const uiPatch = roleCardUiToConversationPatch(parsedUi.content, greetingUi)
+  const greetingActivity = inferCardInitialActivity(macroResolved)
+  const greetingRelationship = inferCardInitialRelationship(macroResolved)
   const regexDisplay = await applyRegexPipeline({
     text: macroResolved,
     characterId: character.value.id,
@@ -2025,10 +2172,11 @@ async function insertCharacterGreeting(greeting: string) {
     : displayText
 
   const now = new Date().toISOString()
+  const conversationId = conversation.value.id
   const message: Message = {
     id: crypto.randomUUID(),
     worldId: conversation.value.worldId,
-    conversationId: conversation.value.id,
+    conversationId,
     senderId: character.value.id,
     type: isRich ? 'rich' : 'text',
     content: preview,
@@ -2036,19 +2184,82 @@ async function insertCharacterGreeting(greeting: string) {
     richHtml,
     richSource: isRich ? (regexDisplay.applied.length ? 'regex' : 'card-ui') : undefined,
     roleCardUi: greetingUi,
+    isGreetingSeed: true,
+    greetingIndex,
     status: 'delivered',
     createdAt: now
   }
-  await db.transaction('rw', db.messages, db.conversations, db.conversationStates, async () => {
-    await db.messages.add(message)
-    await db.conversations.update(conversation.value!.id, { updatedAt: now })
-    if (Object.keys(uiPatch).length) {
-      conversationState.value = await patchConversationState(conversation.value!.id, uiPatch)
+
+  const baseState = createDefaultConversationState(conversationId)
+  const nextState: ConversationState = {
+    ...baseState,
+    innerActivity: '',
+    innerThought: '',
+    ...uiPatch,
+    id: conversationId,
+    summary: '',
+    summaryMessageCount: 0,
+    lastTechnicalError: '',
+    lastProviderNotice: '',
+    unresolvedTopics: [],
+    pendingEvents: [],
+    shortTermGoals: [],
+    updatedAt: now
+  }
+
+  await db.transaction(
+    'rw',
+    [db.messages, db.memories, db.conversationStates, db.conversationStateHistory, db.promptDebugTraces, db.conversations, db.characters],
+    async () => {
+      if (resetNeeded) {
+        await db.messages.where('conversationId').equals(conversationId).delete()
+        await db.memories.where('conversationId').equals(conversationId).delete()
+        await db.conversationStateHistory.where('conversationId').equals(conversationId).delete()
+        await db.promptDebugTraces.where('conversationId').equals(conversationId).delete()
+      }
+      await db.conversationStates.put(nextState)
+      await db.messages.add(message)
+      await db.conversations.update(conversationId, { updatedAt: now })
+      await db.characters.update(character.value!.id, {
+        activity: greetingActivity,
+        ...(greetingRelationship ? { relationship: greetingRelationship } : {}),
+        updatedAt: now
+      })
     }
-  })
-  messages.value.push(message)
+  )
+
+  messages.value = [message]
+  memories.value = []
+  conversationState.value = nextState
+  conversation.value = { ...conversation.value, updatedAt: now }
+  character.value = {
+    ...character.value,
+    activity: greetingActivity,
+    ...(greetingRelationship ? { relationship: greetingRelationship } : {}),
+    updatedAt: now
+  }
   activePanel.value = null
+  noticeMessage.value = `${greetingIndex === 0 ? '默认开场' : `备用开场 ${greetingIndex}`}已启用${resetNeeded ? '，旧剧情分支已清空' : ''}。`
+  await nextTick()
   await scrollToBottom()
+
+  // 从社区开场主页点击 triggerStory(n) 时，不执行原 JS；本地完成同等的安全分支切换。
+  if (source === 'community-ui') chatComposerRef.value?.focus()
+}
+
+async function selectGreetingByIndex(index: number, source: 'picker' | 'settings' | 'community-ui' = 'picker') {
+  const greeting = availableGreetings.value[index]
+  if (!greeting) {
+    noticeMessage.value = `没有找到开场 ${index}。`
+    return
+  }
+  await applyCharacterGreeting(greeting, index, source)
+}
+
+async function switchCharacterGreeting(greeting: string) {
+  const index = availableGreetings.value.findIndex(item => item === greeting)
+  if (index < 0) return
+  await applyCharacterGreeting(greeting, index, 'settings')
 }
 
 async function persistChatSettings() {
@@ -2111,7 +2322,7 @@ async function clearConversationMessages() {
       lastProviderNotice: ''
     }
   )
-  activePanel.value = null
+  activePanel.value = availableGreetings.value.length > 1 ? 'greeting' : null
 }
 
 
@@ -2588,6 +2799,7 @@ onUnmounted(() => {
         @stop-speech="stopSpeechPlayback"
         @retry-message="retryMessage"
         @select-alternative="selectMessageAlternative"
+        @select-greeting="selectGreetingByIndex($event, 'community-ui')"
       />
 
       <button
@@ -2637,10 +2849,20 @@ onUnmounted(() => {
       <div
         v-if="activePanel"
         class="panel-backdrop"
-        @click.self="activePanel = null"
+        @click.self="activePanel !== 'greeting' && (activePanel = null)"
       >
+        <ChatGreetingPicker
+          v-if="activePanel === 'greeting'"
+          :title="title"
+          :greetings="availableGreetings"
+          :required="requiresInitialGreetingChoice"
+          :panel-style="panelStyle"
+          @select="selectGreetingByIndex($event, 'picker')"
+          @close="activePanel = null"
+        />
+
         <ChatThoughtPanel
-          v-if="activePanel === 'thought'"
+          v-else-if="activePanel === 'thought'"
           :title="title"
           :character="character"
           :conversation-state="displayedConversationState"
@@ -2713,7 +2935,7 @@ onUnmounted(() => {
           @open-character-card="character && router.push(`/characters/${character.id}/card`)"
           @open-prompt-debug="conversation && router.push(`/chat/${conversation.id}/debug`)"
           @open-memory-manager="conversation && router.push(`/chat/${conversation.id}/memory`)"
-          @use-greeting="insertCharacterGreeting"
+          @use-greeting="switchCharacterGreeting"
         />
 
         <ChatActionSheet

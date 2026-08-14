@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildCommunityUiPriorityPrompt, detectCommunityUiContract, sanitizeCommunityUiText } from './communityUiRuntime'
+import {
+  buildCommunityUiPriorityPrompt,
+  communityUiOutputConforms,
+  detectCommunityUiContract,
+  sanitizeCommunityUiText
+} from './communityUiRuntime'
 import type { Character, RegexScript } from '../types/domain'
 
 const character = {
@@ -18,13 +23,76 @@ describe('community UI priority', () => {
     })
     expect(contract.active).toBe(true)
     expect(contract.mode).toBe('structured-contract')
+    expect(contract.requiredTagNames).toContain('日期')
     expect(buildCommunityUiPriorityPrompt(contract)).toContain('不要套用小手机默认的“动作与对白分开/合并”规则')
   })
 
   it('detects regex generated HTML UI', () => {
-    const contract = detectCommunityUiContract({ character, assistantRegex: [statusRegex] })
+    const contract = detectCommunityUiContract({ character, assistantRegex: [statusRegex], lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>{{当前日期}}</日期>' })
     expect(contract.active).toBe(true)
     expect(contract.mode).toBe('regex-html')
+    expect(contract.regexInputSkeleton).toContain('<日期>')
+    expect(communityUiOutputConforms({
+      contract,
+      rawText: '<日期>10月15日</日期>',
+      renderedText: '<style>.card{}</style><div class="card">10月15日</div>',
+      appliedRegex: ['状态栏']
+    })).toBe(true)
+    expect(communityUiOutputConforms({ contract, rawText: '普通回复', renderedText: '普通回复', appliedRegex: [] })).toBe(false)
+  })
+
+  it('recognizes a multi-field status regex as a per-reply UI contract even when the lorebook rule is not currently in the prompt', () => {
+    const multiStatus = {
+      ...statusRegex,
+      name: '状态栏 UI',
+      findRegex: '/<日期>(.*?)<\\/日期>\\s*<时间>(.*?)<\\/时间>\\s*<地点>(.*?)<\\/地点>/s'
+    }
+    const contract = detectCommunityUiContract({ character, assistantRegex: [multiStatus] })
+    expect(contract.active).toBe(true)
+    expect(contract.mode).toBe('regex-html')
+    expect(contract.regexInputSkeleton).toContain('<时间>')
+  })
+
+  it('does not force every reply into UI just because an occasional rich regex exists', () => {
+    const contract = detectCommunityUiContract({ character, assistantRegex: [{ ...statusRegex, name: '开场白', findRegex: '/【主页】/s' }] })
+    expect(contract.active).toBe(false)
+    expect(contract.mode).toBe('none')
+  })
+
+  it('does not let an opening-page regex satisfy a per-reply status UI contract', () => {
+    const openingRegex = { ...statusRegex, id: 'opening', name: '开场白', findRegex: '/【八卦主页】/s' }
+    const perReplyStatus = {
+      ...statusRegex,
+      id: 'status',
+      name: '状态栏',
+      findRegex: '/<日期>(.*?)<\/日期>\s*<时间>(.*?)<\/时间>\s*<地点>(.*?)<\/地点>\s*<环境>(.*?)<\/环境>/s'
+    }
+    const contract = detectCommunityUiContract({ character, assistantRegex: [openingRegex, perReplyStatus] })
+    expect(contract.requiredRegexNames).toEqual(['状态栏'])
+    expect(communityUiOutputConforms({
+      contract,
+      rawText: '【八卦主页】',
+      renderedText: '<style>.home{}</style><div class="home">主页</div>',
+      appliedRegex: ['开场白']
+    })).toBe(false)
+    expect(communityUiOutputConforms({
+      contract,
+      rawText: '<日期>8月14日</日期><时间>10:00</时间><地点>家</地点><环境>安静</环境>',
+      renderedText: '<style>.status{}</style><div class="status">状态</div>',
+      appliedRegex: ['状态栏']
+    })).toBe(true)
+  })
+
+  it('requires HTML when the card defines a direct HTML contract', () => {
+    const contract = detectCommunityUiContract({
+      character,
+      lorebookPrompt: '每次回复严格遵守状态栏格式UI，不得省略。状态栏格式UI如下:<div><details><summary>状态</summary></details></div>'
+    })
+    expect(contract.mode).toBe('html-contract')
+    expect(communityUiOutputConforms({ contract, rawText: '只是普通文本' })).toBe(false)
+    expect(communityUiOutputConforms({ contract, rawText: '<div><details><summary>状态</summary></details></div>' })).toBe(true)
+    expect(contract.exactHtmlTemplate).toContain('<details>')
+    expect(buildCommunityUiPriorityPrompt(contract)).toContain('原卡 HTML UI 模板')
   })
 
   it('keeps community XML while removing only phone private protocol', () => {

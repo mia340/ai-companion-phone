@@ -6,7 +6,7 @@ describe('character card import', () => {
     const result = parseCharacterCardJson(JSON.stringify({
       spec: 'chara_card_v2',
       data: {
-        name: '顾言',
+        name: '测试角色',
         personality: '克制，慢热',
         description: '身份：医生',
         first_mes: '还没睡？',
@@ -16,7 +16,7 @@ describe('character card import', () => {
       }
     }))
     expect(result.format).toBe('sillytavern-v2')
-    expect(result.patch.name).toBe('顾言')
+    expect(result.patch.name).toBe('测试角色')
     expect(result.patch.exampleDialogues?.length).toBe(1)
     expect(result.lorebookEntries).toHaveLength(1)
     expect(result.lorebookEntries[0]?.constant).toBe(true)
@@ -103,4 +103,61 @@ it('从内嵌世界书 user人设条目识别角色专属 Persona', () => {
   expect(result.embeddedUser?.patch.identity).toContain('墨清尘徒弟')
   expect(result.embeddedUser?.rawTemplate).toContain('{{user}}我是洛梨')
   expect(result.notes.some(note => note.includes('内嵌世界书 user 人设条目'))).toBe(true)
+})
+
+it('识别 description 中带序号的自然语言 {{user}} Persona（夜临格式）', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    spec_version: '2.0',
+    data: {
+      name: '夜临',
+      description: '{{char}}是夜临。\n③{{user}}我是江梨,女,19岁,162cm.A大大一新生,棕发棕瞳,普通单亲家庭,短暂性失聪,会唇语。'
+    }
+  }))
+  expect(result.embeddedUser?.patch.name).toBe('江梨')
+  expect(result.embeddedUser?.patch.age).toBe('19')
+  expect(result.embeddedUser?.patch.gender).toBe('女')
+  expect(result.embeddedUser?.patch.height).toBe('162cm')
+  expect(result.embeddedUser?.patch.identity).toContain('A大大一新生')
+})
+
+it('识别多种社区 description 内联 Persona 写法，但不把普通 {{user}} 剧情句当 Persona', () => {
+  const cases = [
+    ['[用户]{{user}}是{洛梨,女,20岁,170cm,影阁二把手+顶级杀手。', '洛梨'],
+    ['{{user}}洛梨，疑似西国女将，武功高强，身份危险。', '洛梨'],
+    ['{{user}}姜阮,女,25岁,168cm,纪实记者。', '姜阮']
+  ] as const
+  for (const [description, name] of cases) {
+    const result = parseCharacterCardJson(JSON.stringify({ spec: 'chara_card_v2', data: { name: '测试', description } }))
+    expect(result.embeddedUser?.patch.name).toBe(name)
+  }
+
+  const ordinary = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    data: {
+      name: '普通剧情',
+      description: '{{user}}要求不高，希望开心就好。{{char}}从小照顾{{user}}。\n{{user}}已发生的故事：两人大学相识。'
+    }
+  }))
+  expect(ordinary.embeddedUser).toBeUndefined()
+})
+
+it('识别 user基本情况 / user设定 世界书，同时忽略 user_personal_room 等环境资源', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    data: {
+      name: '世界书用户测试',
+      description: '{{char}}设定',
+      character_book: {
+        entries: [
+          { id: 1, name: '<user_personal_room>', content: '<user_personal_room>{{user}}住址: 高端公寓</user_personal_room>', constant: true, enabled: true },
+          { id: 2, name: 'user基本情况', content: '姜阮,女,20岁,168cm,插画师。', constant: true, enabled: true }
+        ]
+      }
+    }
+  }))
+  expect(result.embeddedUser?.patch.name).toBe('姜阮')
+  expect(result.embeddedUser?.patch.age).toBe('20')
+  expect(result.embeddedUser?.patch.height).toBe('168cm')
+  expect(result.embeddedUser?.rawTemplate).toContain('姜阮')
 })

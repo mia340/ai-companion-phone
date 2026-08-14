@@ -11,6 +11,7 @@ import { extractRoleCardUiHints, parseRoleCardUi, roleCardUiToConversationPatch 
 import { applyRegexScript, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml } from '../services/regexRuntime'
 import { createDefaultChatSettings } from '../services/chatSettings'
 import { inferCardInitialActivity } from '../services/characterInitialStateService'
+import { collectCharacterGreetings } from '../services/characterGreetingService'
 import { ensureDefaultPersona } from '../services/personaService'
 import type { Character, CommunityResourceArchive, RegexScript, UserPersona } from '../types/domain'
 
@@ -618,7 +619,9 @@ async function save() {
     const createdImportedResourceIds: string[] = []
     const importedRawText = importedCardRawText.value
     const openingMessage = firstMessage.value.trim() || importedPatch.firstMessage?.trim() || ''
-    const initialActivity = inferCardInitialActivity(openingMessage)
+    const greetingChoices = collectCharacterGreetings(openingMessage, importedPatch.alternateGreetings || [])
+    const deferGreetingSelection = greetingChoices.length > 1
+    const initialActivity = deferGreetingSelection ? '' : inferCardInitialActivity(openingMessage)
 
     await db.transaction(
       'rw',
@@ -773,7 +776,9 @@ async function save() {
           }))
         }
 
-        if (openingMessage) {
+        // 有多个开场时不要先写死 first_mes。首次进入聊天由用户选择分支，
+        // 避免默认开场先进入上下文，之后再选择备用开场时两个剧情叠在一起。
+        if (openingMessage && !deferGreetingSelection) {
           const openingMacroResolved = openingMessage
             .replace(/\{\{user\}\}/gi, openingUserName)
             .replace(/\{\{char\}\}/gi, trimmedName)
@@ -809,6 +814,8 @@ async function save() {
             richHtml: openingHtml,
             richSource: openingIsRich ? (openingRegexApplied ? 'regex' : 'worldbook-ui') : undefined,
             roleCardUi: openingUi,
+            isGreetingSeed: true,
+            greetingIndex: 0,
             status: 'delivered',
             createdAt: now
           }))
@@ -1058,12 +1065,12 @@ async function save() {
           v-model="importText"
           rows="7"
           placeholder="例如：
-姓名：苏晚
+姓名：示例角色
 年龄：23
-身份：甜品店店主
+身份：自由职业者
 性格：温柔慢热，观察力很强
-说话方式：语气自然，偶尔使用可爱的表情
-背景：经营一家只在傍晚营业的甜品店"
+说话方式：语气自然，表达简洁
+背景：可以粘贴任意角色的人物介绍"
         ></textarea>
 
         <div class="button-row">
@@ -1204,7 +1211,7 @@ async function save() {
         <input
           v-model="name"
           maxlength="20"
-          placeholder="例如：苏晚"
+          placeholder="例如：角色姓名"
         />
       </label>
 
@@ -1213,7 +1220,7 @@ async function save() {
         <input
           v-model="nickname"
           maxlength="20"
-          placeholder="例如：晚晚"
+          placeholder="例如：昵称"
         />
       </label>
 
@@ -1397,20 +1404,20 @@ async function save() {
 .card-import-button { display: flex; align-items: center; justify-content: center; min-height: 42px; border-radius: 13px; background: #d96f9b; color: white; font-weight: 800; cursor: pointer; }
 .visually-hidden-file { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 .card-import-preview { padding: 11px 12px; border: 1px solid rgba(217,111,155,.18); border-radius: 14px; background: rgba(255,248,251,.82); }
-.card-import-preview > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card-import-preview > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .card-import-preview span, .card-import-preview p { color: #9b7183; font-size: 12px; }
 .card-import-preview p { margin: 5px 0 0; }
 .embedded-user-card { margin-top: 10px; padding: 11px; border-radius: 13px; background: rgba(217,111,155,.08); display: grid; gap: 9px; }
-.embedded-user-title { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.embedded-user-title { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: flex-start; }
 .embedded-user-title > div { display: grid; gap: 3px; }
 .embedded-user-title small { color: #9b7183; line-height: 1.45; }
-.embedded-user-switch { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; font-weight: 800; color: #b8567f; }
+.embedded-user-switch { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; font-size: 12px; font-weight: 800; color: #b8567f; }
 .embedded-persona-name { display: grid; gap: 5px; font-size: 12px; color: #8e6577; }
 .embedded-persona-name input { min-height: 38px; border: 1px solid rgba(217,111,155,.18); border-radius: 11px; padding: 0 10px; background: rgba(255,255,255,.86); }
 .embedded-user-card details { border-top: 1px solid rgba(217,111,155,.12); padding-top: 8px; }
 .embedded-user-card summary { cursor: pointer; color: #b8567f; font-weight: 800; font-size: 12px; }
 .embedded-user-card pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; font: inherit; font-size: 12px; line-height: 1.55; color: #634b56; }
-@media (max-width: 390px) { .card-import-actions { grid-template-columns: 1fr; } }
+@media (max-width: 390px) { .card-import-actions { grid-template-columns: 1fr; } .embedded-user-title { grid-template-columns: 1fr; } .embedded-user-switch { justify-self: start; } }
 
 .creation-card h3 {
   margin: 0 0 6px;

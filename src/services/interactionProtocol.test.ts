@@ -12,7 +12,7 @@ import { createDefaultChatSettings, createDefaultConversationState } from './cha
 import type { Character } from '../types/domain'
 
 const character: Character = {
-  id: 'r', worldId: 'w', name: '顾言', avatar: '🙂', persona: '克制，慢热，会在意用户',
+  id: 'r', worldId: 'w', name: '测试角色', avatar: '🙂', persona: '克制，慢热，会在意用户',
   relationship: '朋友', mood: '平静', activity: '看书', groups: [], replySpeed: 'natural',
   createdAt: '2026-01-01T00:00:00.000Z'
 }

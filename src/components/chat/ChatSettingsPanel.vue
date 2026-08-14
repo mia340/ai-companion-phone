@@ -262,7 +262,7 @@ const emit = defineEmits<{
 
       <div v-if="greetings.length" class="greeting-picker">
         <b>角色开场白</b>
-        <small>可以把任一开场作为角色的新消息插入聊天</small>
+        <small>切换开场会清空当前剧情分支，并从所选开场重新开始，避免旧开场继续影响回复</small>
         <button v-for="(greeting, index) in greetings" :key="`${index}-${greeting.slice(0, 12)}`" type="button" @click="emit('useGreeting', greeting)">
           <span>{{ index === 0 ? '默认' : `备用 ${index}` }}</span>
           {{ greeting }}

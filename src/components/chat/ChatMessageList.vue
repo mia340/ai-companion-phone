@@ -34,6 +34,7 @@ const emit = defineEmits<{
   stopSpeech: []
   retryMessage: [message: Message]
   selectAlternative: [message: Message, offset: number]
+  selectGreeting: [index: number]
 }>()
 
 const listRef = ref<HTMLElement>()
@@ -76,6 +77,7 @@ defineExpose({ getElement })
       @stop-speech="emit('stopSpeech')"
       @retry-message="emit('retryMessage', $event)"
       @select-alternative="forwardAlternative"
+      @select-greeting="emit('selectGreeting', $event)"
     />
 
     <div

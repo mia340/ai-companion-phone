@@ -1,3 +1,65 @@
+# V0.4.3.7.5
+
+- 移除内置演示角色林夏 / 顾言及其演示会话、消息；新安装从干净通讯录开始。
+- IndexedDB 升级到 V11：一次性清理历史数据库中的林夏 / 顾言 / 苏晚，以及对应单聊、消息、关系、记忆、状态、Prompt Debug、角色专属 Persona 和角色资源绑定；之后用户仍可自行创建同名角色。
+- 锁屏通知改为读取真实未读会话；没有未读消息时不显示伪通知。
+- 桌面欢迎卡与聊天角标改为读取真实数据库，不再固定显示“林夏正在等你的消息 / 2 条未读”。
+- 创建角色页移除“苏晚”演示占位文本。
+- 文档去重：删除历史版本化 `AI续开发交接说明_*` 与 `新对话请先阅读_*`；以后仅在用户真正准备开启新对话时生成一份最新交接文件。
+- Backup 版本仍为 V9。
+
+# V0.4.3.7.4.1
+
+- 修复 `characterCardImportService.ts` 中递归函数 `objectPersonaTemplate` 缺少显式返回类型导致的 `TS7023 / TS7024`。
+- 不改变 Community Persona Extractor V2 行为，不改变 IndexedDB / Backup 版本。
+
+## V0.4.3.7.4
+
+- Community Persona Extractor V2：不再只识别 `{{user}}:` 和特定世界书写法。
+- 支持 description 中 `③{{user}}我是江梨...`、`[用户]{{user}}是{洛梨...}`、`{{user}}洛梨，...` 等自然语言角色专属 Persona。
+- 支持 `user人设 / user设定 / user基本情况 / 用户档案 / 关于user` 等内嵌世界书来源，并排除 user 房间、座驾、衣橱、NPC 等非 Persona 资源。
+- Persona 候选扩展到 description / scenario / creator notes / system prompt / post-history instructions / data+root extensions / character_book。
+- 自然语言 Persona 补提取姓名、年龄、性别、身高、身份；无法安全得到姓名时保留完整角色专属设定但不猜名字。
+- 用现有社区资源包回归 32 张角色卡：32/32 仍可解析；16 张安全识别到独立 user Persona，其余保留为剧情占位而不误建 Persona。
+- 所有 Markdown 文档统一归档到 `docs/`，ZIP 根目录不再散落 `.md`。
+- IndexedDB V10 / backup V9 不变。
+
+## V0.4.3.7.3
+
+- 多开场角色首次进入聊天先弹出开场选择；创建时不再提前写死默认 first_mes。
+- 切换开场会重置当前会话消息、记忆、剧情状态、状态历史与 Prompt Debug，不再把新旧开场叠进同一上下文。
+- Safe Rich UI 安全识别 `triggerStory(n)` / `setChatMessages(...swipe_id...)` 并映射到本地 alternate greeting，不执行第三方 JS。
+- 每轮 UI Regex contract 排除 opening-only Rich Regex；“开场白”不能再冒充“状态栏”合规输出。
+- Safe Rich HTML 保留普通 button 元素但移除事件脚本，使本地安全交互可以显示。
+- IndexedDB V10 / backup V9 不变。
+
+## V0.4.3.7.2
+
+- 提取并注入社区原卡 HTML UI 模板，修复模型连续两次只返回普通文本的问题。
+- 对 Regex HTML UI 生成结构化输入骨架，并可仅凭明确的多字段状态栏 Regex 判定每轮 UI 接管。
+- UI 合规校验增加关键栏目标题检查。
+- 社区 UI 失败会把原始模型输出写入 Prompt Debug，方便诊断。
+- 修复创建角色页 `{{user}}` Persona 卡片在窄屏挤压；社区资源卡编辑器不再显示误导性的低完整度。
+- IndexedDB V10 / backup V9 不变。
+
+## V0.4.3.7.1
+
+- 修复 V0.4.3.6 实机仍可能出现的 IndexedDB `DataCloneError`。
+- ChatSettings / ConversationState / MusicState 写库统一经过 clone-safe sanitizer。
+- Prompt Debug 保存/更新失败改为旁路容错，不再影响角色回复。
+- IndexedDB V10 / backup V9 不变。
+
+## V0.4.3.7
+
+- 社区 UI 合规校验：HTML / Regex HTML / Structured Contract 三类输出都必须真正满足原卡格式。
+- UI 格式不合规自动低温重写一次；再次失败则不保存错误普通文本。
+- 修复旧 `first_mes` 中 `<br>` 作为文字泄漏。
+- 仅存在偶发 Rich Regex 时不再错误强制每轮 UI。
+- Safe Rich UI 增加安全 Tab、关注切换和遮罩揭开交互。
+- 资源型 / 多角色社区卡详情显示绑定世界书 / Regex / Preset / Depth Prompt。
+- CharacterCardEditor 保留 V3 cardVersion；资源型卡显示“社区资源已载入”。
+- IndexedDB V10 / backup V9。
+
 ## V0.4.3.6.1
 
 - 修复 `ChatRoom.vue` 构建错误：`lorebookPrompt` 未定义。
