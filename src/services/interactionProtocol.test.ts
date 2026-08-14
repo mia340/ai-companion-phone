@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   extractInlineSceneActions,
-  findUnsupportedUserFactClaims,
   naturalnessWarnings,
   parseCompanionOutput,
   scoreNaturalness,
@@ -74,16 +73,23 @@ describe('interaction protocol V2', () => {
     const robotic = scoreNaturalness({ text: '你分享了三张图片。你是想分析角色还是画风？', character, latestUserText: '他是我喜欢的角色' })
     expect(natural.total).toBeGreaterThan(robotic.total)
   })
-  it('远程模式一个完整句子一个气泡，并在始终显示动作时保证 scene_action', () => {
+  it('普通远程回复保持整轮一颗气泡，不凭空补设备动作或按句子切碎', () => {
     const settings = { ...createDefaultChatSettings('c'), presenceMode: 'remote' as const, actionVisibility: 'always' as const, multiBubble: true }
     const state = { ...createDefaultConversationState('c'), presence: 'remote' as const, location: '训练场', innerActivity: '正在收拾球拍' }
     const shaped = shapeCompanionActions([
-      { kind: 'text', content: '训练结束了。刚拿到手机。你十二点下班对吧？我等你。' }
+      { kind: 'text', content: '训练结束了。等我收拾一下。你十二点下班对吧？我等你。' }
     ], character, settings, false, state)
-    expect(shaped[0].kind).toBe('scene_action')
-    expect(shaped.filter(item => item.kind === 'text').map(item => item.content)).toEqual([
-      '训练结束了。', '刚拿到手机。', '你十二点下班对吧？', '我等你。'
-    ])
+    expect(shaped).toEqual([{ kind: 'text', content: '训练结束了。等我收拾一下。你十二点下班对吧？我等你。' }])
+  })
+
+  it('隐藏协议明确给出多条 text 时保留多气泡意图', () => {
+    const settings = { ...createDefaultChatSettings('c'), presenceMode: 'remote' as const, multiBubble: true }
+    const shaped = shapeCompanionActions([
+      { kind: 'text', content: '第一条。' },
+      { kind: 'typing_pause', content: '', delayMs: 500 },
+      { kind: 'text', content: '第二条。' }
+    ], character, settings, true, createDefaultConversationState('c'))
+    expect(shaped.filter(item => item.kind === 'text').map(item => item.content)).toEqual(['第一条。', '第二条。'])
   })
 
 
@@ -108,12 +114,19 @@ describe('interaction protocol V2', () => {
     expect(shaped[0].content).toContain('（翻过身，将你捞进怀里。）')
   })
 
-  it('detects invented user habits when history and memory do not support them', () => {
-    expect(findUnsupportedUserFactClaims('我记得上次你想吃寿司。', '用户说：晚上吃什么？')).toHaveLength(1)
-    expect(findUnsupportedUserFactClaims('我记得上次你想吃寿司。', '用户说：我上次想吃寿司。')).toHaveLength(0)
-    expect(findUnsupportedUserFactClaims('你一直很喜欢吃寿司。', '用户说：我今天想吃寿司。')).toHaveLength(1)
-    expect(findUnsupportedUserFactClaims('你一直很喜欢吃寿司。', '用户说：我一直很喜欢吃寿司。')).toHaveLength(0)
+  it('recognizes close contact such as pinching the user chin as together', () => {
+    const parsed = parseCompanionOutput('角色松开手，指腹擦过你的下巴，随后半侧身看着你。')
+    expect(parsed.status?.presence).toBe('together')
+    expect(parsed.presenceResolution?.source).toBe('direct-contact')
   })
+
+  it('recognizes gaze on the user in the same room as co-presence', () => {
+    const parsed = parseCompanionOutput('他目光落在你覆着白纱的双眼上，停了片刻，才缓缓开口。')
+    expect(parsed.status?.presence).toBe('together')
+    expect(parsed.presenceResolution?.source).toBe('co-presence')
+  })
+
+
 
 })
 
@@ -135,23 +148,6 @@ it('V0.4.3.4 自动排版：远程默认分开、同场景默认合并且动作�
   expect(togetherRows).toHaveLength(1)
   expect(togetherRows[0].content).toBe('（翻过身，将你捞进怀里。）我也没睡着。')
   expect(togetherRows[0].content).not.toContain('\n')
-})
-
-it('旧版手动动作排版值不再覆盖自动场景规则', () => {
-  const togetherLegacy = { ...createDefaultChatSettings('layout-a'), presenceMode: 'together' as const, actionTextLayout: 'separate' as const }
-  const togetherRows = shapeCompanionActions([
-    { kind: 'scene_action', content: '抬手碰了碰你的额头。' },
-    { kind: 'text', content: '不烫。' }
-  ], character, togetherLegacy, true, createDefaultConversationState('layout-a'))
-  expect(togetherRows).toHaveLength(1)
-  expect(togetherRows[0].content).toBe('（抬手碰了碰你的额头。）不烫。')
-
-  const remoteLegacy = { ...createDefaultChatSettings('layout-b'), presenceMode: 'remote' as const, actionTextLayout: 'merged' as const }
-  const remoteRows = shapeCompanionActions([
-    { kind: 'scene_action', content: '靠在椅背上看手机。' },
-    { kind: 'text', content: '等我一下。' }
-  ], character, remoteLegacy, true, createDefaultConversationState('layout-b'))
-  expect(remoteRows.map(item => item.kind)).toEqual(['scene_action', 'text'])
 })
 
 it('流式截断和带额外空格的 scene_action 标签都不会泄漏', () => {

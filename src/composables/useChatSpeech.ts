@@ -16,7 +16,6 @@ import {
 } from '../services/speechService'
 import type {
   Character,
-  CharacterRelationship,
   ChatSettings,
   Message
 } from '../types/domain'
@@ -26,7 +25,6 @@ export function useChatSpeech(options: {
   title: ComputedRef<string>
   chatSettings: Ref<ChatSettings | undefined>
   character: Ref<Character | undefined>
-  relationship: Ref<CharacterRelationship | undefined>
   noticeMessage: Ref<string>
   afterDraftUpdated?: () => void
 }) {
@@ -163,19 +161,15 @@ export function useChatSpeech(options: {
 
   function roleRate() {
     const base = options.chatSettings.value?.voiceRate ?? 1
-    const relationship = options.relationship.value
-    const style = `${options.character.value?.mood ?? ''}${relationship?.emotion ?? ''}${options.character.value?.speakingStyle ?? ''}`
+    const style = `${options.character.value?.mood ?? ''}${options.character.value?.speakingStyle ?? ''}`
     let adjustment = 0
     if (/温柔|安静|疲惫|难过|低落|沉稳/.test(style)) adjustment -= 0.06
     if (/活泼|开心|兴奋|轻快/.test(style)) adjustment += 0.05
-    if (relationship && ['亲近', '依赖', '特别关系'].includes(relationship.stage)) adjustment -= 0.02
     return Math.min(1.4, Math.max(0.7, base + adjustment))
   }
 
   function prepareText(text: string) {
-    const relationship = options.relationship.value
-    if (!relationship || !['亲近', '依赖', '特别关系'].includes(relationship.stage)) return text
-    return text.replace(/([。！？!?])/g, '$1 ')
+    return text
   }
 
   function stopSpeechPlayback() {

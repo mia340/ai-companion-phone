@@ -298,14 +298,53 @@ export async function deleteCharacterSafely(
         }
       }
 
-      await db.lorebookEntries
-        .where('characterId')
-        .equals(characterId)
+      // 清理保留群聊中由该角色发送的消息，避免留下 senderId 孤儿记录。
+      const remainingCharacterMessages = await db.messages
+        .toCollection()
+        .filter(message => message.senderId === characterId)
+        .toArray()
+      if (remainingCharacterMessages.length) {
+        await db.messages.bulkDelete(remainingCharacterMessages.map(message => message.id))
+        result.deletedMessages += remainingCharacterMessages.length
+      }
+
+      // 角色级运行状态、记忆、调试与 Persona 全部跟随角色删除。
+      await Promise.all([
+        db.memories.where('characterId').equals(characterId).delete(),
+        db.conversationStateHistory.where('characterId').equals(characterId).delete(),
+        db.promptDebugTraces.where('characterId').equals(characterId).delete(),
+        db.personas.toCollection().filter(persona => persona.boundCharacterId === characterId).delete(),
+        db.resourceBindings.where('characterId').equals(characterId).delete(),
+        db.resourceBindings.where('scopeId').equals(characterId).delete()
+      ])
+
+      // 删除角色自带世界书 / Regex；只删除明确归属于该角色的资源，不碰共享全局资源。
+      const characterLorebooks = await db.lorebooks.where('characterId').equals(characterId).toArray()
+      const characterLorebookIds = characterLorebooks.map(row => row.id)
+      if (characterLorebookIds.length) {
+        for (const lorebookId of characterLorebookIds) {
+          await db.lorebookEntries.where('lorebookId').equals(lorebookId).delete()
+          await db.resourceBindings.where('resourceId').equals(lorebookId).delete()
+        }
+        await db.lorebooks.bulkDelete(characterLorebookIds)
+      }
+      await db.lorebookEntries.where('characterId').equals(characterId).delete()
+
+      const characterRegex = await db.regexScripts.where('characterId').equals(characterId).toArray()
+      const characterRegexIds = characterRegex.map(row => row.id)
+      if (characterRegexIds.length) {
+        for (const regexId of characterRegexIds) {
+          await db.resourceBindings.where('resourceId').equals(regexId).delete()
+        }
+        await db.regexScripts.bulkDelete(characterRegexIds)
+      }
+
+      await db.communityResourceArchives
+        .toCollection()
+        .filter(archive => archive.characterId === characterId)
         .delete()
 
-      await db.characters.delete(
-        characterId
-      )
+      await db.characters.delete(characterId)
     }
   )
 

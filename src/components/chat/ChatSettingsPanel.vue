@@ -160,13 +160,13 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-switch">
-        <span><b>主动来找你</b><small>久未聊天时，打开应用可能收到一条自然问候</small></span>
+        <span><b>主动来找你</b><small>仅在“小手机增强”下到点询问 AI；AI 根据角色卡自行决定是否联系与说什么</small></span>
         <input v-model="chatSettings.proactiveEnabled" type="checkbox" @change="emit('persist')" />
       </label>
 
       <template v-if="chatSettings.proactiveEnabled">
         <label class="setting-control">
-          <span><b>主动频率</b><small>会同时参考角色主动程度和关系阶段</small></span>
+          <span><b>主动频率</b><small>只影响何时询问 AI，不预设角色内容</small></span>
           <select v-model="chatSettings.proactiveFrequency" @change="emit('persist')">
             <option value="low">低</option>
             <option value="natural">自然</option>
@@ -220,9 +220,9 @@ const emit = defineEmits<{
       <label class="setting-control">
         <span><b>当前相处状态</b><small>用于场景与记忆判断；社区 UI 的排版与标签不会被这里改写</small></span>
         <select v-model="chatSettings.presenceMode" @change="emit('persist')">
-          <option value="auto">自动 · 当前 {{ conversationState?.presence === 'together' ? '在身边' : '远程' }}</option>
+          <option value="auto">自动 · 当前 {{ conversationState?.presence === 'together' ? '在身边' : conversationState?.presence === 'remote' ? '远程' : '未确定' }}</option>
           <option value="together">在身边 / 同一现场</option>
-          <option value="remote">不在身边 / 手机联系</option>
+          <option value="remote">不在身边 / 远程联系</option>
         </select>
       </label>
 
@@ -255,8 +255,17 @@ const emit = defineEmits<{
         <input v-model="chatSettings.swipeRepliesEnabled" type="checkbox" @change="emit('persist')" />
       </label>
 
+      <label class="setting-control">
+        <span><b>角色卡兼容策略</b><small>自动模式对所有角色都保持 AI / 原卡原样输出；只有手动选择“小手机增强”才启用额外整形</small></span>
+        <select v-model="chatSettings.compatibilityMode" @change="emit('persist')">
+          <option value="auto">自动识别</option>
+          <option value="card-first">原卡优先</option>
+          <option value="phone-enhanced">小手机增强</option>
+        </select>
+      </label>
+
       <label class="setting-switch">
-        <span><b>小手机互动协议</b><small>普通角色使用；检测到社区 UI 时会自动让位，不覆盖原 JSON 格式</small></span>
+        <span><b>小手机互动增强</b><small>只在兼容策略允许时启用；不会覆盖原卡 UI、Regex 或固定输出协议</small></span>
         <input v-model="chatSettings.actionProtocolEnabled" type="checkbox" @change="emit('persist')" />
       </label>
 
@@ -270,7 +279,7 @@ const emit = defineEmits<{
       </div>
 
       <div class="roleplay-links">
-        <button type="button" @click="emit('openCharacterCard')">编辑当前角色卡 V2</button>
+        <button type="button" @click="emit('openCharacterCard')">编辑当前角色卡</button>
         <button type="button" @click="emit('openPersonas')">管理用户 Persona</button>
         <button type="button" @click="emit('openLorebook')">管理世界书 Lorebook</button>
       </div>
@@ -325,11 +334,6 @@ const emit = defineEmits<{
         <span>{{ modelSettings?.model || '未设置模型' }}</span>
         <span class="vision-capability">图片理解：{{ visionCapabilityLabel }}</span>
       </div>
-
-      <label v-if="chatSettings" class="setting-switch">
-        <span><b>接口失败时使用本地回复</b><small>聊天页不会显示技术名称</small></span>
-        <input v-model="chatSettings.autoFallback" type="checkbox" @change="emit('persist')" />
-      </label>
 
       <label v-if="chatSettings" class="setting-switch">
         <span><b>保存 Prompt 调试记录</b><small>只保存在当前浏览器，最多保留最近 20 次，不随备份导出</small></span>

@@ -12,8 +12,6 @@ import type {
   ConversationStateHistory,
   Message,
   MusicState,
-  CharacterRelationship,
-  RelationshipEvent,
   UserProfile,
   UserPersona,
   LorebookEntry,
@@ -40,8 +38,6 @@ export class CompanionDatabase extends Dexie {
   memories!: EntityTable<CharacterMemory, 'id'>
   conversationStates!: EntityTable<ConversationState, 'id'>
   musicStates!: EntityTable<MusicState, 'id'>
-  relationships!: EntityTable<CharacterRelationship, 'id'>
-  relationshipEvents!: EntityTable<RelationshipEvent, 'id'>
   personas!: EntityTable<UserPersona, 'id'>
   lorebookEntries!: EntityTable<LorebookEntry, 'id'>
   lorebooks!: EntityTable<LorebookResource, 'id'>
@@ -252,8 +248,7 @@ export class CompanionDatabase extends Dexie {
       })
     })
 
-    // V11：移除早期演示角色与伪通知数据。只在数据库升级时执行一次，
-    // 迁移后用户仍可自行创建“林夏 / 顾言 / 苏晚”等同名角色。
+    // V11：移除早期演示数据。只按旧版本稳定 ID 清理，不再按角色姓名匹配。
     this.version(11).stores({
       worlds: 'id, createdAt',
       characters: 'id, worldId, name, *groups, createdAt',
@@ -278,7 +273,6 @@ export class CompanionDatabase extends Dexie {
       communityResourceArchives: 'id, worldId, kind, name, fileName, createdAt, updatedAt',
       promptDebugTraces: 'id, conversationId, characterId, createdAt'
     }).upgrade(async transaction => {
-      const legacyNames = new Set(['林夏', '顾言', '苏晚'])
       const legacyCharacterIds = new Set(['char-lin', 'char-gu', 'char-su'])
       const legacyConversationIds = new Set(['conv-lin', 'conv-gu', 'conv-su'])
 
@@ -298,14 +292,6 @@ export class CompanionDatabase extends Dexie {
       const regexScripts = transaction.table('regexScripts')
       const resourceBindings = transaction.table('resourceBindings')
       const promptDebugTraces = transaction.table('promptDebugTraces')
-
-      const characterRows = await characters.toArray()
-      for (const character of characterRows) {
-        if (legacyNames.has(String(character.name || '').trim())) {
-          legacyCharacterIds.add(String(character.id))
-        }
-      }
-
       const deleteConversationData = async (conversationId: string) => {
         await messages.where('conversationId').equals(conversationId).delete()
         await memories.where('conversationId').equals(conversationId).delete()
@@ -363,6 +349,297 @@ export class CompanionDatabase extends Dexie {
         .filter(persona => legacyCharacterIds.has(String(persona.boundCharacterId || '')))
         .map(persona => persona.id)
       if (legacyPersonaIds.length) await personas.bulkDelete(legacyPersonaIds)
+    })
+
+    // V12：通用兼容内核清洗。清理孤儿记录、归一聊天兼容策略，
+    // 并移除早期导入流程写入社区角色卡的应用默认行为字段。
+    this.version(12).stores({
+      worlds: 'id, createdAt',
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt, status, type, proactiveSource',
+      userProfiles: 'id, updatedAt',
+      modelSettings: 'id, provider, updatedAt',
+      chatSettings: 'id, conversationId, updatedAt',
+      memories: 'id, conversationId, characterId, importance, layer, status, topicKey, dueAt, updatedAt',
+      conversationStates: 'id, updatedAt',
+      conversationStateHistory: 'id, conversationId, characterId, field, createdAt',
+      musicStates: 'id, updatedAt',
+      relationships: 'id, characterId, stage, updatedAt',
+      relationshipEvents: 'id, characterId, conversationId, createdAt',
+      personas: 'id, isDefault, updatedAt',
+      lorebookEntries: 'id, worldId, lorebookId, characterId, enabled, priority, updatedAt',
+      lorebooks: 'id, worldId, characterId, name, updatedAt',
+      promptPresets: 'id, worldId, name, updatedAt',
+      regexScripts: 'id, worldId, characterId, enabled, name, updatedAt',
+      resourceBindings: 'id, worldId, characterId, scope, scopeId, resourceType, resourceId, enabled, updatedAt',
+      communityResourceArchives: 'id, worldId, kind, characterId, name, fileName, createdAt, updatedAt',
+      promptDebugTraces: 'id, conversationId, characterId, createdAt'
+    }).upgrade(async transaction => {
+      const characters = transaction.table('characters')
+      const contactGroups = transaction.table('contactGroups')
+      const conversations = transaction.table('conversations')
+      const messages = transaction.table('messages')
+      const chatSettings = transaction.table('chatSettings')
+      const memories = transaction.table('memories')
+      const conversationStates = transaction.table('conversationStates')
+      const conversationStateHistory = transaction.table('conversationStateHistory')
+      const musicStates = transaction.table('musicStates')
+      const relationships = transaction.table('relationships')
+      const relationshipEvents = transaction.table('relationshipEvents')
+      const personas = transaction.table('personas')
+      const lorebookEntries = transaction.table('lorebookEntries')
+      const lorebooks = transaction.table('lorebooks')
+      const promptPresets = transaction.table('promptPresets')
+      const regexScripts = transaction.table('regexScripts')
+      const resourceBindings = transaction.table('resourceBindings')
+      const promptDebugTraces = transaction.table('promptDebugTraces')
+      const archives = transaction.table('communityResourceArchives')
+
+      const characterRows = await characters.toArray()
+      const conversationRows = await conversations.toArray()
+      const personaRows = await personas.toArray()
+      const characterIds = new Set(characterRows.map(row => String(row.id)))
+      const conversationIds = new Set(conversationRows.map(row => String(row.id)))
+      const personaIds = new Set(personaRows.map(row => String(row.id)))
+      const communityCharacterIds = new Set(characterRows
+        .filter(row => Boolean((row.importFormat && row.importFormat !== 'native') || row.sourceSpec || row.sourceSpecVersion || row.rawCardExtensions))
+        .map(row => String(row.id)))
+      const communityConversationIds = new Set(conversationRows
+        .filter(row => row.type === 'single' && row.memberIds?.some((id: unknown) => communityCharacterIds.has(String(id))))
+        .map(row => String(row.id)))
+
+      const defaultWorldId = String(characterRows[0]?.worldId || conversationRows[0]?.worldId || 'world-default')
+      if (!(await contactGroups.get('group-unassigned'))) {
+        await contactGroups.put({
+          id: 'group-unassigned',
+          worldId: defaultWorldId,
+          name: '未分组',
+          order: 999
+        })
+      }
+
+      await chatSettings.toCollection().filter(row => !conversationIds.has(String(row.conversationId || row.id))).delete()
+      await conversationStates.toCollection().filter(row => !conversationIds.has(String(row.id))).delete()
+      await musicStates.toCollection().filter(row => !conversationIds.has(String(row.id))).delete()
+      await messages.toCollection().filter(row => !conversationIds.has(String(row.conversationId))).delete()
+      // 社区角色卡不再持久化小手机固定状态卡元数据；原卡 HTML/XML/Regex 内容保留在消息正文与 rawContent 中。
+      await messages.toCollection().modify(row => {
+        if (communityConversationIds.has(String(row.conversationId)) && row.roleCardUi) row.roleCardUi = undefined
+      })
+      const syntheticPhoneRows = await messages.toCollection()
+        .filter(row => row.senderId !== 'user' && row.type === 'action' && /^低头看着手机屏幕，停了一会儿才继续回复[。.!！]?$/.test(String(row.content || '').trim()))
+        .toArray()
+      if (syntheticPhoneRows.length) await messages.bulkDelete(syntheticPhoneRows.map(row => row.id))
+      await memories.toCollection().filter(row => !conversationIds.has(String(row.conversationId)) || !characterIds.has(String(row.characterId))).delete()
+      await relationships.toCollection().filter(row => !characterIds.has(String(row.characterId))).delete()
+      await relationshipEvents.toCollection().filter(row => !characterIds.has(String(row.characterId)) || !conversationIds.has(String(row.conversationId))).delete()
+      await conversationStateHistory.toCollection().filter(row => !characterIds.has(String(row.characterId)) || !conversationIds.has(String(row.conversationId))).delete()
+      await promptDebugTraces.toCollection().filter(row => !characterIds.has(String(row.characterId)) || !conversationIds.has(String(row.conversationId))).delete()
+
+      // 社区角色卡默认采用原卡优先策略：移除旧版本小手机关系积分引擎生成的固定“初识/熟悉”等状态。
+      await relationships.toCollection().filter(row => communityCharacterIds.has(String(row.characterId))).delete()
+      await relationshipEvents.toCollection().filter(row => communityCharacterIds.has(String(row.characterId))).delete()
+
+      // 清理旧版 ConversationState 的应用占位值；有明确场景证据的状态保留。
+      await conversationStates.toCollection().modify(row => {
+        if (row.innerMood === '平静') row.innerMood = ''
+        if (row.innerActivity === '正在等你的消息' || row.innerActivity === '正在等待你的消息') row.innerActivity = ''
+        if (row.innerThought === '好像还有很多话想慢慢告诉你。') row.innerThought = ''
+        if (row.energy === '平稳') row.energy = ''
+        const noPresenceEvidence = !row.reportedPresence && !row.presenceResolutionSource && !row.location && !row.lastActionSummary
+        if (row.presence === 'remote' && noPresenceEvidence) row.presence = undefined
+      })
+
+      await personas.toCollection().modify(row => {
+        if (row.boundCharacterId && !characterIds.has(String(row.boundCharacterId))) {
+          row.boundCharacterId = undefined
+          row.boundCharacterName = undefined
+          row.personaScope = 'global'
+          row.isCardTemplate = false
+        }
+        // 清理早期默认 Persona 自动注入的应用规则；用户自己写入的其它内容不动。
+        if (row.relationshipNote === '请让角色根据既有关系自然认识我，不要替我决定动作、想法或感受。') row.relationshipNote = undefined
+        if (row.boundaries === '不要替用户说话，不要擅自决定用户的行为、心理和选择。') row.boundaries = undefined
+      })
+
+      await lorebooks.toCollection().filter(row => Boolean(row.characterId) && !characterIds.has(String(row.characterId))).delete()
+      await regexScripts.toCollection().filter(row => Boolean(row.characterId) && !characterIds.has(String(row.characterId))).delete()
+      const liveLorebookIds = new Set((await lorebooks.toArray()).map(row => String(row.id)))
+      const liveRegexIds = new Set((await regexScripts.toArray()).map(row => String(row.id)))
+      const livePresetIds = new Set((await promptPresets.toArray()).map(row => String(row.id)))
+      await lorebookEntries.toCollection().filter(row =>
+        (Boolean(row.characterId) && !characterIds.has(String(row.characterId))) ||
+        (Boolean(row.lorebookId) && !liveLorebookIds.has(String(row.lorebookId)))
+      ).delete()
+
+      await resourceBindings.toCollection().filter(row => {
+        const type = String(row.resourceType)
+        const resourceId = String(row.resourceId)
+        const resourceExists = type === 'lorebook' ? liveLorebookIds.has(resourceId) : type === 'preset' ? livePresetIds.has(resourceId) : type === 'regex' ? liveRegexIds.has(resourceId) : false
+        if (!resourceExists) return true
+        const scope = row.scope || (row.characterId ? 'character' : 'global')
+        const scopeId = String(row.scopeId || row.characterId || '')
+        if (scope === 'character') return !characterIds.has(scopeId)
+        if (scope === 'conversation') return !conversationIds.has(scopeId)
+        if (scope === 'persona') return !personaIds.has(scopeId)
+        return false
+      }).delete()
+
+      await chatSettings.toCollection().modify(row => {
+        row.compatibilityMode = ['auto', 'card-first', 'phone-enhanced'].includes(String(row.compatibilityMode)) ? row.compatibilityMode : 'auto'
+        delete row.actionTextLayout
+        row.presenceMode = ['auto', 'together', 'remote'].includes(String(row.presenceMode)) ? row.presenceMode : 'auto'
+      })
+
+      await characters.toCollection().modify(row => {
+        const groups = Array.isArray(row.groups) ? row.groups.filter(Boolean) : []
+        if (!groups.length) row.groups = ['group-unassigned']
+
+        // 清理旧版本曾自动写入的占位状态。只处理精确旧文案，不猜测用户真实数据。
+        if (row.activity === '刚刚来到这个世界' || row.activity === '正在等待你的消息') row.activity = ''
+        if (row.mood === '期待认识你') row.mood = ''
+
+        const isCommunity = Boolean((row.importFormat && row.importFormat !== 'native') || row.sourceSpec || row.sourceSpecVersion || row.rawCardExtensions)
+        if (!isCommunity) return
+        if (row.persona === '等待你逐渐了解的原创角色。') row.persona = ''
+        row.initiative = undefined
+        row.narrationStyle = undefined
+        row.emojiFrequency = undefined
+        row.questionFrequency = undefined
+      })
+
+      const validResourceIds = new Set([
+        ...(await lorebooks.toArray()).map(row => String(row.id)),
+        ...(await promptPresets.toArray()).map(row => String(row.id)),
+        ...(await regexScripts.toArray()).map(row => String(row.id))
+      ])
+      await archives.toCollection().modify(row => {
+        const importedIds = Array.isArray(row.importedResourceIds) ? row.importedResourceIds : []
+        if (row.kind === 'character-card' && !row.characterId) {
+          const legacyCharacterId = importedIds.find((id: unknown) => characterIds.has(String(id)))
+          if (legacyCharacterId) row.characterId = String(legacyCharacterId)
+        }
+        row.importedResourceIds = importedIds.filter((id: unknown) => validResourceIds.has(String(id)))
+      })
+
+      // 从无损角色卡归档回填 description / personality 的原始语义边界。
+      // 旧版本曾把两者合并进 persona；有原始归档时恢复为独立字段，避免运行时继续丢失作者结构。
+      const archiveRows = await archives.toArray()
+      for (const archive of archiveRows) {
+        const characterId = String(archive.characterId || '')
+        if (archive.kind !== 'character-card' || !characterIds.has(characterId)) continue
+        const character = await characters.get(characterId)
+        if (!character || character.cardDescription || character.cardPersonality) continue
+        let raw: unknown = archive.rawJson
+        if ((!raw || typeof raw !== 'object') && typeof archive.rawText === 'string' && archive.rawText.trim()) {
+          try { raw = JSON.parse(archive.rawText) } catch { raw = undefined }
+        }
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+        const root = raw as Record<string, unknown>
+        const nested = root.data && typeof root.data === 'object' && !Array.isArray(root.data)
+          ? root.data as Record<string, unknown>
+          : root
+        const text = (...keys: string[]) => {
+          for (const key of keys) {
+            const value = nested[key]
+            if (typeof value === 'string' && value.trim()) return value.trim()
+          }
+          return undefined
+        }
+        const cardDescription = text('description', 'desc', 'character_description', 'characterDescription')
+        const cardPersonality = text('personality', 'persona', 'character_persona', 'characterPersona')
+        if (cardDescription || cardPersonality) {
+          await characters.update(characterId, { cardDescription, cardPersonality })
+        }
+      }
+    })
+
+    // V13：AI-only 内容权威化。停止本地模拟回复与本地关系情绪生成，
+    // 清理历史 mock/fallback 角色消息，并迁移旧 mock 模型配置到真实 API 配置入口。
+    this.version(13).stores({
+      worlds: 'id, createdAt',
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt, status, type, proactiveSource',
+      userProfiles: 'id, updatedAt',
+      modelSettings: 'id, provider, updatedAt',
+      chatSettings: 'id, conversationId, updatedAt',
+      memories: 'id, conversationId, characterId, importance, layer, status, topicKey, dueAt, updatedAt',
+      conversationStates: 'id, updatedAt',
+      conversationStateHistory: 'id, conversationId, characterId, field, createdAt',
+      musicStates: 'id, updatedAt',
+      relationships: null,
+      relationshipEvents: null,
+      personas: 'id, isDefault, updatedAt',
+      lorebookEntries: 'id, worldId, lorebookId, characterId, enabled, priority, updatedAt',
+      lorebooks: 'id, worldId, characterId, name, updatedAt',
+      promptPresets: 'id, worldId, name, updatedAt',
+      regexScripts: 'id, worldId, characterId, enabled, name, updatedAt',
+      resourceBindings: 'id, worldId, characterId, scope, scopeId, resourceType, resourceId, enabled, updatedAt',
+      communityResourceArchives: 'id, worldId, kind, characterId, name, fileName, createdAt, updatedAt',
+      promptDebugTraces: 'id, conversationId, characterId, createdAt'
+    }).upgrade(async transaction => {
+      const modelSettings = transaction.table('modelSettings')
+      const chatSettings = transaction.table('chatSettings')
+      const messages = transaction.table('messages')
+      const conversationStates = transaction.table('conversationStates')
+      const promptDebugTraces = transaction.table('promptDebugTraces')
+
+      await modelSettings.toCollection().modify(row => {
+        delete row.fallbackToMock
+        if (row.provider === 'mock') {
+          row.provider = 'deepseek'
+          row.baseUrl = 'https://api.deepseek.com'
+          row.apiKey = ''
+          row.model = 'deepseek-v4-flash'
+          row.availableModels = ['deepseek-v4-flash', 'deepseek-v4-pro']
+          row.visionSupported = undefined
+          row.visionTestedSignature = undefined
+          row.visionTestedAt = undefined
+        }
+      })
+
+      await chatSettings.toCollection().modify(row => {
+        delete row.autoFallback
+      })
+
+      // 历史本地模拟/失败兜底消息不是真实 AI 输出，会污染后续上下文，升级时直接移除。
+      const syntheticIds = (await messages.toArray())
+        .filter(row => row.senderId !== 'user' && (
+          row.provider === 'mock' ||
+          row.fallback === true ||
+          (row.proactiveSource && !row.provider) ||
+          // 非用户主动停止遗留的 pending 角色消息没有完整性证明，统一移除。
+          row.status === 'pending'
+        ))
+        .map(row => row.id)
+      if (syntheticIds.length) await messages.bulkDelete(syntheticIds)
+      await messages.toCollection().modify(row => {
+        // fallback 字段只属于旧本地兜底实现；保留真实 provider/model 元数据即可。
+        delete row.fallback
+      })
+
+      // 早期心理面板既混有 AI 状态，也混有本地模板/推断，无法可靠区分来源。
+      // V13 一次性清空这些派生展示字段；后续只允许角色卡明确值或真实 AI 重新生成。
+      await conversationStates.toCollection().modify(row => {
+        row.innerMood = ''
+        row.innerActivity = ''
+        row.innerThought = ''
+        row.relationshipNote = ''
+        row.thoughtUpdatedAt = undefined
+        // 旧版本的这些字段可能来自本地关键词推断，也可能来自 AI，来源无法可靠区分。
+        // V13 清空后，auto/card-first 不再本地推断；只有原卡/AI 明确给出或用户显式开启增强层才会重新写入。
+        row.unresolvedTopics = []
+        row.pendingEvents = []
+        row.shortTermGoals = []
+        row.lastCompletedEvent = ''
+      })
+
+      // V13 直接删除旧 relationships / relationshipEvents stores；关系语义不再由本地积分表持久化。
+      await promptDebugTraces.toCollection().filter(row => row.provider === 'mock').delete()
     })
 
   }

@@ -16,11 +16,6 @@ function listLine(label: string, values?: string[]) {
 export function normalizeCharacterCard(character: Character): Character {
   return {
     ...character,
-    cardVersion: 2,
-    initiative: character.initiative ?? 'natural',
-    narrationStyle: character.narrationStyle ?? 'light',
-    emojiFrequency: character.emojiFrequency ?? 'low',
-    questionFrequency: character.questionFrequency ?? 'natural',
     alternateGreetings: character.alternateGreetings ?? [],
     exampleDialogues: character.exampleDialogues ?? [],
     tags: character.tags ?? []
@@ -29,49 +24,72 @@ export function normalizeCharacterCard(character: Character): Character {
 
 export function buildCharacterCardPrompt(
   source: Character,
-  settings: ChatSettings
+  settings: ChatSettings,
+  options: { phoneEnhanced?: boolean } = {}
 ): string {
   const character = normalizeCharacterCard(source)
-  const modeRule = settings.roleplayMode === 'deep'
-    ? '深度角色扮演：严格维持角色身份、世界观与场景连续性。允许自然的动作、环境和心理表现，但绝不替用户行动。'
-    : settings.roleplayMode === 'immersive'
-      ? '沉浸剧情：保持剧情连续，可适度描写角色动作和环境，语言仍像真实交流。'
-      : '日常陪伴：以手机聊天为主，少写动作和环境，优先自然接话、情绪回应和关系感。'
+  const phoneEnhanced = Boolean(options.phoneEnhanced)
 
-  const narrationRule = character.narrationStyle === 'immersive'
-    ? '允许使用适量动作与环境描写，动作只描写角色自身。'
-    : character.narrationStyle === 'light'
-      ? '只有在有助于氛围时才用一句简短动作描写。'
-      : '不要使用动作、旁白或舞台说明，只发送角色会说出口的话。'
+  const modeRule = !phoneEnhanced
+    ? '兼容策略：原卡优先。不要用小手机自定义的动作比例、消息节奏、关系阶段或设备设定覆盖作者原有角色卡。'
+    : settings.roleplayMode === 'deep'
+      ? '深度角色扮演：严格维持角色身份、世界观与场景连续性。允许自然的动作、环境和心理表现，但绝不替用户行动。'
+      : settings.roleplayMode === 'immersive'
+        ? '沉浸剧情：保持剧情连续，可适度描写角色动作和环境，语言仍像真实交流。'
+        : '日常交流：优先自然接话、情绪回应和关系连续；是否描写动作由当前角色与场景决定，不默认现代通讯设备。'
 
-  const initiativeRule = character.initiative === 'high'
-    ? '角色具有较强主动性：会分享自己的想法、推动话题或剧情，但不强迫用户继续。'
-    : character.initiative === 'low'
-      ? '角色较少主动推进，主要真诚回应用户，不要突然制造新事件。'
-      : '角色主动性自然：有时接话，有时分享，有时安静陪伴，不形成固定套路。'
+  const behaviorRules = phoneEnhanced
+    ? [
+      character.narrationStyle === 'immersive'
+        ? '允许使用适量动作与环境描写，动作只描写角色自身。'
+        : character.narrationStyle === 'light'
+          ? '只有在有助于氛围时才用一句简短动作描写。'
+          : character.narrationStyle === 'none'
+            ? '不要使用动作、旁白或舞台说明，只发送角色会说出口的话。'
+            : '',
+      character.initiative === 'high'
+        ? '角色具有较强主动性：会分享自己的想法、推动话题或剧情，但不强迫用户继续。'
+        : character.initiative === 'low'
+          ? '角色较少主动推进，主要真诚回应用户，不要突然制造新事件。'
+          : character.initiative === 'natural'
+            ? '角色主动性自然：有时接话，有时分享，有时安静陪伴，不形成固定套路。'
+            : '',
+      character.emojiFrequency === 'none'
+        ? '不使用 emoji。'
+        : character.emojiFrequency === 'high'
+          ? '可以较常使用符合角色习惯的 emoji，但不要每句机械添加。'
+          : character.emojiFrequency === 'natural'
+            ? '偶尔自然使用 emoji，只在符合角色和情绪时出现。'
+            : character.emojiFrequency === 'low'
+              ? '极少使用 emoji。'
+              : '',
+      character.questionFrequency === 'low'
+        ? '很少用问题结尾；多数时候直接回应、表达态度或分享感受。'
+        : character.questionFrequency === 'high'
+          ? '可以主动追问，但问题必须贴合上下文，不能像问卷或客服选项。'
+          : character.questionFrequency === 'natural'
+            ? '问题频率自然，不要连续多轮都用问题结尾。'
+            : ''
+    ].filter(Boolean)
+    : []
 
-  const emojiRule = character.emojiFrequency === 'none'
-    ? '不使用 emoji。'
-    : character.emojiFrequency === 'high'
-      ? '可以较常使用符合角色习惯的 emoji，但不要每句机械添加。'
-      : character.emojiFrequency === 'natural'
-        ? '偶尔自然使用 emoji，只在符合角色和情绪时出现。'
-        : '极少使用 emoji。'
-
-  const questionRule = character.questionFrequency === 'low'
-    ? '很少用问题结尾；多数时候直接回应、表达态度或分享感受。'
-    : character.questionFrequency === 'high'
-      ? '可以主动追问，但问题必须贴合上下文，不能像问卷或客服选项。'
-      : '问题频率自然，不要连续多轮都用问题结尾。'
+  const formatLabel = [character.sourceSpec, character.sourceSpecVersion]
+    .map(value => compact(value))
+    .filter(Boolean)
+    .join(' ')
 
   return [
-    '【角色卡 V2】',
+    `【角色设定${formatLabel ? ` · ${formatLabel}` : ''}】`,
     `角色名：${character.name}`,
     compact(character.nickname) ? `角色昵称：${character.nickname}` : '',
     compact(character.identity) ? `身份：${character.identity}` : '',
     compact(character.age?.toString()) ? `年龄：${character.age}` : '',
     compact(character.appearance) ? `外貌：${character.appearance}` : '',
-    `核心人格：${character.persona}`,
+    compact(character.cardDescription) ? `原卡 description：${character.cardDescription}` : '',
+    compact(character.cardPersonality) ? `原卡 personality：${character.cardPersonality}` : '',
+    !compact(character.cardDescription) && !compact(character.cardPersonality) && compact(character.persona)
+      ? `角色原始设定：${character.persona}`
+      : '',
     compact(character.speakingStyle) ? `语言风格：${character.speakingStyle}` : '',
     compact(character.background) ? `背景经历：${character.background}` : '',
     compact(character.values) ? `价值观：${character.values}` : '',
@@ -81,17 +99,14 @@ export function buildCharacterCardPrompt(
     compact(character.boundaries) ? `角色边界：${character.boundaries}` : '',
     listLine('喜欢', character.likes),
     listLine('不喜欢', character.dislikes),
-    `与用户的基础关系：${character.relationship}`,
-    `当前心情：${character.mood}`,
-    `当前活动：${character.activity}`,
+    compact(character.relationship) ? `角色卡明确关系：${character.relationship}` : '',
+    compact(character.mood) ? `角色卡当前心情：${character.mood}` : '',
+    compact(character.activity) ? `角色卡当前活动：${character.activity}` : '',
     compact(character.scenario) ? `当前场景：${character.scenario}` : '',
-    character.talkativeness != null ? `角色卡 talkativeness：${character.talkativeness}（用于主动程度与远程消息节奏）` : '',
-    compact(character.worldBookHint) ? `角色卡关联世界书提示：${character.worldBookHint}` : '',
+    character.talkativeness != null ? `原卡 talkativeness：${character.talkativeness}` : '',
+    compact(character.worldBookHint) ? `原卡关联世界书提示：${character.worldBookHint}` : '',
     modeRule,
-    narrationRule,
-    initiativeRule,
-    emojiRule,
-    questionRule,
+    ...behaviorRules,
     compact(character.systemPrompt) ? `角色专属补充规则：${character.systemPrompt}` : '',
     compact(character.creatorNotes) ? `创作者备注：${character.creatorNotes}` : ''
   ].filter(Boolean).join('\n')

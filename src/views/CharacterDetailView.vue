@@ -19,6 +19,7 @@ import {
   getOrCreateSingleConversation
 } from '../services/characterService'
 import { listResourceBindings } from '../services/resourceBindingService'
+import { renderRoleplayText } from '../services/textMacroService'
 
 import type {
   Character
@@ -36,6 +37,7 @@ const isDeleting = ref(false)
 const errorMessage = ref('')
 
 const resourceStats = ref({ lorebookEntries: 0, regexScripts: 0, presets: 0, hasDepthPrompt: false })
+const boundPersonaName = ref('')
 
 const isResourceDrivenCard = computed(() => Boolean(
   character.value &&
@@ -80,7 +82,7 @@ function showValue(
     return '未填写'
   }
 
-  return String(value)
+  return renderRoleplayText(String(value), boundPersonaName.value || '你', character.value?.name) || String(value)
 }
 
 function showList(
@@ -97,6 +99,10 @@ function showList(
 }
 
 function showResourceBackedField(value: string | undefined, field: 'persona' | 'speaking' | 'background') {
+  if (field === 'persona') {
+    const original = character.value?.cardPersonality?.trim() || character.value?.cardDescription?.trim()
+    if (original) return original
+  }
   if (value?.trim()) return value
   if (!isResourceDrivenCard.value) return '未填写'
   if (field === 'persona') return `这是一张资源型 / 多角色社区卡，主要人物设定存放在内嵌世界书中（当前 ${resourceStats.value.lorebookEntries} 条），聊天运行时会自动加载。`
@@ -121,10 +127,12 @@ async function loadCharacter() {
     }
 
     character.value = result
-    const [lorebookEntries, bindings] = await Promise.all([
+    const [lorebookEntries, bindings, boundPersona] = await Promise.all([
       db.lorebookEntries.where('characterId').equals(result.id).count(),
-      listResourceBindings(result.id)
+      listResourceBindings(result.id),
+      db.personas.filter(item => item.boundCharacterId === result.id).first()
     ])
+    boundPersonaName.value = boundPersona?.name || ''
     resourceStats.value = {
       lorebookEntries,
       regexScripts: bindings.filter(item => item.enabled && item.resourceType === 'regex').length,
@@ -283,7 +291,7 @@ onMounted(loadCharacter)
             </p>
 
             <div class="profile-tags">
-              <span>
+              <span v-if="character.relationship?.trim()">
                 {{ character.relationship }}
               </span>
 

@@ -53,6 +53,6 @@ it('keeps surrounding text when a full HTML UI is embedded in the reply', () => 
 })
 
 it('resolves user/char macros inside regex replacement UI', () => {
-  const output = applyRegexScript('<x>状态</x>', { ...script, findRegex: '/<x>(.*?)<\\/x>/s', replaceString: '<div>{{user}} · {{char}} · $1</div>' }, { user: '洛梨', char: '墨清尘' })
-  expect(output).toBe('<div>洛梨 · 墨清尘 · 状态</div>')
+  const output = applyRegexScript('<x>状态</x>', { ...script, findRegex: '/<x>(.*?)<\\/x>/s', replaceString: '<div>{{user}} · {{char}} · $1</div>' }, { user: '用户甲', char: '角色甲' })
+  expect(output).toBe('<div>用户甲 · 角色甲 · 状态</div>')
 })

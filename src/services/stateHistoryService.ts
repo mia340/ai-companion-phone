@@ -110,7 +110,7 @@ export function buildConversationStatePrompt(state?: ConversationState) {
   if (!state) return ''
   const lines = [
     state.location ? `当前地点：${state.location}` : '',
-    state.presence ? `当前相处状态：${state.presence === 'together' ? '与用户在身边 / 同一现场' : '与用户不在同一现场 / 手机远程联系'}` : '',
+    state.presence ? `当前相处状态：${state.presence === 'together' ? '与用户在身边 / 同一现场' : '与用户不在同一现场 / 远程联系'}` : '',
     state.timePeriod ? `当前时间段：${state.timePeriod}` : '',
     state.innerActivity ? `当前活动：${state.innerActivity}` : '',
     state.innerMood ? `当前心情：${state.innerMood}` : '',

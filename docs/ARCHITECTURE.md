@@ -1,6 +1,6 @@
 # AI Companion Phone 架构文档
 
-> 当前架构版本：**V0.4.1**。下方早期章节中的“当前版本”是对应开发阶段的历史记录，最新结构以文末 V0.4.1 章节为准。
+> 当前架构版本：**V0.4.4.1**。下方早期章节保留历史记录，最新运行原则以文末 V0.4.4.1 章节为准。
 
 # AI Companion Phone 架构说明
 
@@ -116,8 +116,8 @@ AI Companion Phone
 │   ├── Prompt Builder
 │   ├── Context Builder
 │   ├── Response Parser
-│   ├── Mock Provider
-│   └── Error Handling
+│   ├── Real Provider Adapter（DeepSeek / OpenAI-compatible）
+│   └── Token / Network Error Handling
 │
 ├── Data System
 │   ├── IndexedDB
@@ -1826,3 +1826,34 @@ V0.4.3.1 的世界中心 UI 先开放 `global / character`，后端接口已经�
 ### 安全边界
 
 Theme、未知 JSON 与未知文本可以归档，但不会直接执行。第三方 Rich UI 仍只允许安全 HTML/CSS 子集，禁止任意 JavaScript 获得 App 数据权限。
+
+---
+
+## V0.4.4.1 · AI 内容权威层
+
+```text
+用户输入 / 角色卡资源 / 记忆 / 世界状态
+                  ↓
+            Prompt Composer
+                  ↓
+             真实 AI Provider
+                  ↓
+       完整性检查（Token / finish）
+          ↓完整             ↓不足
+ 原卡协议解析 / Safe UI      硬停止 + 错误提示
+          ↓                 不保存半截回复
+       保存真实 AI 输出
+```
+
+边界：
+
+- **AI / 原角色卡**负责角色台词、动作、心理、情绪、关系感受和剧情内容。
+- **小手机 Runtime**只负责上下文编排、格式、宏、资源注入、协议解析、UI、安全过滤、状态持久化与错误处理；不提供角色化文案。
+- Runtime 不得创建“看手机 / 想你 / 平静 / 查岗 / 本地角色回复”等角色化兜底。
+- UI 修复如需改写内容，必须再次调用真实 AI；Token 不足时不得用程序拼接补齐。
+- 旧本地关系积分不再作为角色事实源；V13 删除其 IndexedDB stores。
+
+- `compatibilityMode=auto` 对社区卡和小手机原生角色统一解析为 `card-first`：默认保存/展示 AI 原始语义输出，不做小手机消息重塑；`phone-enhanced` 只允许用户显式选择。
+- 角色回复完成后不再运行本地“事实纠偏/语义改写器”。除原卡明确 UI / Regex 结构校验外，应用不根据固定语义规则重写 AI 台词。
+- HTTP 402、上下文窗口不足、额度不足、`finish_reason=length/max_tokens` 与无 finish reason 但输出打满上限都进入 Token 硬停止路径。
+- 新会话主动消息默认关闭；刷新/崩溃/断线遗留的 pending assistant 不作为有效角色内容恢复，统一删除。

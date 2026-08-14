@@ -5,8 +5,8 @@ export const DEFAULT_WORLD_ID = 'world-default'
 /**
  * 初始化一个干净的本地世界。
  *
- * 从 V0.4.3.7.5 起不再写入林夏 / 顾言 / 苏晚等演示角色，
- * 也不再伪造未读消息。新用户从空通讯录开始，自行创建或导入角色。
+ * 不写入任何固定演示角色，也不伪造未读消息。
+ * 新用户从空通讯录开始，自行创建或导入角色。
  */
 export async function seedDatabase() {
   if (await db.worlds.count()) return
@@ -34,9 +34,9 @@ export async function seedDatabase() {
           order: 1
         },
         {
-          id: 'group-friends',
+          id: 'group-unassigned',
           worldId: DEFAULT_WORLD_ID,
-          name: '朋友',
+          name: '未分组',
           order: 2
         }
       ])

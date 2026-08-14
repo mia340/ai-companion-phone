@@ -45,7 +45,7 @@ const form = reactive({
   age: '',
   identity: '',
 
-  relationship: '朋友',
+  relationship: '',
 
   persona: '',
   speakingStyle: '',
@@ -248,7 +248,7 @@ async function loadCharacter() {
       character.identity ?? ''
 
     form.relationship =
-      character.relationship || '朋友'
+      character.relationship || ''
 
     form.persona =
       character.persona ?? ''
@@ -358,12 +358,10 @@ async function saveCharacter() {
           undefined,
 
         relationship:
-          form.relationship.trim() ||
-          '朋友',
+          form.relationship.trim(),
 
         persona:
-          form.persona.trim() ||
-          '等待你逐渐了解的原创角色。',
+          form.persona.trim(),
 
         speakingStyle:
           form.speakingStyle.trim() ||
@@ -382,12 +380,10 @@ async function saveCharacter() {
           ),
 
         mood:
-          form.mood.trim() ||
-          '平静',
+          form.mood.trim(),
 
         activity:
-          form.activity.trim() ||
-          '正在等待你的消息',
+          form.activity.trim(),
 
         replySpeed
       }
@@ -554,17 +550,21 @@ onMounted(loadCharacter)
           <label>
             与我的关系
 
-            <select
+            <input
               v-model="form.relationship"
-            >
-              <option>朋友</option>
-              <option>挚友</option>
-              <option>恋人</option>
-              <option>家人</option>
-              <option>同学</option>
-              <option>同事</option>
-              <option>陌生人</option>
-            </select>
+              list="relationship-suggestions"
+              maxlength="40"
+              placeholder="按原卡填写；可以是师徒、宿敌、夫妻、陌生人等任意关系"
+            />
+            <datalist id="relationship-suggestions">
+              <option value="朋友" />
+              <option value="挚友" />
+              <option value="恋人" />
+              <option value="家人" />
+              <option value="同学" />
+              <option value="同事" />
+              <option value="陌生人" />
+            </datalist>
           </label>
         </section>
 

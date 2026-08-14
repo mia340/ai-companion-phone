@@ -31,19 +31,18 @@ import type {
 
 const form = ref<ModelSettings>({
   id: 'default',
-  provider: 'mock',
-  baseUrl: '',
+  provider: 'deepseek',
+  baseUrl: 'https://api.deepseek.com',
   apiKey: '',
-  model: 'mock',
+  model: 'deepseek-v4-flash',
   temperature: 0.8,
   maxTokens: 2048,
-  fallbackToMock: true,
-  availableModels: ['mock'],
+  availableModels: ['deepseek-v4-flash', 'deepseek-v4-pro'],
   visionMode: 'auto',
   updatedAt: new Date().toISOString()
 })
 
-const modelOptions = ref<string[]>(['mock'])
+const modelOptions = ref<string[]>(['deepseek-v4-flash', 'deepseek-v4-pro'])
 const manualModelMode = ref(false)
 
 const isLoading = ref(true)
@@ -62,11 +61,6 @@ const providerOptions: Array<{
   description: string
 }> = [
   {
-    value: 'mock',
-    label: '本地模拟模型',
-    description: '不联网，不需要 API Key，用于演示和离线测试。'
-  },
-  {
     value: 'deepseek',
     label: 'DeepSeek',
     description: '使用 DeepSeek 官方 OpenAI 兼容接口。'
@@ -78,16 +72,10 @@ const providerOptions: Array<{
   }
 ]
 
-const isRemoteProvider = computed(() => {
-  return form.value.provider !== 'mock'
-})
+const isRemoteProvider = computed(() => true)
 
 const visionStatus = computed(() => {
   const capability = getVisionCapability(form.value)
-
-  if (form.value.provider === 'mock') {
-    return '本地模拟不会读取图片内容'
-  }
 
   if (capability === 'supported') {
     return form.value.visionMode === 'enabled'
@@ -98,7 +86,7 @@ const visionStatus = computed(() => {
   if (capability === 'unsupported') {
     return form.value.visionMode === 'disabled'
       ? '已关闭图片理解'
-      : '当前模型不支持图片理解，将自动使用自然兜底'
+      : '当前模型不支持图片理解；发送图片时将停止图片解析，不会由本地内容代替'
   }
 
   return '尚未检测，首次发送图片时会自动尝试'
@@ -161,7 +149,7 @@ watch(
       ...defaults.models
     ]
     form.value.modelsUpdatedAt = undefined
-    form.value.visionSupported = provider === 'mock' ? false : undefined
+    form.value.visionSupported = undefined
     form.value.visionTestedSignature = undefined
     form.value.visionTestedAt = undefined
 
@@ -211,10 +199,6 @@ function validateEndpoint() {
 }
 
 function validate() {
-  if (form.value.provider === 'mock') {
-    return
-  }
-
   validateEndpoint()
 
   if (!form.value.model.trim()) {
@@ -314,10 +298,7 @@ async function save() {
       ...(form.value.availableModels ?? [])
     ]
 
-    successMessage.value =
-      form.value.provider === 'mock'
-        ? '本地模拟模型设置已保存。'
-        : `设置已保存，当前模型：${form.value.model}`
+    successMessage.value = `设置已保存，当前模型：${form.value.model}`
   } catch (error) {
     errorMessage.value =
       error instanceof Error
@@ -347,10 +328,7 @@ async function testConnection() {
       Math.round(performance.now() - startedAt)
     )
 
-    successMessage.value =
-      form.value.provider === 'mock'
-        ? '本地模拟模型可正常使用。'
-        : `连接成功，当前模型：${form.value.model}，耗时约 ${elapsed} ms。`
+    successMessage.value = `连接成功，当前模型：${form.value.model}，耗时约 ${elapsed} ms。`
   } catch (error) {
     errorMessage.value =
       error instanceof Error
@@ -368,11 +346,6 @@ async function testVision() {
 
   try {
     validate()
-
-    if (form.value.provider === 'mock') {
-      errorMessage.value = '本地模拟模型只生成演示回复，不能读取图片内容。'
-      return
-    }
 
     await saveModelSettings(form.value)
     form.value = await getModelSettings()
@@ -393,7 +366,7 @@ async function testVision() {
   } catch (error) {
     if (isVisionUnsupportedError(error)) {
       form.value = await saveVisionCapability(form.value, false)
-      errorMessage.value = '当前模型或接口不支持图片理解，聊天时会自动使用自然兜底。'
+      errorMessage.value = '当前模型或接口不支持图片理解。之后发送图片时不会生成任何本地角色回复。'
     } else {
       errorMessage.value = error instanceof Error
         ? `图片理解测试失败：${error.message}`
@@ -558,7 +531,7 @@ async function testVision() {
         </label>
 
         <label>
-          最大输出长度
+          最大输出 Token
           <input
             v-model.number="form.maxTokens"
             type="number"
@@ -566,22 +539,9 @@ async function testVision() {
             max="8192"
             step="64"
           />
-          <small>建议 2048 起。旧版 576 / 600 的默认值会自动提升到 2048，避免角色卡协议和动作标签在输出末尾被截断。</small>
+          <small>建议 2048 起。若模型返回“达到最大输出 Token”，本轮会停止并删除不完整回复，不会用本地文案续写。</small>
         </label>
 
-        <label class="switch-row">
-          <span>
-            <b>失败时降级到本地模拟</b>
-            <small>
-              网络或接口失败时仍返回本地角色化回复。
-            </small>
-          </span>
-
-          <input
-            v-model="form.fallbackToMock"
-            type="checkbox"
-          />
-        </label>
       </section>
 
       <section class="setting-card field-card vision-card">
@@ -595,7 +555,7 @@ async function testVision() {
             <option value="disabled">关闭图片理解</option>
           </select>
           <small>
-            自动模式会在发送图片时尝试读取；若接口不支持，会改用不猜测图片细节的自然回应。
+            自动模式会在发送图片时尝试读取；若接口不支持，只会由同一 AI 根据文字部分继续，不会生成本地角色回复。
           </small>
         </label>
 

@@ -1,4 +1,4 @@
-import type { Character, CharacterExampleDialogue, LorebookEntry, RegexScript } from '../types/domain'
+import type { Character, CharacterExampleDialogue, LorebookEntry, LorebookResource, RegexScript } from '../types/domain'
 import { parseLorebookJson, parseRegexJson } from './resourceImportService'
 import type { ImportedPersonaPreview } from './personaImportService'
 import { parseExampleDialogues } from './characterCardService'
@@ -28,22 +28,25 @@ interface CardPayload {
 export type ImportedCharacterLorebookEntry = Omit<LorebookEntry, 'id' | 'worldId' | 'lorebookId' | 'createdAt' | 'updatedAt'>
 
 export interface ImportedCharacterCard {
-  format: 'sillytavern-v2' | 'sillytavern-v3' | 'legacy-json'
+  format: 'sillytavern-v2' | 'sillytavern-v3' | 'legacy-json' | 'community-json' | 'png-character-card'
   patch: Partial<Character>
   lorebookEntries: ImportedCharacterLorebookEntry[]
   lorebookName?: string
+  lorebookResource?: Partial<Omit<LorebookResource, 'id' | 'worldId' | 'createdAt' | 'updatedAt'>>
   regexScripts: Array<Omit<RegexScript, 'id' | 'worldId' | 'createdAt' | 'updatedAt'>>
   embeddedUser?: ImportedPersonaPreview & { rawTemplate: string }
   notes: string[]
+  rawSourceJson?: string
 }
 
 const asText = (value: unknown) =>
   typeof value === 'string' ? value.trim() : ''
 
-const asStringArray = (value: unknown) =>
-  Array.isArray(value)
-    ? Array.from(new Set(value.map(asText).filter(Boolean)))
-    : []
+const asStringArray = (value: unknown) => {
+  if (Array.isArray(value)) return Array.from(new Set(value.map(asText).filter(Boolean)))
+  const single = asText(value)
+  return single ? [single] : []
+}
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -79,29 +82,14 @@ function extractDepthPrompt(...extensions: Record<string, unknown>[]) {
   return undefined
 }
 
-function inferInitiative(talkativeness?: number): Character['initiative'] | undefined {
-  if (talkativeness == null) return undefined
-  if (talkativeness <= 0.34) return 'low'
-  if (talkativeness >= 0.66) return 'high'
-  return 'natural'
-}
-
 function inferRelationshipFromCard(firstMessage: string, embeddedUser?: ImportedPersonaPreview) {
   const normalized = firstMessage.replace(/<br\s*\/?\s*>/gi, '\n')
-  const explicit = normalized.match(/(?:^|\n)\s*[▪•·-]?\s*关系\s*[:：]\s*([^\n<]{1,24})/i)?.[1]?.trim()
-  if (explicit && !/^(?:无|未知|待定|未设定)$/i.test(explicit)) return explicit.replace(/^人(?=陌生人$)/, '')
-
-  const identity = [embeddedUser?.patch.identity, embeddedUser?.patch.relationshipNote, embeddedUser?.patch.description]
-    .filter(Boolean)
-    .join(' ')
-  if (/徒弟|弟子/.test(identity)) return '师徒'
-  if (/妻子|丈夫|老公|老婆|配偶|已婚/.test(identity)) return '夫妻'
-  if (/恋人|情侣|男友|女友/.test(identity)) return '恋人'
-  if (/同事/.test(identity)) return '同事'
-  if (/朋友|好友/.test(identity)) return '朋友'
-  return undefined
+  const xml = normalized.match(/<(?:关系|关系状态|relationship|relation)>\s*([\s\S]{1,50}?)\s*<\/(?:关系|关系状态|relationship|relation)>/i)?.[1]?.trim()
+  const plain = normalized.match(/(?:^|\n)\s*[▪•·\-]?\s*(?:关系|关系状态|relationship|relation)\s*[:：=]\s*([^\n<]{1,50})/i)?.[1]?.trim()
+  const explicit = xml || plain || embeddedUser?.patch.relationshipNote?.trim()
+  if (!explicit || /^(?:无|未知|待定|未设定|none|unknown|n\/a)$/i.test(explicit)) return undefined
+  return explicit.replace(/^人(?=陌生人$)/, '')
 }
-
 
 const extractDialogue = (value: unknown): CharacterExampleDialogue[] => {
   const normalized = asText(value)
@@ -389,33 +377,90 @@ function buildEmbeddedUserPreviewFromExtensions(extensions: Record<string, unkno
   return undefined
 }
 
+
+function collectEmbeddedRegexRows(...records: Record<string, unknown>[]) {
+  const rows: unknown[] = []
+  const seenObjects = new Set<object>()
+  const visit = (value: unknown, depth = 0) => {
+    if (!value || depth > 3) return
+    if (Array.isArray(value)) {
+      const looksRegexArray = value.some(item => {
+        const row = asRecord(item)
+        return Boolean(row.findRegex ?? row.find_regex ?? row.regex ?? row.replaceString ?? row.replace_string)
+      })
+      if (looksRegexArray) rows.push(...value)
+      else value.forEach(item => visit(item, depth + 1))
+      return
+    }
+    if (typeof value !== 'object') return
+    if (seenObjects.has(value as object)) return
+    seenObjects.add(value as object)
+    const record = value as Record<string, unknown>
+    for (const [key, child] of Object.entries(record)) {
+      if (/^(?:regex_scripts|regexScripts|regexes|regex)$/i.test(key)) visit(child, depth + 1)
+      else if (/^(?:tavern_helper|tavernHelper|scripts|plugins|extensions)$/i.test(key)) visit(child, depth + 1)
+    }
+  }
+  records.forEach(record => visit(record))
+  return rows
+}
+
 function inferFormat(root: Record<string, unknown>) {
-  if (root.spec === 'chara_card_v3') return 'sillytavern-v3' as const
-  if (root.spec === 'chara_card_v2') return 'sillytavern-v2' as const
-  return 'legacy-json' as const
+  const spec = asText(root.spec).toLowerCase()
+  const specVersion = asText(root.spec_version ?? root.specVersion).toLowerCase()
+  if (spec.includes('chara_card_v3')) return 'sillytavern-v3' as const
+  if (spec.includes('chara_card_v2')) return 'sillytavern-v2' as const
+
+  const data = asRecord(root.data)
+  const characterSignals = [
+    root.name, root.description, root.personality, root.first_mes, root.firstMessage, root.character_name, root.characterName,
+    data.name, data.description, data.personality, data.first_mes, data.firstMessage, data.character_name, data.characterName
+  ].some(value => Boolean(asText(value)))
+
+  // 只有同时存在角色卡结构时才用 spec_version 推断 V2/V3；
+  // 普通社区 JSON 的 `version: 2/3` 可能只是它自己的版本号，不能误判为 Tavern 角色卡版本。
+  if (characterSignals && /^3(?:\.|$)/.test(specVersion)) return 'sillytavern-v3' as const
+  if (characterSignals && /^2(?:\.|$)/.test(specVersion)) return 'sillytavern-v2' as const
+  return characterSignals ? 'community-json' as const : 'legacy-json' as const
+}
+
+function firstDefined(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key]
+    if (value !== undefined && value !== null) return value
+  }
+  return undefined
 }
 
 function extractData(root: Record<string, unknown>): CardPayload {
-  const data = root.data
-  return data && typeof data === 'object' && !Array.isArray(data)
-    ? data as CardPayload
-    : root as CardPayload
-}
-
-function extractCharacterBook(value: unknown): ImportedCharacterLorebookEntry[] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
-  try {
-    return parseLorebookJson(JSON.stringify(value), '角色卡内嵌世界书.json').entries
-  } catch {
-    return []
+  const nested = asRecord(root.data)
+  const source = { ...root, ...nested }
+  return {
+    name: firstDefined(source, ['name', 'character_name', 'characterName', 'char_name', 'display_name']),
+    avatar: firstDefined(source, ['avatar', 'avatar_url', 'avatarUrl', 'image', 'portrait']),
+    description: firstDefined(source, ['description', 'desc', 'character_description', 'characterDescription']),
+    personality: firstDefined(source, ['personality', 'persona', 'character_persona', 'characterPersona']),
+    scenario: firstDefined(source, ['scenario', 'setting', 'context', 'world_scenario']),
+    first_mes: firstDefined(source, ['first_mes', 'first_message', 'firstMessage', 'greeting', 'initial_message']),
+    mes_example: firstDefined(source, ['mes_example', 'example_dialogue', 'exampleDialogue', 'example_dialogues', 'examples']),
+    alternate_greetings: firstDefined(source, ['alternate_greetings', 'alternateGreetings', 'greetings', 'swipes']),
+    creator_notes: firstDefined(source, ['creator_notes', 'creatorNotes', 'notes']),
+    system_prompt: firstDefined(source, ['system_prompt', 'systemPrompt']),
+    post_history_instructions: firstDefined(source, ['post_history_instructions', 'postHistoryInstructions', 'post_history']),
+    tags: firstDefined(source, ['tags', 'labels']),
+    creator: firstDefined(source, ['creator', 'author']),
+    character_version: firstDefined(source, ['character_version', 'characterVersion', 'version']),
+    extensions: firstDefined(source, ['extensions', 'extension']),
+    character_book: firstDefined(source, ['character_book', 'characterBook', 'world_book', 'worldBook', 'lorebook', 'lore_book']),
+    group_only_greetings: firstDefined(source, ['group_only_greetings', 'groupOnlyGreetings'])
   }
 }
 
-function extractCharacterBookName(value: unknown) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+function parseCharacterBook(value: unknown) {
+  if (!value || typeof value !== 'object') return undefined
   try {
-    const name = parseLorebookJson(JSON.stringify(value), '角色卡内嵌世界书.json').lorebook.name
-    return name === '角色卡内嵌世界书' ? undefined : name || undefined
+    const normalized = Array.isArray(value) ? { entries: value } : value
+    return parseLorebookJson(JSON.stringify(normalized), '角色卡内嵌世界书.json')
   } catch {
     return undefined
   }
@@ -456,21 +501,37 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   const talkativeness = asNumber(rootExtensions.talkativeness ?? extensions.talkativeness ?? record.talkativeness)
   const depthPrompt = extractDepthPrompt(rootExtensions, extensions)
   const worldBookHint = asText(rootExtensions.world ?? extensions.world) || undefined
-  const rootMetadata = Object.fromEntries(Object.entries(record).filter(([key]) => !['spec', 'spec_version', 'data', 'extensions'].includes(key)))
-  const rawCardExtensions = JSON.parse(JSON.stringify({ data: extensions, root: rootExtensions, rootMetadata })) as Record<string, unknown>
+  const sourceSpec = asText(record.spec) || undefined
+  const sourceSpecVersion = asText(record.spec_version ?? record.specVersion) || undefined
+  const nestedData = asRecord(record.data)
+  const knownDataKeys = new Set([
+    'name', 'avatar', 'description', 'personality', 'scenario', 'first_mes', 'mes_example', 'alternate_greetings',
+    'creator_notes', 'system_prompt', 'post_history_instructions', 'tags', 'creator', 'character_version', 'extensions',
+    'character_book', 'group_only_greetings'
+  ])
+  const unknownData = Object.fromEntries(Object.entries(nestedData).filter(([key]) => !knownDataKeys.has(key)))
+  const rootMetadata = Object.fromEntries(Object.entries(record).filter(([key]) => !['spec', 'spec_version', 'specVersion', 'data', 'extensions'].includes(key)))
+  const rawCardExtensions = JSON.parse(JSON.stringify({
+    dataExtensions: extensions,
+    rootExtensions,
+    unknownData,
+    rootMetadata,
+    originalAvatar: asText(data.avatar ?? record.avatar) || undefined,
+    sourceSpec,
+    sourceSpecVersion
+  })) as Record<string, unknown>
   const notes: string[] = []
 
   if (!asText(data.name) && !description && !personality) {
     throw new Error('没有找到角色姓名、描述或性格。请确认选择的是角色卡，而不是预设、世界书或正则 JSON。')
   }
 
-  const lorebookEntries = extractCharacterBook(data.character_book)
-  const lorebookName = lorebookEntries.length ? extractCharacterBookName(data.character_book) : undefined
+  const parsedCharacterBook = parseCharacterBook(data.character_book)
+  const lorebookEntries = parsedCharacterBook?.entries || []
+  const lorebookName = parsedCharacterBook?.lorebook.name === '角色卡内嵌世界书' ? undefined : parsedCharacterBook?.lorebook.name || undefined
+  const lorebookResource = parsedCharacterBook?.lorebook
   let regexScripts: Array<Omit<RegexScript, 'id' | 'worldId' | 'createdAt' | 'updatedAt'>> = []
-  const embeddedRegexRows = [
-    ...(Array.isArray(extensions.regex_scripts) ? extensions.regex_scripts : []),
-    ...(Array.isArray(rootExtensions.regex_scripts) ? rootExtensions.regex_scripts : [])
-  ]
+  const embeddedRegexRows = collectEmbeddedRegexRows(extensions, rootExtensions)
   if (embeddedRegexRows.length) {
     try {
       const parsed = parseRegexJson(JSON.stringify({ regex_scripts: embeddedRegexRows }), `${asText(data.name) || '角色'}-内嵌正则.json`).scripts
@@ -514,7 +575,9 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
     name: asText(data.name) || undefined,
     avatar: importableAvatar(data.avatar ?? record.avatar),
     relationship: inferredRelationship,
-    persona: [personality, description].filter(Boolean).join('\n\n') || undefined,
+    persona: personality || description || undefined,
+    cardDescription: description || undefined,
+    cardPersonality: personality || undefined,
     scenario: asText(data.scenario) || undefined,
     firstMessage: asText(data.first_mes) || undefined,
     alternateGreetings: asStringArray(data.alternate_greetings),
@@ -522,7 +585,6 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
     creatorNotes: asText(data.creator_notes) || undefined,
     systemPrompt: asText(data.system_prompt) || undefined,
     postHistoryInstructions: asText(data.post_history_instructions) || undefined,
-    initiative: inferInitiative(talkativeness),
     talkativeness,
     depthPrompt,
     worldBookHint,
@@ -538,7 +600,9 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
       : undefined,
     importFormat: format,
     embeddedUserTemplate: embeddedUser?.rawTemplate,
-    cardVersion: format === 'sillytavern-v3' ? 3 : 2
+    cardVersion: format === 'sillytavern-v3' ? 3 : format === 'sillytavern-v2' ? 2 : sourceSpecVersion || undefined,
+    sourceSpec,
+    sourceSpecVersion
   }
 
   if (format === 'legacy-json') notes.push('已按旧版 JSON 字段导入，部分扩展字段可能无法识别。')
@@ -554,27 +618,153 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   }
   if (regexScripts.length) notes.push(`检测到内嵌正则 ${regexScripts.length} 条，将保存为角色专属正则并自动启用。`)
   if (depthPrompt) notes.push('检测到 depth_prompt，将按角色卡扩展提示参与运行时 Prompt。')
-  if (talkativeness != null) notes.push(`检测到 talkativeness=${talkativeness}，已映射到角色主动程度。`)
+  if (talkativeness != null) notes.push(`检测到 talkativeness=${talkativeness}，已保留原始数值供兼容运行时使用。`)
   if (worldBookHint) notes.push(`检测到角色卡 world 绑定提示“${worldBookHint}”，已保留供资源兼容与后续绑定。`)
   if (asRecord(extensions.tavern_helper).scripts || asRecord(rootExtensions.tavern_helper).scripts) {
     notes.push('检测到 tavern_helper / JavaScript 扩展：已无损归档，但不会执行第三方 JS。')
   }
   if (asText(data.avatar ?? record.avatar) && !patch.avatar) notes.push('角色卡头像是外部相对路径；JSON 未携带图片文件，已保留原路径但不会显示成损坏头像。')
 
-  return { format, patch, lorebookEntries, lorebookName, regexScripts, embeddedUser, notes }
+  return { format, patch, lorebookEntries, lorebookName, lorebookResource, regexScripts, embeddedUser, notes, rawSourceJson: value }
+}
+
+function decodeBase64Utf8(value: string) {
+  try {
+    const binary = atob(value.replace(/\s+/g, ''))
+    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return ''
+  }
+}
+
+async function inflatePngText(bytes: Uint8Array) {
+  if (typeof DecompressionStream === 'undefined') return ''
+  try {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))
+    return await new Response(stream).text()
+  } catch {
+    return ''
+  }
+}
+
+async function extractPngCharacterJson(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10]
+  if (signature.some((value, index) => bytes[index] !== value)) throw new Error('PNG 文件头无效。')
+  const decoder = new TextDecoder()
+  const candidates: Array<{ keyword: string; text: string }> = []
+  let offset = 8
+  while (offset + 12 <= bytes.length) {
+    const length = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0)
+    const type = String.fromCharCode(...bytes.slice(offset + 4, offset + 8))
+    const dataStart = offset + 8
+    const dataEnd = dataStart + length
+    if (dataEnd + 4 > bytes.length) break
+    const data = bytes.slice(dataStart, dataEnd)
+    if (type === 'tEXt') {
+      const zero = data.indexOf(0)
+      if (zero > 0) candidates.push({ keyword: decoder.decode(data.slice(0, zero)), text: decoder.decode(data.slice(zero + 1)) })
+    } else if (type === 'zTXt') {
+      const zero = data.indexOf(0)
+      if (zero > 0 && zero + 2 <= data.length) {
+        const text = await inflatePngText(data.slice(zero + 2))
+        if (text) candidates.push({ keyword: decoder.decode(data.slice(0, zero)), text })
+      }
+    } else if (type === 'iTXt') {
+      let cursor = data.indexOf(0)
+      if (cursor > 0 && cursor + 3 < data.length) {
+        const keyword = decoder.decode(data.slice(0, cursor))
+        const compressed = data[cursor + 1] === 1
+        cursor += 3
+        const languageEnd = data.indexOf(0, cursor)
+        if (languageEnd >= 0) {
+          cursor = languageEnd + 1
+          const translatedEnd = data.indexOf(0, cursor)
+          if (translatedEnd >= 0) {
+            cursor = translatedEnd + 1
+            const payload = data.slice(cursor)
+            const text = compressed ? await inflatePngText(payload) : decoder.decode(payload)
+            if (text) candidates.push({ keyword, text })
+          }
+        }
+      }
+    }
+    offset = dataEnd + 4
+    if (type === 'IEND') break
+  }
+
+  const prioritized = candidates.sort((a, b) => {
+    const score = (item: { keyword: string; text: string }) => /^(?:chara|ccv3|character|card)$/i.test(item.keyword.trim()) ? 2 : /chara|character|card/i.test(item.keyword) ? 1 : 0
+    return score(b) - score(a)
+  })
+  for (const candidate of prioritized) {
+    const direct = candidate.text.trim()
+    const attempts = [direct, decodeBase64Utf8(direct)].filter(Boolean)
+    for (const text of attempts) {
+      try {
+        const parsed = JSON.parse(text)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return text
+      } catch {
+        // 继续尝试其它 metadata chunk。
+      }
+    }
+  }
+  throw new Error('PNG 中没有找到可识别的角色卡 JSON 元数据。')
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+    reader.onerror = () => reject(reader.error || new Error('读取角色卡图片失败。'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function characterNameFromFile(fileName: string): string {
+  return fileName
+    .replace(/\.(?:json|png)$/i, '')
+    .replace(/^Tavo[_\s-]*/i, '')
+    .replace(/[_\s-]*\d{8}T?\d{4,6}(?:\(\d+\))?$/i, '')
+    .trim()
+}
+
+function applyFileNameFallback(parsed: ImportedCharacterCard, fileName: string): ImportedCharacterCard {
+  if (parsed.patch.name?.trim()) return parsed
+  const fallbackName = characterNameFromFile(fileName)
+  return fallbackName ? { ...parsed, patch: { ...parsed.patch, name: fallbackName } } : parsed
 }
 
 export async function parseCharacterCardFile(file: File) {
-  if (!file.name.toLowerCase().endsWith('.json')) {
-    throw new Error('当前支持 SillyTavern / Tavo JSON 角色卡；PNG 角色卡嵌入数据暂未开放。')
+  const lower = file.name.toLowerCase()
+  if (lower.endsWith('.json')) return applyFileNameFallback(parseCharacterCardJson(await file.text()), file.name)
+  if (lower.endsWith('.png')) {
+    const parsed = applyFileNameFallback(parseCharacterCardJson(await extractPngCharacterJson(file)), file.name)
+    const embeddedAvatar = await fileToDataUrl(file)
+    return {
+      ...parsed,
+      format: 'png-character-card' as const,
+      patch: {
+        ...parsed.patch,
+        avatar: embeddedAvatar || parsed.patch.avatar,
+        importFormat: 'png-character-card' as const
+      },
+      notes: [
+        '从 PNG 角色卡 metadata 读取到嵌入 JSON。',
+        embeddedAvatar ? 'PNG 卡面已作为角色头像保存。' : '',
+        ...parsed.notes
+      ].filter(Boolean)
+    }
   }
-  return parseCharacterCardJson(await file.text())
+  throw new Error('请选择 JSON 或带角色卡 metadata 的 PNG 文件。')
 }
 
-export function exportCharacterAsSillyTavernV2(character: Character) {
+export function exportCharacterAsSillyTavernV2(character: Character, resources: { lorebook?: LorebookResource; lorebookEntries?: LorebookEntry[]; regexScripts?: RegexScript[] } = {}) {
   const stored = asRecord(character.rawCardExtensions)
-  const storedDataExtensions = asRecord(stored.data)
-  const storedRootExtensions = asRecord(stored.root)
+  const storedDataExtensions = asRecord(stored.dataExtensions ?? stored.data)
+  const storedRootExtensions = asRecord(stored.rootExtensions ?? stored.root)
+  const unknownData = asRecord(stored.unknownData)
   const extensions: Record<string, unknown> = {
     ...storedDataExtensions,
     source_url: character.sourceUrl || storedDataExtensions.source_url || '',
@@ -591,24 +781,97 @@ export function exportCharacterAsSillyTavernV2(character: Character) {
   }
   if (character.worldBookHint) extensions.world = character.worldBookHint
 
+  if (resources.regexScripts?.length) {
+    extensions.regex_scripts = resources.regexScripts.map(script => ({
+      ...(script.raw || {}),
+      scriptName: script.name,
+      findRegex: script.findRegex,
+      replaceString: script.replaceString,
+      trimStrings: script.trimStrings,
+      placement: script.placement,
+      disabled: !script.enabled,
+      markdownOnly: script.markdownOnly,
+      promptOnly: script.promptOnly,
+      runOnEdit: script.runOnEdit,
+      substituteRegex: script.substituteRegex,
+      minDepth: script.minDepth,
+      maxDepth: script.maxDepth
+    }))
+  }
+
+  const characterBook = resources.lorebookEntries?.length
+    ? {
+      ...(resources.lorebook?.rawExtensions || {}),
+      name: resources.lorebook?.name || `${character.name} · Lorebook`,
+      description: resources.lorebook?.description || '',
+      scan_depth: resources.lorebook?.scanDepth,
+      token_budget: resources.lorebook?.tokenBudget,
+      recursive_scanning: resources.lorebook?.recursiveScanning,
+      entries: resources.lorebookEntries.map(entry => ({
+        ...(entry.rawExtensions || {}),
+        id: entry.sourceEntryId,
+        name: entry.title,
+        keys: entry.keywords,
+        secondary_keys: entry.secondaryKeys || [],
+        content: entry.content,
+        enabled: entry.enabled,
+        constant: entry.constant,
+        case_sensitive: entry.caseSensitive,
+        matchWholeWords: entry.matchWholeWords,
+        use_regex: entry.useRegex,
+        selective: entry.selective,
+        selectiveLogic: entry.selectiveLogic,
+        priority: entry.priority,
+        insertion_order: entry.insertionOrder,
+        position: entry.position,
+        depth: entry.depth,
+        role: entry.role,
+        probability: entry.probability,
+        useProbability: entry.useProbability,
+        sticky: entry.sticky,
+        cooldown: entry.cooldown,
+        delay: entry.delay,
+        group: entry.group,
+        groupOverride: entry.groupOverride,
+        groupWeight: entry.groupWeight,
+        scanDepth: entry.scanDepth,
+        excludeRecursion: entry.excludeRecursion,
+        preventRecursion: entry.preventRecursion,
+        delayUntilRecursion: entry.delayUntilRecursion,
+        useGroupScoring: entry.useGroupScoring,
+        matchPersonaDescription: entry.matchPersonaDescription,
+        matchCharacterDescription: entry.matchCharacterDescription,
+        matchCharacterPersonality: entry.matchCharacterPersonality,
+        matchCharacterDepthPrompt: entry.matchCharacterDepthPrompt,
+        matchScenario: entry.matchScenario,
+        matchCreatorNotes: entry.matchCreatorNotes
+      }))
+    }
+    : undefined
+
+  const embeddedUserBlock = character.embeddedUserTemplate?.trim()
+    ? /\{\{user\}\}/i.test(character.embeddedUserTemplate)
+      ? character.embeddedUserTemplate.trim()
+      : `{{user}}:\n${character.embeddedUserTemplate.split('\n').map(line => `  ${line}`).join('\n')}`
+    : ''
+
   return JSON.stringify({
     spec: 'chara_card_v2',
     spec_version: '2.0',
     data: {
+      ...unknownData,
       name: character.name,
-      avatar: character.avatar || '',
-      description: [
+      avatar: character.avatar || asText(stored.originalAvatar) || '',
+      description: character.cardDescription || [
         character.identity ? `身份：${character.identity}` : '',
         character.appearance ? `外貌：${character.appearance}` : '',
         character.background ? `背景：${character.background}` : '',
         character.values ? `价值观：${character.values}` : '',
         character.habits ? `习惯：${character.habits}` : '',
         character.boundaries ? `边界：${character.boundaries}` : '',
-        character.embeddedUserTemplate
-          ? `{{user}}:\n${character.embeddedUserTemplate.split('\n').map(line => `  ${line}`).join('\n')}`
-          : ''
+        embeddedUserBlock
       ].filter(Boolean).join('\n'),
-      personality: character.persona,
+      personality: character.cardPersonality || character.persona,
       scenario: character.scenario || '',
       first_mes: character.firstMessage || '',
       mes_example: (character.exampleDialogues || [])
@@ -617,11 +880,12 @@ export function exportCharacterAsSillyTavernV2(character: Character) {
       creator_notes: character.creatorNotes || '',
       system_prompt: character.systemPrompt || '',
       post_history_instructions: character.postHistoryInstructions || '',
+      character_book: characterBook,
       alternate_greetings: character.alternateGreetings || [],
       group_only_greetings: character.groupOnlyGreetings || [],
       tags: character.tags || [],
       creator: character.creator || '',
-      character_version: character.resourceVersion || '0.4.3.4',
+      character_version: character.resourceVersion || '',
       extensions
     }
   }, null, 2)

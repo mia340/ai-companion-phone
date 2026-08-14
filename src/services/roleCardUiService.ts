@@ -1,4 +1,4 @@
-import type { Character, ConversationState } from '../types/domain'
+import type { ConversationState } from '../types/domain'
 
 export interface RoleCardUiState {
   date?: string
@@ -9,6 +9,28 @@ export interface RoleCardUiState {
   todos?: string[]
 }
 
+
+function clean(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/?[a-z][^>]*>/gi, '')
+    .replace(/[\t ]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .trim()
+}
+
+function parseTodos(value: unknown): string[] {
+  const source = clean(value)
+  if (!source) return []
+
+  return source
+    .replace(/(?:^|\n)\s*[-*•·]\s*/g, '\n')
+    .split(/\n+|[；;]+|(?=\d+\s*[.、）)])/) 
+    .map(item => item.replace(/^\s*\d+\s*[.、）)]\s*/, '').trim())
+    .filter(Boolean)
+}
+
 export interface PresenceResolution {
   reportedPresence?: 'together' | 'remote'
   resolvedPresence?: 'together' | 'remote'
@@ -16,25 +38,6 @@ export interface PresenceResolution {
   reason: string
   conflict?: boolean
   uiSurroundings?: string
-}
-
-const UI_MARKERS = ['{日期:', '{时间:', '{地点:', '{内心:', '{周围:', '{待办:']
-
-function clean(value?: string) {
-  return value?.replace(/```/g, '').trim() || undefined
-}
-
-function parseTodos(value?: string): string[] | undefined {
-  const text = clean(value)
-  if (!text) return undefined
-  const numbered = text.split(/(?=\d+[\.、])/).map(item => item.replace(/^\d+[\.、]\s*/, '').trim()).filter(Boolean)
-  if (numbered.length > 1) return numbered.slice(0, 5)
-  return text.split(/[；;\n]/).map(item => item.trim()).filter(Boolean).slice(0, 5)
-}
-
-export function characterRequiresRoleCardUi(character: Pick<Character, 'persona'|'systemPrompt'|'postHistoryInstructions'|'creatorNotes'|'firstMessage'>): boolean {
-  const source = [character.persona, character.systemPrompt, character.postHistoryInstructions, character.creatorNotes, character.firstMessage].filter(Boolean).join('\n')
-  return /每次回复.{0,20}(附带|包含).{0,20}UI/i.test(source) || UI_MARKERS.filter(marker => source.includes(marker)).length >= 3
 }
 
 export function parseRoleCardUi(text: string): { content: string; ui?: RoleCardUiState } {
@@ -127,8 +130,8 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
   return found >= 2 ? ui : undefined
 }
 
-const DIRECT_CONTACT_PATTERN = /(?:把你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|将你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|抱住你|抱着你|搂住你|搂着你|揽住你|揽着你|牵住你|牵着你|握住你|握着你的手|扣住你|环住你|圈住你|吻你|亲你|亲上你|吻上你|摸了摸你|抚过你|揉了揉你|拍了拍你|拍了下你|轻拍你|贴着你|贴近你|靠在你|靠着你|埋进你|埋在你|蹭着你|蹭了蹭你|鼻尖蹭着你|额头抵着你|抵住你|压住你|扶住你|拉住你|拽住你|替你掖|给你掖|躺在你身边|睡在你身边|和你同床|与你同床|彼此的呼吸)/
-const CO_PRESENCE_PATTERN = /(?:走到你身边|坐到你身边|坐在你旁边|站在你面前|来到你面前|俯身看你|低头看你|看了你一眼|从你身边|递到你手里|放到你手边)/
+const DIRECT_CONTACT_PATTERN = /(?:把你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|将你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|抱住你|抱着你|搂住你|搂着你|揽住你|揽着你|牵住你|牵着你|握住你|握着你的手|扣住你|环住你|圈住你|吻你|亲你|亲上你|吻上你|摸了摸你|抚过你|揉了揉你|拍了拍你|拍了下你|轻拍你|贴着你|贴近你|靠在你|靠着你|埋进你|埋在你|蹭着你|蹭了蹭你|鼻尖蹭着你|额头抵着你|抵住你|压住你|扶住你|拉住你|拽住你|替你掖|给你掖|躺在你身边|睡在你身边|和你同床|与你同床|彼此的呼吸|(?:捏|掐|托|抬|碰|触|擦|抚|按|扣)(?:着|住|了|过)?你(?:的)?(?:下巴|脸|脸颊|手|手腕|肩|腰|后背|额头|发顶|头发|膝|脚踝)|指腹(?:擦过|蹭过|抵着|按着)你(?:的)?(?:下巴|脸|脸颊|手|手腕)|(?:指尖|手指|手掌|掌心)?(?:轻轻)?(?:压在|按在|搭在|落在)你(?:的)?(?:手腕|腕脉|肩|额头|脸|脸颊|手背)|指尖在你(?:掌心|手心|手背|腕间|手腕)(?:不经意)?(?:一触|轻触|碰触))/
+const CO_PRESENCE_PATTERN = /(?:走到你身边|坐到你身边|坐在你旁边|坐在你床边|坐在你榻边|站在你面前|来到你面前|俯身看你|低头看你|看向你|望向你|目光落在你(?:的)?(?:脸|脸上|身上|眼睛|双眼|手|指尖|肩|身前)|目光落在你.{0,16}(?:脸|脸上|身上|眼睛|双眼|手|指尖|肩|身前)|看了你一眼|从你身边|递到你手里|放到你手边|与你同处(?:一室|一屋|房间|院中|巷中|车内)|和你同处(?:一室|一屋|房间|院中|巷中|车内))/
 
 export function resolvePresenceFromRoleCardScene(
   text: string,
@@ -137,6 +140,7 @@ export function resolvePresenceFromRoleCardScene(
 ): PresenceResolution {
   const surroundings = ui?.surroundings?.trim() || ''
   const content = text
+    .replace(/\{\{\s*user\s*\}\}/gi, '你')
     .replace(/<\s*\/?\s*scene[_-]?action\b[^>]*>/gi, '')
     .replace(/\s+/g, '')
   const hasDirectContact = DIRECT_CONTACT_PATTERN.test(content)

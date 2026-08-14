@@ -21,8 +21,7 @@ export function createDefaultChatSettings(
     showTyping: true,
     naturalDelay: true,
     innerThoughtVisibility: 'thoughts',
-    autoFallback: true,
-    proactiveEnabled: true,
+    proactiveEnabled: false,
     proactiveIntervalHours: 12,
     proactiveFrequency: 'natural',
     proactiveQuietHoursEnabled: true,
@@ -41,7 +40,7 @@ export function createDefaultChatSettings(
     promptDebugEnabled: true,
     presenceMode: 'auto',
     actionVisibility: 'always',
-    actionTextLayout: 'auto',
+    compatibilityMode: 'auto',
     updatedAt: new Date().toISOString()
   }
 }
@@ -65,7 +64,7 @@ export async function getChatSettings(
       promptDebugEnabled: row.promptDebugEnabled ?? true,
       presenceMode: row.presenceMode ?? 'auto',
       actionVisibility: row.actionVisibility ?? 'always',
-      actionTextLayout: row.actionTextLayout ?? 'auto',
+      compatibilityMode: row.compatibilityMode ?? 'auto',
       proactiveFrequency: row.proactiveFrequency ?? 'natural',
       proactiveQuietHoursEnabled: row.proactiveQuietHoursEnabled ?? true,
       proactiveQuietStart: row.proactiveQuietStart ?? '23:00',
@@ -81,7 +80,7 @@ export async function saveChatSettings(
   await db.chatSettings.put(toPlainStorageValue({
     ...value,
     id: value.conversationId,
-    proactiveEnabled: value.proactiveEnabled ?? true,
+    proactiveEnabled: value.proactiveEnabled ?? false,
     proactiveIntervalHours: Math.min(168, Math.max(1, Math.round(value.proactiveIntervalHours ?? 12))),
     proactiveFrequency: value.proactiveFrequency ?? 'natural',
     proactiveQuietHoursEnabled: value.proactiveQuietHoursEnabled ?? true,
@@ -90,7 +89,7 @@ export async function saveChatSettings(
     proactiveAllowedSources: value.proactiveAllowedSources?.length ? value.proactiveAllowedSources : ['continue-topic', 'promise-reminder', 'daily-share', 'care', 'story-event'],
     presenceMode: value.presenceMode ?? 'auto',
     actionVisibility: value.actionVisibility ?? 'always',
-    actionTextLayout: value.actionTextLayout ?? 'auto',
+    compatibilityMode: value.compatibilityMode ?? 'auto',
     voiceRate: Math.min(1.4, Math.max(0.7, Number(value.voiceRate ?? 1))),
     recentMessageLimit: Math.min(
       60,
@@ -107,12 +106,12 @@ export function createDefaultConversationState(
     id: conversationId,
     summary: '',
     summaryMessageCount: 0,
-    innerMood: '平静',
-    innerActivity: '正在等你的消息',
-    innerThought: '好像还有很多话想慢慢告诉你。',
-    presence: 'remote',
+    innerMood: '',
+    innerActivity: '',
+    innerThought: '',
+    presence: undefined,
     timePeriod: '',
-    energy: '平稳',
+    energy: '',
     unresolvedTopics: [],
     pendingEvents: [],
     shortTermGoals: [],
@@ -130,7 +129,7 @@ export async function getConversationState(
     ? {
       ...defaults,
       ...row,
-      presence: row.presence ?? 'remote',
+      presence: row.presence,
       unresolvedTopics: row.unresolvedTopics ?? [],
       pendingEvents: row.pendingEvents ?? [],
       shortTermGoals: row.shortTermGoals ?? []

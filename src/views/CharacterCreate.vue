@@ -43,7 +43,7 @@ const age = ref('')
 const identity = ref('')
 
 // 人物设定
-const relationship = ref('朋友')
+const relationship = ref('')
 const persona = ref('')
 const speakingStyle = ref('')
 const background = ref('')
@@ -273,15 +273,12 @@ async function handleCharacterCardImport(event: Event) {
   isImportingCard.value = true
 
   try {
-    const [imported, rawText] = await Promise.all([
-      parseCharacterCardFile(file),
-      file.text()
-    ])
+    const imported = await parseCharacterCardFile(file)
     importedCard.value = imported
     importedCardFileName.value = file.name
-    importedCardRawText.value = rawText
+    importedCardRawText.value = imported.rawSourceJson || (file.name.toLowerCase().endsWith('.json') ? await file.text() : '')
     applyImportedCardToForm(imported)
-    if (!imported.patch.relationship?.trim()) relationship.value = '未设定'
+    if (!imported.patch.relationship?.trim()) relationship.value = ''
     createEmbeddedUserPersona.value = Boolean(imported.embeddedUser)
     embeddedPersonaName.value = imported.embeddedUser?.patch.name || `${imported.patch.name || '角色'} · 原卡用户`
     cardImportMessage.value = [
@@ -660,7 +657,9 @@ async function save() {
           persona:
             persona.value.trim() ||
             importedPatch.persona?.trim() ||
-            '等待你逐渐了解的原创角色。',
+            '',
+          cardDescription: importedPatch.cardDescription,
+          cardPersonality: importedPatch.cardPersonality,
 
           speakingStyle:
             speakingStyle.value.trim() || importedPatch.speakingStyle || undefined,
@@ -685,12 +684,14 @@ async function save() {
           creatorNotes: importedPatch.creatorNotes,
           systemPrompt: importedPatch.systemPrompt,
           postHistoryInstructions: importedPatch.postHistoryInstructions,
-          initiative: importedPatch.initiative || 'natural',
-          narrationStyle: importedPatch.narrationStyle || 'light',
-          emojiFrequency: importedPatch.emojiFrequency || 'low',
-          questionFrequency: importedPatch.questionFrequency || 'natural',
+          initiative: importedPatch.initiative,
+          narrationStyle: importedPatch.narrationStyle,
+          emojiFrequency: importedPatch.emojiFrequency,
+          questionFrequency: importedPatch.questionFrequency,
           tags: importedPatch.tags || [],
-          cardVersion: importedPatch.cardVersion || 2,
+          cardVersion: importedPatch.cardVersion,
+          sourceSpec: importedPatch.sourceSpec,
+          sourceSpecVersion: importedPatch.sourceSpecVersion,
           creator: importedPatch.creator,
           resourceVersion: importedPatch.resourceVersion,
           sourceUrl: importedPatch.sourceUrl,
@@ -704,10 +705,10 @@ async function save() {
           worldBookHint: importedPatch.worldBookHint,
           rawCardExtensions: importedPatch.rawCardExtensions,
           groupOnlyGreetings: importedPatch.groupOnlyGreetings || [],
-          mood: '平静',
+          mood: '',
           activity: initialActivity,
 
-          groups: ['group-friends'],
+          groups: ['group-unassigned'],
           replySpeed: 'natural',
 
           createdAt: now,
@@ -752,7 +753,7 @@ async function save() {
             background: patch.background,
             relationshipNote: patch.relationshipNote,
             characterKnowledge: patch.characterKnowledge,
-            boundaries: patch.boundaries || '不要替用户说话，不要擅自决定用户的行为、心理和选择。',
+            boundaries: patch.boundaries,
             tags: patch.tags || [],
             creator: patch.creator,
             sourceUrl: patch.sourceUrl,
@@ -783,7 +784,10 @@ async function save() {
             .replace(/\{\{user\}\}/gi, openingUserName)
             .replace(/\{\{char\}\}/gi, trimmedName)
           const openingSource = normalizeCommunityPlainText(openingMacroResolved)
-          const parsedOpening = parseRoleCardUi(openingSource)
+          // 社区角色卡开场保持作者原文；状态字段只作为旁路提示读取，不删除/重写原始结构。
+          const parsedOpening = importedSnapshot
+            ? { content: openingSource, ui: extractRoleCardUiHints(openingSource) }
+            : parseRoleCardUi(openingSource)
           const openingUi = parsedOpening.ui || extractRoleCardUiHints(openingSource)
           const openingStatePatch = roleCardUiToConversationPatch(parsedOpening.content, openingUi)
           let renderedOpening = parsedOpening.content
@@ -813,7 +817,7 @@ async function save() {
             rawContent: openingMessage,
             richHtml: openingHtml,
             richSource: openingIsRich ? (openingRegexApplied ? 'regex' : 'worldbook-ui') : undefined,
-            roleCardUi: openingUi,
+            roleCardUi: !importedSnapshot && openingIsRich ? openingUi : undefined,
             isGreetingSeed: true,
             greetingIndex: 0,
             status: 'delivered',
@@ -824,13 +828,13 @@ async function save() {
               id: conversationId,
               summary: '',
               summaryMessageCount: 0,
-              innerMood: '平静',
+              innerMood: '',
               innerActivity: initialActivity,
               innerThought: openingStatePatch.innerThought || '',
               location: openingStatePatch.location,
-              presence: openingStatePatch.presence || 'remote',
+              presence: openingStatePatch.presence,
               timePeriod: openingStatePatch.timePeriod || '',
-              energy: '平稳',
+              energy: '',
               unresolvedTopics: [],
               pendingEvents: [],
               shortTermGoals: openingStatePatch.shortTermGoals || [],
@@ -842,15 +846,17 @@ async function save() {
 
 
         if (importedLorebook.length && importedLorebookId) {
+          const sourceLorebook = importedSnapshot?.lorebookResource || {}
           await db.lorebooks.add(toPlainStorageValue({
+            ...sourceLorebook,
             id: importedLorebookId,
             worldId: DEFAULT_WORLD_ID,
             characterId,
-            name: importedSnapshot?.lorebookName || `${trimmedName}'s Lorebook`,
-            description: '角色卡内嵌世界书',
-            sourceFileName: importedCardFileName.value || undefined,
+            name: importedSnapshot?.lorebookName || sourceLorebook.name || `${trimmedName}'s Lorebook`,
+            description: sourceLorebook.description || '角色卡内嵌世界书',
+            sourceFileName: importedCardFileName.value || sourceLorebook.sourceFileName || undefined,
             sourceFormat: 'character-card',
-            recursiveScanning: true,
+            recursiveScanning: sourceLorebook.recursiveScanning,
             createdAt: now,
             updatedAt: now
           }))
@@ -924,13 +930,14 @@ async function save() {
             id: crypto.randomUUID(),
             worldId: DEFAULT_WORLD_ID,
             kind: 'character-card',
+            characterId,
             name: trimmedName,
             fileName: importedCardFileName.value || `${trimmedName}.json`,
             mimeType: 'application/json',
             sourceFormat: importedSnapshot.format,
             rawText: importedRawText,
             rawJson,
-            importedResourceIds: [characterId, ...createdImportedResourceIds],
+            importedResourceIds: createdImportedResourceIds,
             compatibility: {
               format: importedSnapshot.format,
               summary: [
@@ -987,19 +994,19 @@ async function save() {
           <div>
             <h3>直接导入角色卡</h3>
             <p class="section-description">
-              支持 SillyTavern / Tavo V2、V3 JSON。无需先创建空角色，选择文件后会直接填入下方表单。
+              支持 SillyTavern / Tavo / 常见社区 JSON 与带 metadata 的 PNG 角色卡。原始字段与绑定资源会尽量保留，不按固定角色模板重写。
             </p>
           </div>
-          <span class="format-badge">JSON</span>
+          <span class="format-badge">CARD</span>
         </div>
 
         <div class="card-import-actions">
           <label class="card-import-button">
-            {{ isImportingCard ? '正在读取…' : '选择角色卡 JSON' }}
+            {{ isImportingCard ? '正在读取…' : '选择角色卡文件' }}
             <input
               class="visually-hidden-file"
               type="file"
-              accept="application/json,.json"
+              accept="application/json,image/png,.json,.png"
               :disabled="isImportingCard"
               @change="handleCharacterCardImport"
             />

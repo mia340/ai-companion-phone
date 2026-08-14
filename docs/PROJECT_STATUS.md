@@ -1,12 +1,21 @@
+## V0.4.4.1 当前状态
+
+- 所有角色台词、动作、心理、情绪、关系感受、主动消息与剧情推进只来自真实 AI + 角色卡/社区资源；小手机不生成本地角色内容。
+- `自动识别` 对社区卡和原生角色统一保持 card-first/raw AI；只有用户显式选择“小手机增强”才启用额外消息整形。
+- API / 网络 / Token / 上下文 / 额度异常均硬停止；非用户主动停止时，流式半截回复删除且不入库。
+- 心理状态刷新统一调用真实 AI，失败不补“平静 / 正在……”等本地模板。
+- IndexedDB V13 删除历史 mock/fallback 角色消息、旧本地关系积分 stores 与来源不明的心理派生字段。
+- 原卡 HTML/XML/Regex UI 只做结构解析和安全渲染；没有原卡协议时不添加应用自造 UI。
+
 # AI Companion Phone 项目状态
 
 ## 当前版本
 
-V0.4.3.7.5
+V0.4.4.1
 
 ## 当前阶段
 
-项目已进入“长期陪伴内核 + Tavo / SillyTavern 社区资源兼容运行时”阶段。角色聊天仍保留多层记忆、双模式消息、场景状态与事实约束，同时新增可组合的世界书、Prompt 预设、正则和安全 Rich UI。桌面“世界”现在是统一资源中心。
+项目已进入“长期陪伴内核 + 通用社区角色卡兼容运行时”阶段。角色聊天保留多层记忆、场景状态与事实约束，同时以 card-first 兼容层运行角色卡、世界书、Prompt 预设、Regex 和安全 Rich UI；小手机增强作为可选层，不覆盖原卡。
 
 ## 技术栈
 
@@ -17,9 +26,28 @@ V0.4.3.7.5
 - Pinia
 - Dexie / IndexedDB
 - PWA
-- Mock、DeepSeek 与 OpenAI 兼容 Provider
+- DeepSeek 与 OpenAI 兼容真实 Provider；不再提供 Mock / 本地角色回复
 
 ## 已完成
+
+### V0.4.4.1 AI 内容权威与 Token 硬停止
+
+- 所有角色化内容由真实 AI + 原角色卡资源生成，小手机不再本地补写台词、动作、心理或关系情绪。
+- 接口失败不再 fallback；非用户主动停止导致的流式半截回复不会保存。
+- Token / 上下文 / API 额度不足会明确提示并停止，不允许自动续写。
+- IndexedDB V13 删除旧 mock/fallback 消息、旧本地关系积分 stores 与来源不明的心理派生字段。
+- 主动消息由 AI 决定内容及是否发送；本地仅负责到点后询问 AI。
+
+
+### V0.4.4.0 通用角色卡兼容内核
+
+- 社区角色 `auto` 默认 card-first；V0.4.4.1 起原生角色的 `auto` 也统一保持 card-first/raw AI。无原卡协议时普通文本原样显示，有原卡 UI/Regex/结构协议时才接管。
+- 导入/运行时不按角色名写补丁，不再给社区卡自动写朋友、初识、remote、平静、动作风格等应用默认。
+- Character Card 解析支持常见 V2/V3/Tavo/社区 JSON/PNG，并保留未知字段和原始归档。
+- Community Persona Extractor 统一处理多来源 `{{user}}` 设定，无法确认姓名时不猜。
+- IndexedDB V12 做通用孤儿数据/旧默认值/社区污染字段清洗；Backup 仍为 V9。
+- 小手机增强改为显式可选层，不覆盖角色卡固定输出协议。
+
 
 ### V0.4.3.7.5 干净初始数据与文档去重
 
@@ -63,7 +91,7 @@ V0.4.3.7.5
 - 完整记忆管理：添加、编辑、锁定、降权、标错、解决冲突和删除
 - 状态协议 V2：地点、时间段、活动、心情、精力、关系感受、未完话题、事件和目标
 - 状态变化历史与自然语言展示
-- 主动消息来源、频率、最短间隔、安静时段和关系阶段控制
+- 主动消息来源、频率、最短间隔与安静时段；内容与是否发送由 AI / 角色卡决定
 - 输入停顿、撤回、消息回应表情和主动分享图片占位
 - Prompt 分区预算、截断风险、命中原因、规则影响和自然度评分
 
@@ -259,7 +287,7 @@ V0.4.3.7.5
 
 ### 数据
 
-IndexedDB 当前为 V10：
+IndexedDB 当前为 V12：
 
 - worlds
 - characters
@@ -276,6 +304,11 @@ IndexedDB 当前为 V10：
 - relationshipEvents
 - personas
 - lorebookEntries
+- lorebooks
+- promptPresets
+- regexScripts
+- resourceBindings
+- communityResourceArchives
 - promptDebugTraces（本地调试，不进入备份）
 - conversationStateHistory
 

@@ -15,6 +15,7 @@ import {
   parseCharacterCardFile
 } from '../services/characterCardImportService'
 import { savePersona } from '../services/personaService'
+import { replaceCharacterCardResources } from '../services/characterCardResourceService'
 import { getChatSettings, saveChatSettings } from '../services/chatSettings'
 import { listResourceBindings } from '../services/resourceBindingService'
 import type {
@@ -48,10 +49,10 @@ const form = reactive({
   creatorNotes: '',
   systemPrompt: '',
   postHistoryInstructions: '',
-  initiative: 'natural' as InitiativeLevel,
-  narrationStyle: 'light' as NarrationStyle,
-  emojiFrequency: 'low' as EmojiFrequency,
-  questionFrequency: 'natural' as QuestionFrequency,
+  initiative: '' as InitiativeLevel | '',
+  narrationStyle: '' as NarrationStyle | '',
+  emojiFrequency: '' as EmojiFrequency | '',
+  questionFrequency: '' as QuestionFrequency | '',
   tagsText: '',
   creator: '',
   resourceVersion: '',
@@ -84,20 +85,34 @@ const completeness = computed(() => {
   return Math.round(values.filter(value => value?.trim()).length / values.length * 100)
 })
 
-const isResourceDrivenCard = computed(() => Boolean(
-  character.value &&
-  (character.value.importFormat === 'sillytavern-v2' || character.value.importFormat === 'sillytavern-v3') &&
-  (
-    resourceStats.value.lorebookEntries > 0 ||
-    resourceStats.value.regexScripts > 0 ||
-    resourceStats.value.presets > 0 ||
-    character.value.depthPrompt?.prompt?.trim() ||
-    character.value.embeddedUserTemplate?.trim()
+const isCommunityCard = computed(() => Boolean(
+  character.value && (
+    (character.value.importFormat && character.value.importFormat !== 'native') ||
+    character.value.sourceSpec ||
+    character.value.sourceSpecVersion ||
+    character.value.rawCardExtensions
   )
 ))
 
-const scorePercent = computed(() => isResourceDrivenCard.value ? 100 : completeness.value)
-const scoreLabel = computed(() => isResourceDrivenCard.value ? '社区资源已载入' : `完整度 ${completeness.value}%`)
+const isResourceDrivenCard = computed(() => Boolean(
+  isCommunityCard.value && (
+    resourceStats.value.lorebookEntries > 0 ||
+    resourceStats.value.regexScripts > 0 ||
+    resourceStats.value.presets > 0 ||
+    character.value?.depthPrompt?.prompt?.trim() ||
+    character.value?.embeddedUserTemplate?.trim()
+  )
+))
+
+const scorePercent = computed(() => isCommunityCard.value ? 100 : completeness.value)
+const scoreLabel = computed(() => isCommunityCard.value ? '原卡已载入' : `完整度 ${completeness.value}%`)
+const cardFormatLabel = computed(() => {
+  const row = character.value
+  if (!row) return '角色卡'
+  if (row.sourceSpec) return `${row.sourceSpec}${row.sourceSpecVersion ? ` · ${row.sourceSpecVersion}` : ''}`
+  if (row.cardVersion) return `角色卡 V${row.cardVersion}`
+  return row.importFormat && row.importFormat !== 'native' ? `社区角色卡 · ${row.importFormat}` : '角色卡'
+})
 
 function parseList(value: string) {
   return Array.from(new Set(value.split(/[,，、\n]+/).map(item => item.trim()).filter(Boolean)))
@@ -131,10 +146,10 @@ async function load() {
     form.creatorNotes = row.creatorNotes || ''
     form.systemPrompt = row.systemPrompt || ''
     form.postHistoryInstructions = row.postHistoryInstructions || ''
-    form.initiative = row.initiative || 'natural'
-    form.narrationStyle = row.narrationStyle || 'light'
-    form.emojiFrequency = row.emojiFrequency || 'low'
-    form.questionFrequency = row.questionFrequency || 'natural'
+    form.initiative = row.initiative || ''
+    form.narrationStyle = row.narrationStyle || ''
+    form.emojiFrequency = row.emojiFrequency || ''
+    form.questionFrequency = row.questionFrequency || ''
     form.tagsText = (row.tags || []).join('、')
     form.creator = row.creator || ''
     form.resourceVersion = row.resourceVersion || ''
@@ -172,10 +187,10 @@ async function save() {
       creatorNotes: form.creatorNotes.trim() || undefined,
       systemPrompt: form.systemPrompt.trim() || undefined,
       postHistoryInstructions: form.postHistoryInstructions.trim() || undefined,
-      initiative: form.initiative,
-      narrationStyle: form.narrationStyle,
-      emojiFrequency: form.emojiFrequency,
-      questionFrequency: form.questionFrequency,
+      initiative: form.initiative || undefined,
+      narrationStyle: form.narrationStyle || undefined,
+      emojiFrequency: form.emojiFrequency || undefined,
+      questionFrequency: form.questionFrequency || undefined,
       tags: parseList(form.tagsText),
       creator: form.creator.trim() || undefined,
       resourceVersion: form.resourceVersion.trim() || undefined,
@@ -183,7 +198,7 @@ async function save() {
       license: form.license.trim() || undefined,
       allowDerivative: form.allowDerivative,
       importFormat: character.value.importFormat || 'native',
-      cardVersion: character.value.cardVersion || 2
+      cardVersion: character.value.cardVersion
     })
 
     character.value = await db.characters.get(character.value.id)
@@ -202,33 +217,68 @@ async function importCard(event: Event) {
   if (!file || !character.value) return
   try {
     const imported = await parseCharacterCardFile(file)
-    const lorebookHint = imported.lorebookEntries.length
-      ? `，并导入 ${imported.lorebookEntries.length} 条内嵌角色世界书`
-      : ''
-    if (!window.confirm(`识别为 ${imported.format}。导入会覆盖当前角色卡中同名字段${lorebookHint}，但保留聊天记录。继续吗？`)) return
-    await updateCharacterAndConversation(character.value.id, imported.patch)
+    const resourceHint = [
+      imported.lorebookEntries.length ? `世界书 ${imported.lorebookEntries.length} 条` : '',
+      imported.regexScripts.length ? `Regex ${imported.regexScripts.length} 个` : ''
+    ].filter(Boolean).join('、')
+    const hint = resourceHint ? `；角色卡自带资源会替换该角色此前由角色卡导入的资源（${resourceHint}）` : ''
+    if (!window.confirm(`识别为 ${imported.format}。导入会覆盖当前角色卡中同名字段${hint}，但保留聊天记录和用户手工创建的共享资源。继续吗？`)) return
 
-    if (imported.lorebookEntries.length) {
-      const existing = await db.lorebookEntries.where('characterId').equals(character.value.id).toArray()
-      const signatures = new Set(existing.map(item => `${item.title}\n${item.content}`))
-      const now = new Date().toISOString()
-      const additions = imported.lorebookEntries
-        .filter(item => !signatures.has(`${item.title}\n${item.content}`))
-        .map((item, index) => ({
-          id: crypto.randomUUID(),
-          worldId: character.value!.worldId,
-          characterId: character.value!.id,
-          title: item.title,
-          keywords: item.keywords,
-          content: item.content,
-          enabled: item.enabled,
-          constant: item.constant,
-          caseSensitive: item.caseSensitive,
-          priority: item.priority || (100 - index),
-          createdAt: now,
-          updatedAt: now
-        }))
-      if (additions.length) await db.lorebookEntries.bulkAdd(additions)
+    const current = character.value
+    await updateCharacterAndConversation(current.id, imported.patch)
+    await replaceCharacterCardResources({
+      characterId: current.id,
+      worldId: current.worldId,
+      characterName: imported.patch.name?.trim() || current.name,
+      fileName: file.name,
+      imported
+    })
+
+    // 角色卡内嵌 {{user}} 也跟随“换卡”同步，避免旧卡 Persona 继续污染新卡。
+    const previousEmbeddedPersona = current.embeddedUserPersonaId
+      ? await db.personas.get(current.embeddedUserPersonaId)
+      : undefined
+    const singleConversations = await db.conversations
+      .filter(item => item.type === 'single' && item.memberIds.includes(current.id))
+      .toArray()
+    if (imported.embeddedUser) {
+      const preview = imported.embeddedUser
+      const syncedPersona = await savePersona({
+        ...preview.patch,
+        id: previousEmbeddedPersona?.isCardTemplate ? previousEmbeddedPersona.id : undefined,
+        name: preview.patch.name || previousEmbeddedPersona?.name || `${imported.patch.name?.trim() || current.name} · 原卡用户`,
+        avatar: preview.patch.avatar || previousEmbeddedPersona?.avatar || '🧑',
+        personaScope: 'character',
+        boundCharacterId: current.id,
+        boundCharacterName: imported.patch.name?.trim() || current.name,
+        sourceUserTemplate: preview.rawTemplate,
+        isCardTemplate: true,
+        isDefault: false
+      })
+      await db.characters.update(current.id, {
+        embeddedUserTemplate: preview.rawTemplate,
+        embeddedUserPersonaId: syncedPersona.id,
+        updatedAt: new Date().toISOString()
+      })
+      for (const conversation of singleConversations) {
+        const settings = await getChatSettings(conversation.id)
+        if (!settings.personaId || settings.personaId === previousEmbeddedPersona?.id) {
+          await saveChatSettings({ ...settings, personaId: syncedPersona.id })
+        }
+      }
+    } else if (previousEmbeddedPersona?.isCardTemplate) {
+      await db.characters.update(current.id, {
+        embeddedUserTemplate: undefined,
+        embeddedUserPersonaId: undefined,
+        updatedAt: new Date().toISOString()
+      })
+      for (const conversation of singleConversations) {
+        const settings = await getChatSettings(conversation.id)
+        if (settings.personaId === previousEmbeddedPersona.id) {
+          await saveChatSettings({ ...settings, personaId: undefined })
+        }
+      }
+      await db.personas.delete(previousEmbeddedPersona.id)
     }
 
     await load()
@@ -282,13 +332,24 @@ async function createOrUpdateEmbeddedPersona() {
 
 onMounted(load)
 
-function exportCard() {
+async function exportCard() {
   if (!character.value) return
-  const blob = new Blob([exportCharacterAsSillyTavernV2(character.value)], { type: 'application/json;charset=utf-8' })
+  const row = character.value
+  const lorebooks = (await db.lorebooks.where('characterId').equals(row.id).toArray())
+    .filter(item => item.sourceFormat === 'character-card')
+  const lorebook = lorebooks[0]
+  const lorebookEntries = lorebook
+    ? await db.lorebookEntries.where('lorebookId').equals(lorebook.id).toArray()
+    : []
+  const regexScripts = (await db.regexScripts.where('characterId').equals(row.id).toArray())
+    .filter(item => item.sourceFormat === 'character-card')
+  const blob = new Blob([
+    exportCharacterAsSillyTavernV2(row, { lorebook, lorebookEntries, regexScripts })
+  ], { type: 'application/json;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${character.value.name || 'character'}_SillyTavern_V2.json`
+  link.download = `${row.name || 'character'}_SillyTavern_V2.json`
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -303,7 +364,7 @@ function exportCard() {
       <p v-if="isLoading" class="state">正在读取角色卡……</p>
       <template v-else-if="character">
         <section class="score-card">
-          <div><b>角色卡 V{{ character.cardVersion || 2 }}</b><span>{{ scoreLabel }}</span></div>
+          <div><b>{{ cardFormatLabel }}</b><span>{{ scoreLabel }}</span></div>
           <p v-if="isResourceDrivenCard">这是一张资源型 / 多角色社区卡：基础角色字段可以为空，原卡设定主要由世界书、Regex、Depth Prompt 等资源驱动，聊天时仍会正常加载。</p>
           <p v-else>基础性格仍在“编辑角色”中管理；这里负责场景、示例对话、行为习惯和沉浸表达。</p>
           <div v-if="isResourceDrivenCard" class="resource-score-tags">
@@ -316,10 +377,10 @@ function exportCard() {
         </section>
 
         <section class="import-card">
-          <div><b>酒馆角色卡兼容</b><small>支持 SillyTavern V2 / V3 JSON 与旧版 JSON</small></div>
-          <input ref="cardFileInput" type="file" accept="application/json,.json" @change="importCard" />
-          <div class="import-actions"><button type="button" @click="cardFileInput?.click()">导入角色卡 JSON</button><button type="button" @click="exportCard">导出为 V2 JSON</button></div>
-          <p>PNG 角色卡中嵌入数据的读取暂未开放；请先在酒馆中导出 JSON。</p>
+          <div><b>社区角色卡兼容</b><small>支持 V2 / V3 / 常见社区 JSON 与带 metadata 的 PNG；未知扩展会保留原始数据</small></div>
+          <input ref="cardFileInput" type="file" accept="application/json,image/png,.json,.png" @change="importCard" />
+          <div class="import-actions"><button type="button" @click="cardFileInput?.click()">导入角色卡文件</button><button type="button" @click="exportCard">导出为 V2 JSON</button></div>
+          <p>PNG 会读取角色卡 metadata，并把卡面作为头像保存；不执行其中的第三方脚本，原始社区扩展会继续归档保留。</p>
         </section>
 
         <section v-if="embeddedUserPreview" class="embedded-user-section">
@@ -369,12 +430,13 @@ function exportCard() {
           </section>
 
           <section class="form-section">
-            <h2>表达方式</h2>
+            <h2>小手机表达增强（可选）</h2>
+            <p class="enhancement-note">这些字段不属于原角色卡。社区卡默认“原卡优先”时不会覆盖作者设定；只有你在聊天设置中明确启用“小手机增强”后才参与运行。</p>
             <div class="two-fields">
-              <label>主动程度<select v-model="form.initiative"><option value="low">偏被动</option><option value="natural">自然</option><option value="high">主动推动</option></select></label>
-              <label>动作描写<select v-model="form.narrationStyle"><option value="none">关闭</option><option value="light">少量</option><option value="immersive">沉浸</option></select></label>
-              <label>表情频率<select v-model="form.emojiFrequency"><option value="none">不用</option><option value="low">很少</option><option value="natural">自然</option><option value="high">较多</option></select></label>
-              <label>提问频率<select v-model="form.questionFrequency"><option value="low">很少</option><option value="natural">自然</option><option value="high">主动追问</option></select></label>
+              <label>主动程度<select v-model="form.initiative"><option value="">跟随原卡 / 不覆盖</option><option value="low">偏被动</option><option value="natural">自然</option><option value="high">主动推动</option></select></label>
+              <label>动作描写<select v-model="form.narrationStyle"><option value="">跟随原卡 / 不覆盖</option><option value="none">关闭</option><option value="light">少量</option><option value="immersive">沉浸</option></select></label>
+              <label>表情频率<select v-model="form.emojiFrequency"><option value="">跟随原卡 / 不覆盖</option><option value="none">不用</option><option value="low">很少</option><option value="natural">自然</option><option value="high">较多</option></select></label>
+              <label>提问频率<select v-model="form.questionFrequency"><option value="">跟随原卡 / 不覆盖</option><option value="low">很少</option><option value="natural">自然</option><option value="high">主动追问</option></select></label>
             </div>
           </section>
 
@@ -399,7 +461,7 @@ function exportCard() {
           </div>
 
           <p v-if="message" class="message">{{ message }}</p>
-          <button class="save-button" type="submit" :disabled="isSaving">{{ isSaving ? '正在保存…' : '保存角色卡 V' + (character.cardVersion || 2) }}</button>
+          <button class="save-button" type="submit" :disabled="isSaving">{{ isSaving ? '正在保存…' : '保存角色卡' }}</button>
         </form>
       </template>
       <p v-else class="state error">{{ message || '角色不存在。' }}</p>
@@ -408,7 +470,7 @@ function exportCard() {
 </template>
 
 <style scoped>
-.card-page{min-height:100%;padding:14px 14px 34px;background:#f7f0f3;color:#5d4350}.score-card,.form-section,.import-card{border:1px solid rgba(106,67,84,.08);border-radius:20px;background:#fff;box-shadow:0 8px 28px rgba(79,46,61,.06)}.score-card{padding:16px}.import-card{margin-top:12px;padding:14px;display:grid;gap:9px}.import-card>div:first-child{display:flex;flex-direction:column;gap:3px}.import-card small,.import-card p{color:#927381;font-size:11px;line-height:1.55}.import-card input{position:absolute;width:1px;height:1px;overflow:hidden;opacity:0}.import-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.import-actions button{border:0;border-radius:12px;background:#f4e8ed;color:#9e5b77;padding:10px;font-weight:800}.check-row{display:flex!important;align-items:center}.check-row input{position:static!important;width:18px!important;height:18px;opacity:1!important;accent-color:#d96f9b}.score-card>div{display:flex;justify-content:space-between;align-items:center}.score-card span{color:#c35f88;font-weight:700}.score-card p,.example-section p{color:#927381;line-height:1.6;font-size:12px}.score-track{height:7px!important;overflow:hidden;border-radius:999px;background:#f1e3e9}.score-track i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#e889b0,#cb5f8d)}.card-form{display:grid;gap:12px;margin-top:12px}.form-section{display:grid;gap:12px;padding:16px}.form-section h2{margin:0;font-size:17px}.form-section label{display:grid;gap:6px;font-size:13px;font-weight:700}.form-section input,.form-section textarea,.form-section select{box-sizing:border-box;width:100%;border:1px solid #eadce2;border-radius:12px;background:#fffbfc;padding:10px 12px;color:#593f4b;font:inherit;resize:vertical}.two-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.advanced summary{cursor:pointer;font-weight:800}.advanced[open] summary{margin-bottom:6px}.linked-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.linked-actions button{border:0;border-radius:13px;background:#fff;color:#a45f7b;padding:11px;font-weight:700}.message{margin:0;padding:10px 12px;border-radius:12px;background:#fff5f8;color:#b65178}.save-button{border:0;border-radius:15px;background:#d96f9b;color:#fff;padding:13px;font-weight:800}.save-button:disabled{opacity:.6}.state{text-align:center;color:#927381}.error{color:#b74c63}code{border-radius:5px;background:#f4e8ed;padding:1px 4px}@media(max-width:390px){.two-fields,.linked-actions{grid-template-columns:1fr}}
+.card-page{min-height:100%;padding:14px 14px 34px;background:#f7f0f3;color:#5d4350}.score-card,.form-section,.import-card{border:1px solid rgba(106,67,84,.08);border-radius:20px;background:#fff;box-shadow:0 8px 28px rgba(79,46,61,.06)}.score-card{padding:16px}.import-card{margin-top:12px;padding:14px;display:grid;gap:9px}.import-card>div:first-child{display:flex;flex-direction:column;gap:3px}.import-card small,.import-card p{color:#927381;font-size:11px;line-height:1.55}.import-card input{position:absolute;width:1px;height:1px;overflow:hidden;opacity:0}.import-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.import-actions button{border:0;border-radius:12px;background:#f4e8ed;color:#9e5b77;padding:10px;font-weight:800}.check-row{display:flex!important;align-items:center}.check-row input{position:static!important;width:18px!important;height:18px;opacity:1!important;accent-color:#d96f9b}.score-card>div{display:flex;justify-content:space-between;align-items:center}.score-card span{color:#c35f88;font-weight:700}.score-card p,.example-section p,.enhancement-note{color:#927381;line-height:1.6;font-size:12px}.score-track{height:7px!important;overflow:hidden;border-radius:999px;background:#f1e3e9}.score-track i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#e889b0,#cb5f8d)}.card-form{display:grid;gap:12px;margin-top:12px}.form-section{display:grid;gap:12px;padding:16px}.form-section h2{margin:0;font-size:17px}.form-section label{display:grid;gap:6px;font-size:13px;font-weight:700}.form-section input,.form-section textarea,.form-section select{box-sizing:border-box;width:100%;border:1px solid #eadce2;border-radius:12px;background:#fffbfc;padding:10px 12px;color:#593f4b;font:inherit;resize:vertical}.two-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.advanced summary{cursor:pointer;font-weight:800}.advanced[open] summary{margin-bottom:6px}.linked-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.linked-actions button{border:0;border-radius:13px;background:#fff;color:#a45f7b;padding:11px;font-weight:700}.message{margin:0;padding:10px 12px;border-radius:12px;background:#fff5f8;color:#b65178}.save-button{border:0;border-radius:15px;background:#d96f9b;color:#fff;padding:13px;font-weight:800}.save-button:disabled{opacity:.6}.state{text-align:center;color:#927381}.error{color:#b74c63}code{border-radius:5px;background:#f4e8ed;padding:1px 4px}@media(max-width:390px){.two-fields,.linked-actions{grid-template-columns:1fr}}
 
 .embedded-user-section { display:grid; gap:10px; padding:14px; border-radius:16px; background:rgba(255,248,251,.9); border:1px solid rgba(217,111,155,.18); }
 .embedded-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }

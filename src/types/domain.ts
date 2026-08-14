@@ -15,8 +15,8 @@ export type EmojiFrequency = 'none' | 'low' | 'natural' | 'high'
 export type QuestionFrequency = 'low' | 'natural' | 'high'
 export type MessagePacing = 'off' | 'quick' | 'natural' | 'slow'
 export type PresenceMode = 'auto' | 'together' | 'remote'
+export type CompatibilityMode = 'auto' | 'card-first' | 'phone-enhanced'
 export type ActionVisibility = 'off' | 'together' | 'always'
-export type ActionTextLayout = 'auto' | 'separate' | 'merged'
 export type CompanionMessageKind = 'text' | 'emoji' | 'voice' | 'scene_action'
 export type CompanionActionKind = CompanionMessageKind | 'typing_pause' | 'recall_message' | 'react_to_message' | 'image_placeholder'
 export type ProactiveFrequency = 'low' | 'natural' | 'high'
@@ -43,6 +43,9 @@ export interface Character {
   appearance?: string
 
   persona: string
+  // 社区角色卡原始字段：运行时保留 description / personality 的语义边界，避免合并后丢失作者结构。
+  cardDescription?: string
+  cardPersonality?: string
   speakingStyle?: string
   background?: string
   values?: string
@@ -70,7 +73,9 @@ export interface Character {
   emojiFrequency?: EmojiFrequency
   questionFrequency?: QuestionFrequency
   tags?: string[]
-  cardVersion?: 2 | 3
+  cardVersion?: number | string
+  sourceSpec?: string
+  sourceSpecVersion?: string
 
   // V0.4.1 资源来源与社区分享信息
   creator?: string
@@ -78,7 +83,7 @@ export interface Character {
   sourceUrl?: string
   license?: string
   allowDerivative?: boolean
-  importFormat?: 'native' | 'sillytavern-v2' | 'sillytavern-v3' | 'legacy-json'
+  importFormat?: 'native' | 'sillytavern-v2' | 'sillytavern-v3' | 'legacy-json' | 'community-json' | 'png-character-card'
   embeddedUserTemplate?: string
   embeddedUserPersonaId?: UUID
 
@@ -282,6 +287,7 @@ export interface CommunityResourceArchive {
   id: UUID
   worldId: UUID
   kind: CommunityArchiveKind
+  characterId?: UUID
   name: string
   fileName: string
   mimeType?: string
@@ -384,7 +390,6 @@ export interface Message {
 
   provider?: string
   model?: string
-  fallback?: boolean
   errorText?: string
   replyGroupId?: UUID
   replySequence?: number
@@ -423,8 +428,6 @@ export type InnerThoughtVisibility =
   | 'thoughts'
   | 'detailed'
 export type ReplyLength = 'short' | 'natural' | 'long'
-export type RelationshipStage = '初识' | '熟悉' | '亲近' | '依赖' | '特别关系'
-
 export interface ChatSettings {
   id: UUID
   conversationId: UUID
@@ -437,7 +440,6 @@ export interface ChatSettings {
   showTyping: boolean
   naturalDelay: boolean
   innerThoughtVisibility: InnerThoughtVisibility
-  autoFallback: boolean
   proactiveEnabled: boolean
   proactiveIntervalHours: number
   proactiveFrequency: ProactiveFrequency
@@ -463,7 +465,7 @@ export interface ChatSettings {
   // V0.4.2.1 场景距离与动作视角
   presenceMode: PresenceMode
   actionVisibility: ActionVisibility
-  actionTextLayout: ActionTextLayout
+  compatibilityMode?: CompatibilityMode
   updatedAt: string
 }
 
@@ -509,6 +511,8 @@ export interface ConversationState {
   innerActivity: string
   innerThought: string
   thoughtUpdatedAt?: string
+  /** 产品调度元数据，不代表角色关系或心理内容。 */
+  lastProactiveAt?: string
   lastTechnicalError?: string
   lastProviderNotice?: string
   location?: string
@@ -555,33 +559,6 @@ export interface MusicState {
   lastReactionTrackKey?: string
   updatedAt: string
 }
-
-export interface CharacterRelationship {
-  id: UUID
-  characterId: UUID
-  intimacy: number
-  trust: number
-  familiarity: number
-  stage: RelationshipStage
-  emotion: string
-  emotionReason: string
-  lastInteractionAt: string
-  lastProactiveAt: string
-  chatDays: number
-  musicCount: number
-  updatedAt: string
-}
-
-export interface RelationshipEvent {
-  id: UUID
-  characterId: UUID
-  conversationId: UUID
-  type: 'first-chat' | 'stage' | 'music' | 'promise' | 'special'
-  title: string
-  description: string
-  createdAt: string
-}
-
 
 export interface PromptDebugMessage {
   role: 'system' | 'user' | 'assistant'

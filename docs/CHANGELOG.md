@@ -1,3 +1,41 @@
+# V0.4.4.1
+
+## V0.4.4.1.1 - 构建清理补丁
+
+- 修复 `ChatRoom.vue` 在发送路径中把可能为 `undefined` 的聊天设置传给运行时配置解析器导致的 TS2322。
+- 增加 `prebuild` 旧源码清理，自动删除已退休的 `src/services/relationshipService.ts`，避免 `robocopy /E` 遗留文件继续参与 TypeScript 编译。
+- 不改变 V0.4.4.1 的 AI 内容权威、Token 硬停止、角色卡兼容和 IndexedDB V13 行为。
+
+
+- 角色台词、动作、心理、情绪、关系感受、主动消息与剧情推进改为真实 AI 独占生成；小手机只组织上下文、解析和渲染。
+- `自动识别` 对社区卡与原生角色统一使用 card-first/raw AI；只有用户显式切换“小手机增强”才允许额外消息整形。
+- 移除本地用户事实检测后的自动语义重写，避免应用用固定规则二次改写 AI 角色内容。
+- 移除 Mock Provider 与 API 失败本地角色回复；真实 AI 请求失败时整轮停止，不再保存非用户主动停止产生的半截回复；刷新/崩溃遗留的 pending assistant 也会删除。
+- Token 硬停止：识别 output length、context window、quota/credit、HTTP 402，以及无 finish_reason 但 completion_tokens 打满 max_tokens 的兼容接口；截断回复不入库。
+- “心里的小角落”刷新改为真实 AI 生成，失败不使用本地心理模板。
+- 新会话主动消息默认关闭；用户显式开启“小手机增强 + 主动消息”后，本地只负责调度时机和提供事实，实际内容完全由 AI 决定，AI 可返回 no_proactive_message。
+- IndexedDB V13 删除历史 mock/fallback/本地主动消息、旧关系积分 stores 与来源不明的心理/关系/剧情派生字段（含 unresolvedTopics / pendingEvents / shortTermGoals）。Backup 仍为 V9。
+
+# V0.4.4.0
+
+- 重构为通用角色卡兼容内核：社区角色 `auto` 默认 card-first，原卡/世界书/Regex/UI 优先于小手机增强。
+- 导入层取消角色专用逻辑和应用默认角色值；description/personality 分离保存，未知扩展字段继续无损归档。
+- 支持 JSON / SillyTavern V2/V3 / Tavo / 常见社区 JSON / PNG metadata；PNG 卡面可直接作为头像。
+- UI/Regex 改为结构检测：有原卡 UI 才渲染，没有则保持普通文本；opening-only Regex 不劫持每轮回复。
+- 移除持久化“动作/对白分开或合并”角色设置，只按真实 presence 自动处理；卡优先模式不做小手机消息重塑。
+- 本地心理状态 fallback 不再发明固定“平静 / 正在看消息 / 正在想着你”状态。
+- IndexedDB 升级 V12：通用清理孤儿记录、旧应用占位状态、社区角色旧关系积分/行为偏好、旧 roleCardUi 与设备污染动作，并从无损 archive 回填原卡语义字段。
+- 角色换卡只替换上一张卡拥有的资源；删除角色会清理关联消息/记忆/关系/状态/Persona/资源/archive。
+- 生产代码不包含任何测试角色名分支。Backup 版本仍为 V9。
+
+## V0.4.3.7.6
+
+- 自动场景判定补强直接接触与同场景证据，支持 `{{user}}` 模板参与判定。
+- 普通文本回复默认整轮一颗气泡；只有显式多 `text` 协议才保留多气泡。
+- 小手机协议不再默认注入“手机屏幕”等现代设备动作。
+- 无原卡 UI 的角色不再显示小手机自造状态卡；夜临等原卡明确 UI 继续按原卡运行。
+- 用户可见状态统一解析 `{{user}}` / `{{char}}`。
+
 # V0.4.3.7.5
 
 - 移除内置演示角色林夏 / 顾言及其演示会话、消息；新安装从干净通讯录开始。

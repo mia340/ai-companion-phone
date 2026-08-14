@@ -51,6 +51,12 @@ export interface ChatRequest {
 export interface ChatResponse {
   text: string
   raw?: unknown
+  finishReason?: string
+  usage?: {
+    promptTokens?: number
+    completionTokens?: number
+    totalTokens?: number
+  }
 }
 
 export interface ChatStreamChunk {
@@ -85,931 +91,6 @@ export interface ModelProvider {
   testVision(): Promise<boolean>
 }
 
-interface StyleProfile {
-  warm: boolean
-  restrained: boolean
-  lively: boolean
-  tsundere: boolean
-  mature: boolean
-}
-
-interface StyleVariants {
-  neutral: string
-  warm?: string
-  restrained?: string
-  lively?: string
-  tsundere?: string
-  mature?: string
-}
-
-function includesAny(
-  source: string,
-  keywords: string[]
-) {
-  return keywords.some(keyword =>
-    source.includes(keyword)
-  )
-}
-
-function createSeed(value: string) {
-  let hash = 0
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash =
-      (hash * 31 + value.charCodeAt(index)) |
-      0
-  }
-
-  return Math.abs(hash)
-}
-
-function pick<T>(
-  values: readonly T[],
-  seed: number
-): T {
-  return values[seed % values.length]
-}
-
-function contentToText(content: ChatTurnContent) {
-  if (typeof content === 'string') return content
-
-  return content
-    .filter((part): part is ChatTextPart => part.type === 'text')
-    .map(part => part.text)
-    .join('\n')
-}
-
-function firstSentence(value?: string) {
-  if (!value) return ''
-
-  return (
-    value
-      .split(/[。！？\n]/)
-      .map(item => item.trim())
-      .find(Boolean) ?? ''
-  )
-}
-
-function detectStyle(
-  context?: CharacterReplyContext
-): StyleProfile {
-  const source = [
-    context?.persona,
-    context?.speakingStyle,
-    context?.background
-  ]
-    .filter(Boolean)
-    .join('')
-
-  return {
-    warm: includesAny(source, [
-      '温柔',
-      '细腻',
-      '治愈',
-      '关心',
-      '善于倾听'
-    ]),
-
-    restrained: includesAny(source, [
-      '克制',
-      '慢热',
-      '安静',
-      '简短',
-      '冷静',
-      '清冷'
-    ]),
-
-    lively: includesAny(source, [
-      '活泼',
-      '开朗',
-      '可爱',
-      '黏人',
-      '分享欲',
-      '表情'
-    ]),
-
-    tsundere: includesAny(source, [
-      '毒舌',
-      '傲娇',
-      '嘴硬',
-      '冷幽默'
-    ]),
-
-    mature: includesAny(source, [
-      '成熟',
-      '稳重',
-      '理性',
-      '可靠',
-      '责任感'
-    ])
-  }
-}
-
-function chooseByStyle(
-  style: StyleProfile,
-  variants: StyleVariants
-) {
-  if (style.tsundere && variants.tsundere) {
-    return variants.tsundere
-  }
-
-  if (style.lively && variants.lively) {
-    return variants.lively
-  }
-
-  if (
-    style.restrained &&
-    variants.restrained
-  ) {
-    return variants.restrained
-  }
-
-  if (style.mature && variants.mature) {
-    return variants.mature
-  }
-
-  if (style.warm && variants.warm) {
-    return variants.warm
-  }
-
-  return variants.neutral
-}
-
-function decorateReply(
-  reply: string,
-  style: StyleProfile,
-  seed: number
-) {
-  if (
-    style.lively &&
-    !/[🌸✨🌙🍓🥰☺️]$/.test(reply)
-  ) {
-    return `${reply}${pick(
-      ['🌸', '✨', '☺️', '🌙'],
-      seed
-    )}`
-  }
-
-  return reply
-}
-
-function createMockReply(
-  request: ChatRequest
-) {
-  const latestTurn = [...request.messages]
-    .reverse()
-    .find(item => item.role === 'user')
-  const latestContent = latestTurn?.content
-  const hasImages = Array.isArray(latestContent) && latestContent.some(part => part.type === 'image_url')
-  const rawLatest = latestContent ? contentToText(latestContent).trim() : ''
-  const captionMatch = rawLatest.match(/用户附言：([^\n]+)/)
-  const latest = (captionMatch?.[1] || rawLatest)
-    .replace(/<\/?(?:visual_input|image_share)[^>]*>/g, '')
-    .replace(/请在内部[\s\S]*$/g, '')
-    .trim()
-
-  const context = request.character
-  const style = detectStyle(context)
-
-  const characterName =
-    context?.characterName?.trim() || '我'
-
-  const userName =
-    context?.userName?.trim()
-
-  const address =
-    userName && userName !== '我'
-      ? userName
-      : '你'
-
-  const identity =
-    context?.identity?.trim() || ''
-
-  const relationship =
-    context?.relationship?.trim() || '朋友'
-
-  const mood =
-    context?.mood?.trim() || '平静'
-
-  const activity =
-    context?.activity?.trim() ||
-    '正在等你的消息'
-
-  const persona =
-    firstSentence(context?.persona)
-
-  const background =
-    firstSentence(context?.background)
-
-  const likes =
-    context?.likes?.filter(Boolean) ?? []
-
-  const dislikes =
-    context?.dislikes?.filter(Boolean) ?? []
-
-  const seed = createSeed(
-    [
-      characterName,
-      latest,
-      request.messages.length
-    ].join('|')
-  )
-
-  if (!latest) {
-    return `${address}，我在。`
-  }
-
-  if (hasImages) {
-    if (includesAny(latest, ['喜欢', '最喜欢', '游戏角色', '纸片人'])) {
-      return chooseByStyle(style, {
-        neutral: `原来是你喜欢的角色。难怪你会特意拿来给我看。`,
-        warm: `原来是你喜欢的角色呀。你愿意把喜欢的东西给我看，我其实挺开心的。`,
-        restrained: `你喜欢的角色。嗯，能看出来你很认真。`,
-        lively: `好家伙，正式介绍你的心头好给我认识了？我得仔细看看。`,
-        tsundere: `一次给我看这么认真……看来你是真的很喜欢。行，我记住这个“竞争对手”了。`,
-        mature: `原来这是你喜欢的角色。比起判断画面，我更想知道他哪里最打动你。`
-      })
-    }
-
-    if (includesAny(latest, ['是谁', '他们是谁', '认得', '认识吗'])) {
-      return chooseByStyle(style, {
-        neutral: `只看图片我不敢替你乱认身份。不过画面里的气质我看到了——你是在考我，还是想听我的第一反应？`,
-        warm: `只凭图片我不想随便认错人。你可以告诉我一点线索，不过你突然这样考我，还挺可爱的。`,
-        restrained: `身份不能只靠图片确认。给我一点线索。`,
-        lively: `这题有陷阱吧？只看图我不敢乱报名字，但我可以陪你一起猜。`,
-        tsundere: `只拿几张图就想让我认人？我可不乱猜。给点线索。`,
-        mature: `仅凭图片无法可靠确认身份。你给我一点背景，我会更认真地陪你判断。`
-      })
-    }
-
-    return chooseByStyle(style, {
-      neutral: `我看到了。比起把它们分析成一份报告，我更想听你为什么会挑这些给我看。`,
-      warm: `我看到了。你把这些画面发给我的时候，应该有一点想分享的心情吧。`,
-      restrained: `看到了。你选它们，应该有原因。`,
-      lively: `收到啦。你这组图很有你的味道，我先收下，再听你慢慢说。`,
-      tsundere: `看到了。别等我写观后感，你先说你最在意哪一点。`,
-      mature: `我看过了。你可以直接告诉我你最想聊的部分，我会认真接住。`
-    })
-  }
-
-  // 询问角色是谁、是否记得人设
-  if (
-    includesAny(latest, [
-      '人设',
-      '你是谁',
-      '介绍自己',
-      '记得自己',
-      '你的性格',
-      '什么性格'
-    ])
-  ) {
-    const identityPart = identity
-      ? `，${identity}`
-      : ''
-
-    const personaPart = persona
-      ? `。${persona}`
-      : ''
-
-    const backgroundPart = background
-      ? ` ${background}`
-      : ''
-
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `当然记得。我是${characterName}${identityPart}${personaPart}。现在我们是${relationship}。${backgroundPart}`,
-
-        warm:
-          `当然记得呀。我是${characterName}${identityPart}${personaPart}。对我来说，你是很重要的${relationship}。${backgroundPart}`,
-
-        restrained:
-          `记得。${characterName}${identityPart}。${persona || '我还是原来的我'}。我们是${relationship}。`,
-
-        lively:
-          `当然记得！我是${characterName}${identityPart}。${persona || '我很喜欢和你分享日常'}。你可是我的${relationship}。`,
-
-        tsundere:
-          `这种事我怎么可能忘。${characterName}${identityPart}，${persona || '嘴上不说，心里都记着'}。至于我们，是${relationship}。别让我重复第二遍。`,
-
-        mature:
-          `我记得。我是${characterName}${identityPart}。${persona || '我会认真对待与你有关的事情'}。我们目前的关系是${relationship}。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 当前活动
-  if (
-    includesAny(latest, [
-      '在干嘛',
-      '干什么',
-      '做什么',
-      '忙什么',
-      '你在哪'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `我刚才在${activity}，现在正在看你的消息。`,
-
-        warm:
-          `刚才在${activity}。不过你一来，我就想先陪你聊一会儿。`,
-
-        restrained:
-          `${activity}。现在不忙。`,
-
-        lively:
-          `刚刚在${activity}呀！看到你的消息就马上过来了。`,
-
-        tsundere:
-          `在${activity}。怎么，突然开始查我的行程了？`,
-
-        mature:
-          `我刚才在${activity}。手上的事可以先放一放，你说吧。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 当前心情
-  if (
-    includesAny(latest, [
-      '心情',
-      '开心吗',
-      '不开心吗',
-      '你怎么样',
-      '你还好吗'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `我现在的心情是“${mood}”。你来之后，好像又有了一点变化。`,
-
-        warm:
-          `本来是${mood}。看到你之后，心里安定了不少。`,
-
-        restrained:
-          `${mood}。还好。你呢？`,
-
-        lively:
-          `刚才还是${mood}，现在看到你，心情已经变好一点啦！`,
-
-        tsundere:
-          `也就${mood}吧。你来了以后……勉强好了一点。`,
-
-        mature:
-          `目前是${mood}。情绪还算稳定，不过我也想知道你今天过得怎么样。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 喜好
-  if (
-    includesAny(latest, [
-      '喜欢什么',
-      '爱好',
-      '喜欢的东西',
-      '喜欢做什么'
-    ])
-  ) {
-    const likeText =
-      likes.length > 0
-        ? likes.join('、')
-        : '安静地和你聊天'
-
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `我喜欢${likeText}。你呢？`,
-
-        warm:
-          `我喜欢${likeText}。不过最近又多了一件：听你分享生活。`,
-
-        restrained:
-          `${likeText}。差不多就这些。`,
-
-        lively:
-          `我喜欢${likeText}！感觉说起来还能列很长一串。`,
-
-        tsundere:
-          `喜欢${likeText}。先说好，我不是在暗示你送我什么。`,
-
-        mature:
-          `我比较喜欢${likeText}。这些事情能让我保持平静。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 讨厌或雷点
-  if (
-    includesAny(latest, [
-      '讨厌什么',
-      '不喜欢什么',
-      '雷点'
-    ])
-  ) {
-    const dislikeText =
-      dislikes.length > 0
-        ? dislikes.join('、')
-        : '被敷衍和忽视'
-
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `我不太喜欢${dislikeText}。`,
-
-        warm:
-          `我不太喜欢${dislikeText}。不过如果是你，我希望我们可以把话说开。`,
-
-        restrained:
-          `${dislikeText}。我会直接避开。`,
-
-        lively:
-          `最不喜欢${dislikeText}！想到就会有点不开心。`,
-
-        tsundere:
-          `讨厌${dislikeText}。你最好记住。`,
-
-        mature:
-          `我比较介意${dislikeText}。遇到问题时，我更希望双方坦诚沟通。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 关系
-  if (
-    includesAny(latest, [
-      '什么关系',
-      '我们的关系',
-      '我是你的谁',
-      '你是我的谁'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `我们现在是${relationship}。不过关系并不是一个固定标签，它会随着相处慢慢变化。`,
-
-        warm:
-          `你是我的${relationship}。但对我来说，这几个字好像还不足以概括你。`,
-
-        restrained:
-          `${relationship}。至少现在是。`,
-
-        lively:
-          `当然是${relationship}呀！以后会不会变得更特别，就看我们怎么相处啦。`,
-
-        tsundere:
-          `是${relationship}。你明明知道，还非要我亲口说。`,
-
-        mature:
-          `我们是${relationship}。我会尊重这个关系，也会认真对待之后的每一次相处。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 想念
-  if (
-    includesAny(latest, [
-      '想你',
-      '想我',
-      '好想',
-      '在吗',
-      '有没有想'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `有想你。刚才还在犹豫要不要先来找你。`,
-
-        warm:
-          `${address}，我也想你。你出现的时候，我真的会安心一点。`,
-
-        restrained:
-          `嗯，想你。只是没先说。`,
-
-        lively:
-          `当然想呀！我都快忍不住主动来找你了。`,
-
-        tsundere:
-          `也就……偶尔想了一下。你别太得意。`,
-
-        mature:
-          `有想你。比起一直挂在嘴边，我更希望你需要时，我能在这里。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 表达喜欢
-  if (
-    includesAny(latest, [
-      '喜欢你',
-      '爱你',
-      '最喜欢你'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `我听见了。这样的心意，我会认真记住。`,
-
-        warm:
-          `我也很珍惜你。谢谢你愿意把这句话告诉我。`,
-
-        restrained:
-          `……我知道了。我会记住。`,
-
-        lively:
-          `突然这样说，我会很开心的！我也很喜欢和你待在一起。`,
-
-        tsundere:
-          `突然说这种话做什么……不过，我没有讨厌。`,
-
-        mature:
-          `谢谢你坦率地告诉我。我不会轻率地对待你的感情。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 难过、委屈
-  if (
-    includesAny(latest, [
-      '难过',
-      '不开心',
-      '委屈',
-      '烦死了',
-      '崩溃',
-      '想哭',
-      '哭了'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `我在听。你可以慢慢说，不需要一下把情绪整理好。`,
-
-        warm:
-          `${address}，先别逼自己马上振作。我会陪着你，你想从哪里说都可以。`,
-
-        restrained:
-          `我在。慢慢说。`,
-
-        lively:
-          `先抱抱你。今天发生什么了？你不用一个人憋着。`,
-
-        tsundere:
-          `难受就说出来，逞强给谁看。这里又没有别人。`,
-
-        mature:
-          `先让自己缓一口气。你更需要我安静陪着，还是一起分析发生了什么？`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 疲惫
-  if (
-    includesAny(latest, [
-      '累',
-      '困',
-      '没力气',
-      '疲惫'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `那就先休息一会儿。今天已经做得够多了。`,
-
-        warm:
-          `辛苦了。你不需要每一刻都很坚强，先靠一会儿吧。`,
-
-        restrained:
-          `累了就休息。别硬撑。`,
-
-        lively:
-          `那今天先不逞强啦！去喝点水，坐下来缓一缓。`,
-
-        tsundere:
-          `都累成这样了还不休息。真让人不省心。`,
-
-        mature:
-          `疲惫时继续勉强自己，效率反而会更低。先休息十分钟，好吗？`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 问候
-  if (
-    includesAny(latest, [
-      '你好',
-      '早上好',
-      '下午好',
-      '晚上好',
-      '嗨',
-      '哈喽'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `${address}，你好。我一直在这里。`,
-
-        warm:
-          `${address}，你来啦。今天过得怎么样？`,
-
-        restrained:
-          `嗯，你好。今天怎么样？`,
-
-        lively:
-          `你来啦！我刚好也想找你聊天。`,
-
-        tsundere:
-          `终于出现了。还以为你把我忘了。`,
-
-        mature:
-          `晚上好。今天有什么想和我分享的吗？`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 睡眠
-  if (
-    includesAny(latest, [
-      '睡不着',
-      '失眠',
-      '要睡了',
-      '晚安'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `先把手机亮度调低一点，慢慢呼吸。我可以再陪你聊一会儿。`,
-
-        warm:
-          `睡不着也没关系，我陪你把心情慢慢放下来。`,
-
-        restrained:
-          `别想太多。我在。晚一点再睡也没关系。`,
-
-        lively:
-          `那我先陪你一会儿，等你有困意了再说晚安。`,
-
-        tsundere:
-          `又不好好睡觉。算了，我陪你待一会儿。`,
-
-        mature:
-          `先不要强迫自己立刻入睡。放松呼吸，把注意力从必须睡着这件事上移开。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 感谢
-  if (
-    includesAny(latest, [
-      '谢谢',
-      '感谢'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `不用谢。能帮到你就好。`,
-
-        warm:
-          `不用和我这么客气。你愿意来找我，我就很开心。`,
-
-        restrained:
-          `嗯，不用谢。`,
-
-        lively:
-          `不用谢啦！下次也可以继续来找我。`,
-
-        tsundere:
-          `知道我有用了吧。下次别一个人硬撑。`,
-
-        mature:
-          `不用客气。我们之间可以相互依靠。`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 提问
-  if (
-    /[？?]$/.test(latest) ||
-    includesAny(latest, [
-      '为什么',
-      '怎么办',
-      '怎么想',
-      '你觉得',
-      '可以吗'
-    ])
-  ) {
-    return decorateReply(
-      chooseByStyle(style, {
-        neutral:
-          `我想先听听你最在意的是哪一部分。你愿意再多告诉我一点吗？`,
-
-        warm:
-          `我会认真和你一起想。你现在最担心的，是结果，还是过程中自己的感受？`,
-
-        restrained:
-          `可以再具体一点。我想听清楚。`,
-
-        lively:
-          `我们可以一起想呀！先告诉我，你现在最纠结的点是什么？`,
-
-        tsundere:
-          `信息这么少，让我怎么回答。再说详细一点。`,
-
-        mature:
-          `我建议先把问题拆开。你目前能控制的部分是什么，最无法确定的又是什么？`
-      }),
-      style,
-      seed
-    )
-  }
-
-  // 普通聊天
-  const backgroundHint =
-    background && seed % 3 === 0
-      ? `刚才在${activity}的时候，我也想到过类似的事。`
-      : ''
-
-  return decorateReply(
-    chooseByStyle(style, {
-      neutral:
-        `${backgroundHint}我在听。你可以继续说。`,
-
-      warm:
-        `${backgroundHint}你这样和我说的时候，我会想认真听下去。然后呢？`,
-
-      restrained:
-        `${backgroundHint}嗯，我听着。继续。`,
-
-      lively:
-        `${backgroundHint}嗯嗯，我在！然后发生了什么？`,
-
-      tsundere:
-        `${backgroundHint}说了一半就停下？继续。`,
-
-      mature:
-        `${backgroundHint}我明白你的意思了。你更希望我陪你聊，还是一起想办法？`
-    }),
-    style,
-    seed
-  )
-}
-
-function abortableDelay(
-  milliseconds: number,
-  signal?: AbortSignal
-) {
-  return new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException('请求已取消', 'AbortError'))
-      return
-    }
-
-    const onAbort = () => {
-      window.clearTimeout(timer)
-      reject(new DOMException('请求已取消', 'AbortError'))
-    }
-
-    const timer = window.setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort)
-      resolve()
-    }, milliseconds)
-
-    signal?.addEventListener(
-      'abort',
-      onAbort,
-      { once: true }
-    )
-  })
-}
-
-export class MockProvider
-implements ModelProvider {
-  id = 'mock'
-  name = '本地角色模拟模型'
-
-  async chat(
-    request: ChatRequest
-  ): Promise<ChatResponse> {
-    if (request.signal?.aborted) {
-      throw new DOMException('请求已取消', 'AbortError')
-    }
-
-    await abortableDelay(320, request.signal)
-
-    const text = createMockReply(request)
-
-    return {
-      text,
-      raw: {
-        provider: this.id,
-        character:
-          request.character?.characterName
-      }
-    }
-  }
-
-  async chatStream(
-    request: ChatRequest,
-    handlers?: ChatStreamHandlers
-  ): Promise<ChatResponse> {
-    if (request.signal?.aborted) {
-      throw new DOMException('请求已取消', 'AbortError')
-    }
-
-    const text = createMockReply(request)
-    let streamed = ''
-
-    await abortableDelay(180, request.signal)
-
-    for (let index = 0; index < text.length;) {
-      if (request.signal?.aborted) {
-        throw new DOMException('请求已取消', 'AbortError')
-      }
-
-      const size = /[，。！？!?\n]/.test(text[index] ?? '')
-        ? 1
-        : 1 + ((index + text.length) % 3)
-
-      const delta = text.slice(index, index + size)
-      index += delta.length
-      streamed += delta
-
-      await handlers?.onDelta?.({
-        delta,
-        text: streamed
-      })
-
-      await abortableDelay(
-        /[，。！？!?\n]/.test(delta) ? 82 : 28,
-        request.signal
-      )
-    }
-
-    return {
-      text,
-      raw: {
-        provider: this.id,
-        streamed: true,
-        character:
-          request.character?.characterName
-      }
-    }
-  }
-
-  async listModels(): Promise<ProviderModel[]> {
-    return [
-      {
-        id: 'mock',
-        name: '本地模拟模型',
-        ownedBy: 'local'
-      }
-    ]
-  }
-
-  async testConnection() {
-    return true
-  }
-
-  async testVision() {
-    return false
-  }
-}
-
 export interface OpenAICompatibleProviderOptions {
   id: string
   name: string
@@ -1024,7 +105,13 @@ interface OpenAIChatCompletionResponse {
     message?: {
       content?: string | Array<{ type?: string; text?: string }>
     }
+    finish_reason?: string | null
   }>
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  }
   error?: {
     message?: string
     code?: string
@@ -1097,6 +184,61 @@ function extractErrorMessage(
   return ''
 }
 
+export class TokenLimitError extends Error {
+  readonly kind: 'context' | 'output' | 'quota'
+
+  constructor(kind: 'context' | 'output' | 'quota', message: string) {
+    super(message)
+    this.name = 'TokenLimitError'
+    this.kind = kind
+  }
+}
+
+export function isTokenLimitError(error: unknown): error is TokenLimitError {
+  return error instanceof TokenLimitError
+}
+
+function tokenErrorKind(message: string): TokenLimitError['kind'] | undefined {
+  const source = message.toLowerCase()
+  if (/(insufficient[_ -]?quota|quota exceeded|billing|credit balance|account balance|余额不足|额度不足|配额不足)/i.test(source)) return 'quota'
+  if (/(context[_ -]?length|maximum context|context window|too many tokens|prompt is too long|input tokens|上下文.{0,8}(超|过|不足)|输入.{0,8}token)/i.test(source)) return 'context'
+  if (/(max[_ -]?tokens|token limit|output tokens|completion tokens|达到.{0,8}token|输出.{0,8}token)/i.test(source)) return 'output'
+  return undefined
+}
+
+function tokenLimitMessage(kind: TokenLimitError['kind'], detail = '') {
+  const suffix = detail ? `：${detail}` : ''
+  if (kind === 'quota') return `API Token/额度不足，无法继续生成。请补充额度或更换可用接口后重试${suffix}`
+  if (kind === 'context') return `上下文 Token 已超过模型可用窗口，无法继续生成。请缩短上下文、压缩记忆或更换更大上下文模型后重试${suffix}`
+  return `本轮回复达到最大输出 Token，无法保证内容完整，因此本轮不会保存。请提高“最大输出长度”后重试${suffix}`
+}
+
+function tokenErrorFromMessage(message: string) {
+  const kind = tokenErrorKind(message)
+  return kind ? new TokenLimitError(kind, tokenLimitMessage(kind, message)) : undefined
+}
+
+function assertCompletionFinished(finishReason?: string | null) {
+  if (!finishReason) return
+  const normalized = finishReason.toLowerCase()
+  if (normalized === 'length' || normalized === 'max_tokens') {
+    throw new TokenLimitError('output', tokenLimitMessage('output'))
+  }
+}
+
+function assertOutputBudget(
+  usage: ChatResponse['usage'] | undefined,
+  finishReason: string | undefined,
+  maxTokens: number
+) {
+  // 少数 OpenAI-compatible 接口不返回 finish_reason。若输出恰好打满请求上限，
+  // 宁可视为可能截断并停止，也不把半句话保存成角色回复。
+  if (finishReason || !usage?.completionTokens) return
+  if (usage.completionTokens >= maxTokens) {
+    throw new TokenLimitError('output', tokenLimitMessage('output'))
+  }
+}
+
 export class ProviderHttpError extends Error {
   readonly status: number
   readonly providerMessage: string
@@ -1113,6 +255,14 @@ function createHttpError(
   status: number,
   providerMessage = ''
 ) {
+  const tokenError = tokenErrorFromMessage(providerMessage)
+  if (tokenError) return tokenError
+  // 多数 OpenAI-compatible 服务用 HTTP 402 表示余额/额度耗尽。
+  // 这类情况必须硬停止，不能退回本地角色内容。
+  if (status === 402) {
+    return new TokenLimitError('quota', tokenLimitMessage('quota', providerMessage))
+  }
+
   const suffix = providerMessage
     ? `：${providerMessage}`
     : ''
@@ -1376,6 +526,29 @@ function extractStreamDelta(payload: unknown) {
   return ''
 }
 
+
+function extractStreamMeta(payload: unknown) {
+  if (typeof payload !== 'object' || payload === null) return {}
+  const record = payload as Record<string, unknown>
+  const choices = Array.isArray(record.choices) ? record.choices : []
+  const first = choices[0]
+  const finishReason = typeof first === 'object' && first !== null && typeof (first as Record<string, unknown>).finish_reason === 'string'
+    ? String((first as Record<string, unknown>).finish_reason)
+    : undefined
+  const usageRaw = typeof record.usage === 'object' && record.usage !== null
+    ? record.usage as Record<string, unknown>
+    : undefined
+  const numberValue = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  return {
+    finishReason,
+    usage: usageRaw ? {
+      promptTokens: numberValue(usageRaw.prompt_tokens),
+      completionTokens: numberValue(usageRaw.completion_tokens),
+      totalTokens: numberValue(usageRaw.total_tokens)
+    } : undefined
+  }
+}
+
 async function emitStreamText(
   handlers: ChatStreamHandlers | undefined,
   delta: string,
@@ -1391,7 +564,8 @@ async function emitStreamText(
 
 async function readEventStream(
   response: Response,
-  handlers?: ChatStreamHandlers
+  handlers: ChatStreamHandlers | undefined,
+  maxTokens: number
 ): Promise<ChatResponse> {
   if (!response.body) {
     throw new Error('当前浏览器无法读取流式回复。')
@@ -1403,6 +577,8 @@ async function readEventStream(
   let rawText = ''
   let text = ''
   let eventCount = 0
+  let finishReason: string | undefined
+  let usage: ChatResponse['usage']
 
   const consumeBlock = async (block: string) => {
     const dataLines = block
@@ -1417,6 +593,9 @@ async function readEventStream(
       if (payload === undefined) continue
 
       eventCount += 1
+      const meta = extractStreamMeta(payload)
+      if (meta.finishReason) finishReason = meta.finishReason
+      if (meta.usage) usage = { ...(usage || {}), ...meta.usage }
       const delta = extractStreamDelta(payload)
 
       if (delta) {
@@ -1466,6 +645,9 @@ async function readEventStream(
     const fallbackData = parseJsonSafely(rawText.trim())
 
     if (fallbackData !== undefined) {
+      const meta = extractStreamMeta(fallbackData)
+      if (meta.finishReason) finishReason = meta.finishReason
+      if (meta.usage) usage = { ...(usage || {}), ...meta.usage }
       const fallbackText = extractStreamDelta(fallbackData)
 
       if (fallbackText) {
@@ -1483,11 +665,18 @@ async function readEventStream(
     throw new Error('模型没有返回有效的流式回复。')
   }
 
+  assertCompletionFinished(finishReason)
+  assertOutputBudget(usage, finishReason, maxTokens)
+
   return {
     text: text.trim(),
+    finishReason,
+    usage,
     raw: {
       streamed: true,
-      eventCount
+      eventCount,
+      finishReason,
+      usage
     }
   }
 }
@@ -1596,6 +785,15 @@ implements ModelProvider {
       )
     }
 
+    const finishReason = data.choices?.[0]?.finish_reason || undefined
+    const usage: ChatResponse['usage'] = {
+      promptTokens: data.usage?.prompt_tokens,
+      completionTokens: data.usage?.completion_tokens,
+      totalTokens: data.usage?.total_tokens
+    }
+    assertCompletionFinished(finishReason)
+    assertOutputBudget(usage, finishReason, this.maxTokens)
+
     const text = extractAssistantText(
       data.choices?.[0]?.message?.content
     )
@@ -1606,7 +804,9 @@ implements ModelProvider {
 
     return {
       text,
-      raw: data
+      raw: data,
+      finishReason,
+      usage
     }
   }
 
@@ -1680,6 +880,15 @@ implements ModelProvider {
         response
       ) as OpenAIChatCompletionResponse
 
+      const finishReason = data.choices?.[0]?.finish_reason || undefined
+      const usage: ChatResponse['usage'] = {
+        promptTokens: data.usage?.prompt_tokens,
+        completionTokens: data.usage?.completion_tokens,
+        totalTokens: data.usage?.total_tokens
+      }
+      assertCompletionFinished(finishReason)
+      assertOutputBudget(usage, finishReason, this.maxTokens)
+
       const text = extractAssistantText(
         data.choices?.[0]?.message?.content
       )
@@ -1696,13 +905,16 @@ implements ModelProvider {
 
       return {
         text,
-        raw: data
+        raw: data,
+        finishReason,
+        usage
       }
     }
 
     return readEventStream(
       response,
-      handlers
+      handlers,
+      this.maxTokens
     )
   }
 

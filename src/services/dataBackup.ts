@@ -5,7 +5,6 @@ import { getMessageImages } from './messageImageService'
 import type {
   Character,
   CharacterMemory,
-  CharacterRelationship,
   ChatSettings,
   ContactGroup,
   Conversation,
@@ -14,7 +13,6 @@ import type {
   Message,
   MessageImage,
   MusicState,
-  RelationshipEvent,
   UserProfile,
   UserPersona,
   LorebookEntry,
@@ -25,6 +23,36 @@ import type {
   CommunityResourceArchive,
   World
 } from '../types/domain'
+
+
+/**
+ * Backup V9 旧字段兼容类型。V13 运行时不再创建/恢复本地关系积分数据。
+ */
+interface LegacyCharacterRelationship {
+  id: string
+  characterId: string
+  intimacy: number
+  trust: number
+  familiarity: number
+  stage: string
+  emotion: string
+  emotionReason: string
+  lastInteractionAt: string
+  lastProactiveAt: string
+  chatDays: number
+  musicCount: number
+  updatedAt: string
+}
+
+interface LegacyRelationshipEvent {
+  id: string
+  characterId: string
+  conversationId: string
+  type: string
+  title: string
+  description: string
+  createdAt: string
+}
 
 export interface CompanionBackup {
   format: 'ai-companion-phone-backup'
@@ -42,8 +70,8 @@ export interface CompanionBackup {
     memories: CharacterMemory[]
     conversationStates: ConversationState[]
     musicStates: MusicState[]
-    relationships: CharacterRelationship[]
-    relationshipEvents: RelationshipEvent[]
+    relationships: LegacyCharacterRelationship[]
+    relationshipEvents: LegacyRelationshipEvent[]
     personas: UserPersona[]
     lorebookEntries: LorebookEntry[]
     lorebooks: LorebookResource[]
@@ -101,8 +129,6 @@ export async function createBackup(options?: {
     memories,
     conversationStates,
     musicStates,
-    relationships,
-    relationshipEvents,
     personas,
     lorebookEntries,
     lorebooks,
@@ -122,8 +148,6 @@ export async function createBackup(options?: {
     db.memories.toArray(),
     db.conversationStates.toArray(),
     db.musicStates.toArray(),
-    db.relationships.toArray(),
-    db.relationshipEvents.toArray(),
     db.personas.toArray(),
     db.lorebookEntries.toArray(),
     db.lorebooks.toArray(),
@@ -133,6 +157,10 @@ export async function createBackup(options?: {
     db.communityResourceArchives.toArray(),
     db.conversationStateHistory.toArray()
   ])
+
+  // Backup V9 兼容字段继续保留，但 V13 起不再有本地关系积分 stores。
+  const relationships: LegacyCharacterRelationship[] = []
+  const relationshipEvents: LegacyRelationshipEvent[] = []
 
   const includeImages = options?.includeImages ?? true
   const exportMessages = includeImages
@@ -303,8 +331,8 @@ export async function parseBackupFile(
       memories: optionalArray('memories') as CharacterMemory[],
       conversationStates: optionalArray('conversationStates') as ConversationState[],
       musicStates: optionalArray('musicStates') as MusicState[],
-      relationships: optionalArray('relationships') as CharacterRelationship[],
-      relationshipEvents: optionalArray('relationshipEvents') as RelationshipEvent[],
+      relationships: optionalArray('relationships') as LegacyCharacterRelationship[],
+      relationshipEvents: optionalArray('relationshipEvents') as LegacyRelationshipEvent[],
       personas: optionalArray('personas') as UserPersona[],
       lorebookEntries: optionalArray('lorebookEntries') as LorebookEntry[],
       lorebooks: optionalArray('lorebooks') as LorebookResource[],
@@ -335,8 +363,6 @@ export async function restoreBackup(
     await db.memories.clear()
     await db.conversationStates.clear()
     await db.musicStates.clear()
-    await db.relationships.clear()
-    await db.relationshipEvents.clear()
     await db.personas.clear()
     await db.lorebookEntries.clear()
     await db.lorebooks.clear()
@@ -377,12 +403,8 @@ export async function restoreBackup(
     if (plainBackup.data.musicStates.length) {
       await db.musicStates.bulkPut(plainBackup.data.musicStates)
     }
-    if (plainBackup.data.relationships.length) {
-      await db.relationships.bulkPut(plainBackup.data.relationships)
-    }
-    if (plainBackup.data.relationshipEvents.length) {
-      await db.relationshipEvents.bulkPut(plainBackup.data.relationshipEvents)
-    }
+    // 旧备份中的 relationships / relationshipEvents 仅为历史兼容数据，
+    // V13 起不再恢复，避免本地关系积分重新污染角色行为。
     if (plainBackup.data.personas.length) {
       await db.personas.bulkPut(plainBackup.data.personas)
     }

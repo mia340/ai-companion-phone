@@ -24,7 +24,7 @@ describe('community UI priority', () => {
     expect(contract.active).toBe(true)
     expect(contract.mode).toBe('structured-contract')
     expect(contract.requiredTagNames).toContain('日期')
-    expect(buildCommunityUiPriorityPrompt(contract)).toContain('不要套用小手机默认的“动作与对白分开/合并”规则')
+    expect(buildCommunityUiPriorityPrompt(contract)).toContain('不要把它改写成小手机私有格式')
   })
 
   it('detects regex generated HTML UI', () => {
@@ -95,8 +95,8 @@ describe('community UI priority', () => {
     expect(buildCommunityUiPriorityPrompt(contract)).toContain('原卡 HTML UI 模板')
   })
 
-  it('keeps community XML while removing only phone private protocol', () => {
+  it('keeps all original-card tags untouched in card-first mode', () => {
     const text = '<日期>10月15日</日期><地点>公寓</地点>\n<scene_action>抬眼看你</scene_action>\n<companion_packet>{"messages":[]}</companion_packet>'
-    expect(sanitizeCommunityUiText(text)).toBe('<日期>10月15日</日期><地点>公寓</地点>\n抬眼看你')
+    expect(sanitizeCommunityUiText(text)).toBe(text)
   })
 })

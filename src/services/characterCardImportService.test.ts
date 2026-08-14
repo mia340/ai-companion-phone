@@ -17,6 +17,8 @@ describe('character card import', () => {
     }))
     expect(result.format).toBe('sillytavern-v2')
     expect(result.patch.name).toBe('测试角色')
+    expect(result.patch.cardDescription).toBe('身份：医生')
+    expect(result.patch.cardPersonality).toBe('克制，慢热')
     expect(result.patch.exampleDialogues?.length).toBe(1)
     expect(result.lorebookEntries).toHaveLength(1)
     expect(result.lorebookEntries[0]?.constant).toBe(true)
@@ -74,7 +76,7 @@ it('识别 data/root extensions、depth_prompt、talkativeness 与两处内嵌�
     }
   }))
   expect(result.patch.talkativeness).toBe(0.8)
-  expect(result.patch.initiative).toBe('high')
+  expect(result.patch.initiative).toBeUndefined()
   expect(result.patch.depthPrompt?.prompt).toBe('深度约束')
   expect(result.patch.worldBookHint).toBe('测试世界书')
   expect(result.patch.groupOnlyGreetings).toEqual(['群聊开场'])
@@ -88,30 +90,30 @@ it('从内嵌世界书 user人设条目识别角色专属 Persona', () => {
     spec: 'chara_card_v2',
     spec_version: '2.0',
     data: {
-      name: '墨清尘',
-      description: '{{char}}是墨清尘。',
+      name: '角色甲',
+      description: '{{char}}是角色甲。',
       character_book: {
         entries: [
           { id: 1, name: '世界观', comment: '世界观', keys: [], content: '{{user}}幼时生活在中境。', constant: true, enabled: true },
-          { id: 2, name: 'user人设', comment: 'user人设', keys: [], content: '{{user}}我是洛梨,墨清尘徒弟,筑基期剑修,20岁.喜欢种地瓜和写话本。', constant: true, enabled: true }
+          { id: 2, name: 'user人设', comment: 'user人设', keys: [], content: '{{user}}我是洛梨,角色甲徒弟,筑基期剑修,20岁.喜欢种地瓜和写话本。', constant: true, enabled: true }
         ]
       }
     }
   }))
   expect(result.embeddedUser?.patch.name).toBe('洛梨')
   expect(result.embeddedUser?.patch.age).toBe('20')
-  expect(result.embeddedUser?.patch.identity).toContain('墨清尘徒弟')
+  expect(result.embeddedUser?.patch.identity).toContain('角色甲徒弟')
   expect(result.embeddedUser?.rawTemplate).toContain('{{user}}我是洛梨')
   expect(result.notes.some(note => note.includes('内嵌世界书 user 人设条目'))).toBe(true)
 })
 
-it('识别 description 中带序号的自然语言 {{user}} Persona（夜临格式）', () => {
+it('识别 description 中带序号的自然语言 {{user}} Persona（带序号自然语言格式）', () => {
   const result = parseCharacterCardJson(JSON.stringify({
     spec: 'chara_card_v2',
     spec_version: '2.0',
     data: {
-      name: '夜临',
-      description: '{{char}}是夜临。\n③{{user}}我是江梨,女,19岁,162cm.A大大一新生,棕发棕瞳,普通单亲家庭,短暂性失聪,会唇语。'
+      name: '角色乙',
+      description: '{{char}}是角色乙。\n③{{user}}我是江梨,女,19岁,162cm.A大大一新生,棕发棕瞳,普通单亲家庭,短暂性失聪,会唇语。'
     }
   }))
   expect(result.embeddedUser?.patch.name).toBe('江梨')

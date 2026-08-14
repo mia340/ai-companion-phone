@@ -7,17 +7,16 @@ import type {
 
 export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   id: 'default',
-  provider: 'mock',
-  baseUrl: '',
+  provider: 'deepseek',
+  baseUrl: 'https://api.deepseek.com',
   apiKey: '',
-  model: 'mock',
+  model: 'deepseek-v4-flash',
   temperature: 0.8,
   maxTokens: 2048,
-  fallbackToMock: true,
-  availableModels: ['mock'],
+  availableModels: ['deepseek-v4-flash', 'deepseek-v4-pro'],
   visionMode: 'auto',
   visionSupported: false,
-  visionTestedSignature: 'mock||mock',
+  visionTestedSignature: undefined,
   updatedAt: new Date(0).toISOString()
 }
 
@@ -49,8 +48,8 @@ export function getProviderDefaults(
 
   return {
     baseUrl: '',
-    model: 'mock',
-    models: ['mock']
+    model: '',
+    models: []
   }
 }
 
@@ -88,10 +87,7 @@ export function modelVisionSignature(
 export function getVisionCapability(
   settings: ModelSettings
 ): 'supported' | 'unsupported' | 'unknown' {
-  if (
-    settings.provider === 'mock' ||
-    settings.visionMode === 'disabled'
-  ) {
+  if (settings.visionMode === 'disabled') {
     return 'unsupported'
   }
 
@@ -140,10 +136,13 @@ Promise<ModelSettings> {
     }
   }
 
-  const defaults = getProviderDefaults(saved.provider)
+  const savedProvider = String((saved as unknown as { provider?: unknown }).provider || '')
+  const legacyMock = savedProvider === 'mock'
+  const effectiveProvider: ProviderType = savedProvider === 'openai-compatible' ? 'openai-compatible' : 'deepseek'
+  const defaults = getProviderDefaults(effectiveProvider)
 
   const shouldMigrateDeepSeekModel =
-    saved.provider === 'deepseek' &&
+    effectiveProvider === 'deepseek' &&
     [
       'deepseek-chat',
       'deepseek-reasoner'
@@ -156,7 +155,7 @@ Promise<ModelSettings> {
   const availableModels = normalizeModelList([
     ...(saved.availableModels ?? []).filter(
       item =>
-        saved.provider !== 'deepseek' ||
+        effectiveProvider !== 'deepseek' ||
         ![
           'deepseek-chat',
           'deepseek-reasoner'
@@ -175,16 +174,15 @@ Promise<ModelSettings> {
   const normalized: ModelSettings = {
     ...DEFAULT_MODEL_SETTINGS,
     ...saved,
-    model,
+    provider: effectiveProvider,
+    baseUrl: legacyMock ? defaults.baseUrl : saved.baseUrl,
+    apiKey: legacyMock ? '' : saved.apiKey,
+    model: legacyMock ? defaults.model : model,
     maxTokens: migratedMaxTokens ?? DEFAULT_MODEL_SETTINGS.maxTokens,
-    availableModels,
+    availableModels: legacyMock ? defaults.models : availableModels,
     visionMode: saved.visionMode ?? 'auto'
   }
 
-  if (normalized.provider === 'mock') {
-    normalized.visionSupported = false
-    normalized.visionTestedSignature = modelVisionSignature(normalized)
-  }
 
   return normalized
 }
@@ -193,6 +191,7 @@ export async function saveModelSettings(
   settings: ModelSettings
 ): Promise<void> {
   const existing = await db.modelSettings.get('default')
+  const provider: ProviderType = settings.provider
   const normalizedBaseUrl = normalizeApiBaseUrl(settings.baseUrl)
   const normalizedModel = settings.model.trim()
   const availableModels = normalizeModelList([
@@ -201,7 +200,7 @@ export async function saveModelSettings(
   ])
 
   const nextSignature = modelVisionSignature({
-    provider: settings.provider,
+    provider,
     baseUrl: normalizedBaseUrl,
     model: normalizedModel
   })
@@ -215,6 +214,7 @@ export async function saveModelSettings(
   await db.modelSettings.put({
     ...settings,
     id: 'default',
+    provider,
     baseUrl: normalizedBaseUrl,
     apiKey: settings.apiKey.trim(),
     model: normalizedModel,
@@ -228,16 +228,12 @@ export async function saveModelSettings(
     ),
     availableModels,
     visionMode: settings.visionMode ?? 'auto',
-    visionSupported: settings.provider === 'mock'
-      ? false
-      : capabilityChanged
-        ? undefined
-        : settings.visionSupported,
-    visionTestedSignature: settings.provider === 'mock'
-      ? nextSignature
-      : capabilityChanged
-        ? undefined
-        : settings.visionTestedSignature,
+    visionSupported: capabilityChanged
+      ? undefined
+      : settings.visionSupported,
+    visionTestedSignature: capabilityChanged
+      ? undefined
+      : settings.visionTestedSignature,
     visionTestedAt: capabilityChanged
       ? undefined
       : settings.visionTestedAt,
