@@ -1391,9 +1391,9 @@ async function requestAssistantReply(options?: {
         char: activeCharacter.name,
         user: persona.name,
         scenario: activeCharacter.scenario || '',
-        personality: activeCharacter.persona || '',
+        personality: activeCharacter.cardPersonality || activeCharacter.persona || '',
         persona: persona.description || persona.identity || '',
-        description: activeCharacter.background || activeCharacter.identity || '',
+        description: activeCharacter.cardDescription || activeCharacter.background || activeCharacter.identity || '',
         lastChatMessage: latestUserText
       })
       const transformed = activePromptRegex.length ? applyRegexScripts(base, activePromptRegex, regexMacros).text : base
@@ -2940,7 +2940,7 @@ onUnmounted(() => {
           @clear-conversation="clearConversationMessages"
           @open-model-settings="router.push('/settings/models')"
           @open-personas="router.push('/settings/personas')"
-          @open-lorebook="router.push(`/settings/lorebook?character=${character?.id || ''}`)"
+          @open-lorebook="router.push({ path: '/world', query: { character: character?.id || '', tab: 'lorebooks' } })"
           @open-character-card="character && router.push(`/characters/${character.id}/card`)"
           @open-prompt-debug="conversation && router.push(`/chat/${conversation.id}/debug`)"
           @open-memory-manager="conversation && router.push(`/chat/${conversation.id}/memory`)"

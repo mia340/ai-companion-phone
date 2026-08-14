@@ -352,6 +352,123 @@ export async function restoreBackup(
     JSON.stringify(backup)
   ) as CompanionBackup
 
+  // Backup V9 仍能读取旧结构，但恢复到 V0.4.4.2 时立即按 V14 规则归一：
+  // 通讯录不再恢复分组；世界书 / Regex 变成共享资源本体，角色使用关系只通过 ResourceBinding 表达。
+  plainBackup.data.contactGroups = []
+  plainBackup.data.characters = plainBackup.data.characters.map(character => {
+    const next = { ...character, groups: [] }
+    const description = next.cardDescription?.trim() || ''
+    const personality = next.cardPersonality?.trim() || ''
+    const persona = next.persona?.trim() || ''
+    const parts = [description].filter(Boolean)
+    if (personality && !parts.some(item => item === personality || item.includes(personality))) parts.push(personality)
+    const combined = parts.join('\n\n')
+    if (combined && (!persona || persona === description || persona === personality)) next.persona = combined
+    return next
+  })
+  const characterMap = new Map(plainBackup.data.characters.map(character => [character.id, character]))
+  const bindingKeys = new Set(plainBackup.data.resourceBindings.map(binding => {
+    const scope = binding.scope || (binding.characterId ? 'character' : 'global')
+    const scopeId = binding.scopeId || binding.characterId || ''
+    return `${binding.resourceType}|${binding.resourceId}|${scope}|${scopeId}`
+  }))
+  const ensureBinding = (input: {
+    worldId: string
+    characterId?: string
+    scope: 'global' | 'character'
+    resourceType: 'lorebook' | 'regex'
+    resourceId: string
+  }) => {
+    const scopeId = input.scope === 'character' ? input.characterId : undefined
+    if (input.scope === 'character' && !scopeId) return
+    const key = `${input.resourceType}|${input.resourceId}|${input.scope}|${scopeId || ''}`
+    if (bindingKeys.has(key)) return
+    const now = new Date().toISOString()
+    plainBackup.data.resourceBindings.push({
+      id: crypto.randomUUID(),
+      worldId: input.worldId,
+      characterId: input.scope === 'character' ? scopeId : undefined,
+      scope: input.scope,
+      scopeId,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      enabled: true,
+      order: 100,
+      createdAt: now,
+      updatedAt: now
+    })
+    bindingKeys.add(key)
+  }
+
+  for (const lorebook of plainBackup.data.lorebooks) {
+    const legacyCharacterId = lorebook.characterId
+    if (!legacyCharacterId) continue
+    const sourceCharacter = characterMap.get(legacyCharacterId)
+    lorebook.sourceCharacterId = lorebook.sourceCharacterId || (sourceCharacter ? legacyCharacterId : undefined)
+    lorebook.sourceCharacterName = lorebook.sourceCharacterName || sourceCharacter?.name
+    lorebook.characterId = undefined
+    if (sourceCharacter) ensureBinding({
+      worldId: lorebook.worldId || sourceCharacter.worldId,
+      characterId: legacyCharacterId,
+      scope: 'character',
+      resourceType: 'lorebook',
+      resourceId: lorebook.id
+    })
+  }
+
+  for (const entry of plainBackup.data.lorebookEntries) {
+    if (entry.lorebookId) entry.characterId = undefined
+  }
+  const looseEntries = plainBackup.data.lorebookEntries.filter(entry => !entry.lorebookId)
+  const looseGroups = new Map<string, LorebookEntry[]>()
+  for (const entry of looseEntries) {
+    const key = entry.characterId || '__global__'
+    const rows = looseGroups.get(key) || []
+    rows.push(entry)
+    looseGroups.set(key, rows)
+  }
+  for (const [key, rows] of looseGroups) {
+    if (!rows.length) continue
+    const sourceCharacter = key === '__global__' ? undefined : characterMap.get(key)
+    const now = new Date().toISOString()
+    const lorebookId = crypto.randomUUID()
+    const worldId = rows[0]?.worldId || sourceCharacter?.worldId || 'world-default'
+    plainBackup.data.lorebooks.push({
+      id: lorebookId,
+      worldId,
+      name: sourceCharacter ? `${sourceCharacter.name} · 历史世界书` : '历史全局世界书',
+      description: '由旧备份散落世界书条目自动整理；现在是可复用的共享资源。',
+      sourceCharacterId: sourceCharacter ? key : undefined,
+      sourceCharacterName: sourceCharacter?.name,
+      sourceFormat: 'legacy',
+      createdAt: now,
+      updatedAt: now
+    })
+    for (const entry of rows) {
+      entry.lorebookId = lorebookId
+      entry.characterId = undefined
+      entry.updatedAt = now
+    }
+    if (sourceCharacter) ensureBinding({ worldId, characterId: key, scope: 'character', resourceType: 'lorebook', resourceId: lorebookId })
+    else ensureBinding({ worldId, scope: 'global', resourceType: 'lorebook', resourceId: lorebookId })
+  }
+
+  for (const script of plainBackup.data.regexScripts) {
+    const legacyCharacterId = script.characterId
+    if (!legacyCharacterId) continue
+    const sourceCharacter = characterMap.get(legacyCharacterId)
+    script.sourceCharacterId = script.sourceCharacterId || (sourceCharacter ? legacyCharacterId : undefined)
+    script.sourceCharacterName = script.sourceCharacterName || sourceCharacter?.name
+    script.characterId = undefined
+    if (sourceCharacter) ensureBinding({
+      worldId: script.worldId || sourceCharacter.worldId,
+      characterId: legacyCharacterId,
+      scope: 'character',
+      resourceType: 'regex',
+      resourceId: script.id
+    })
+  }
+
   await db.transaction('rw', db.tables, async () => {
     await db.messages.clear()
     await db.conversations.clear()
@@ -375,9 +492,6 @@ export async function restoreBackup(
 
     if (plainBackup.data.worlds.length) {
       await db.worlds.bulkPut(plainBackup.data.worlds)
-    }
-    if (plainBackup.data.contactGroups.length) {
-      await db.contactGroups.bulkPut(plainBackup.data.contactGroups)
     }
     if (plainBackup.data.characters.length) {
       await db.characters.bulkPut(plainBackup.data.characters)

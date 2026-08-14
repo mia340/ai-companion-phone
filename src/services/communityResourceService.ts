@@ -59,9 +59,10 @@ export async function deleteCommunityResourceArchive(id: string) {
 
 export async function importLorebookText(options: { text: string; fileName: string; worldId: string; characterId?: string; autoBind?: boolean }) {
   const parsed = parseLorebookJson(options.text, options.fileName)
-  const book = await saveLorebook({ ...parsed.lorebook, worldId: options.worldId, characterId: options.characterId })
+  // 资源本体永远进入共享资源库；characterId 只用于本次自动绑定，不再成为资源所有权。
+  const book = await saveLorebook({ ...parsed.lorebook, worldId: options.worldId, characterId: undefined })
   for (const entry of parsed.entries) {
-    await saveLorebookEntry({ ...entry, worldId: options.worldId, lorebookId: book.id, characterId: options.characterId })
+    await saveLorebookEntry({ ...entry, worldId: options.worldId, lorebookId: book.id, characterId: undefined })
   }
   if (options.characterId && options.autoBind !== false) {
     await setResourceBinding({ worldId: options.worldId, characterId: options.characterId, resourceType: 'lorebook', resourceId: book.id, enabled: true })
@@ -96,7 +97,7 @@ export async function importRegexText(options: { text: string; fileName: string;
   const parsed = parseRegexJson(options.text, options.fileName)
   const ids: string[] = []
   for (const script of parsed.scripts) {
-    const row = await saveRegexScriptResource({ ...script, worldId: options.worldId, characterId: options.characterId })
+    const row = await saveRegexScriptResource({ ...script, worldId: options.worldId, characterId: undefined })
     ids.push(row.id)
     if (options.characterId && options.autoBind !== false) {
       await setResourceBinding({ worldId: options.worldId, characterId: options.characterId, resourceType: 'regex', resourceId: row.id, enabled: true })

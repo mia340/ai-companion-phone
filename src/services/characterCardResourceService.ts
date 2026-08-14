@@ -11,11 +11,20 @@ export interface ReplaceCharacterCardResourcesInput {
   imported: ImportedCharacterCard
 }
 
+function normalizedScope(binding: { scope?: string; characterId?: string }) {
+  return binding.scope || (binding.characterId ? 'character' : 'global')
+}
+
+function normalizedScopeId(binding: { scopeId?: string; characterId?: string }) {
+  return binding.scopeId || binding.characterId
+}
+
 /**
- * 用一份新导入的角色卡资源替换该角色之前“由角色卡导入”的资源。
+ * 用一份新角色卡替换该角色“由角色卡导入”的资源。
  *
- * 只删除 sourceFormat=character-card / 对应角色卡 archive，绝不碰用户手工创建、
- * 全局共享或其它来源的世界书 / Regex / Preset。
+ * V0.4.4.2 起，世界书 / Regex 是共享资源库资产，不属于任何角色。
+ * 角色卡只提供“来源信息 + 默认绑定”。换卡只解除旧资源与当前角色的绑定，
+ * 旧资源本体始终保留在共享资源库，是否删除由用户在资源库里明确决定。
  */
 export async function replaceCharacterCardResources(input: ReplaceCharacterCardResourcesInput) {
   const now = new Date().toISOString()
@@ -25,19 +34,40 @@ export async function replaceCharacterCardResources(input: ReplaceCharacterCardR
     'rw',
     [db.lorebooks, db.lorebookEntries, db.regexScripts, db.resourceBindings, db.communityResourceArchives],
     async () => {
-      const oldLorebooks = (await db.lorebooks.where('characterId').equals(input.characterId).toArray())
-        .filter(row => row.sourceFormat === 'character-card')
+      const allLorebooks = await db.lorebooks.toArray()
+      const oldLorebooks = allLorebooks.filter(row =>
+        row.sourceFormat === 'character-card' &&
+        (row.sourceCharacterId === input.characterId || row.characterId === input.characterId)
+      )
+
       for (const lorebook of oldLorebooks) {
-        await db.lorebookEntries.where('lorebookId').equals(lorebook.id).delete()
-        await db.resourceBindings.where('resourceId').equals(lorebook.id).delete()
-        await db.lorebooks.delete(lorebook.id)
+        const sourceBindings = (await db.resourceBindings.where('resourceId').equals(lorebook.id).toArray())
+          .filter(binding => normalizedScope(binding) === 'character' && normalizedScopeId(binding) === input.characterId)
+        if (sourceBindings.length) await db.resourceBindings.bulkDelete(sourceBindings.map(binding => binding.id))
+        await db.lorebooks.update(lorebook.id, {
+          characterId: undefined,
+          sourceCharacterId: undefined,
+          sourceCharacterName: lorebook.sourceCharacterName || input.characterName,
+          updatedAt: now
+        })
+        await db.lorebookEntries.where('lorebookId').equals(lorebook.id).modify({ characterId: undefined })
       }
 
-      const oldRegex = (await db.regexScripts.where('characterId').equals(input.characterId).toArray())
-        .filter(row => row.sourceFormat === 'character-card')
+      const allRegex = await db.regexScripts.toArray()
+      const oldRegex = allRegex.filter(row =>
+        row.sourceFormat === 'character-card' &&
+        (row.sourceCharacterId === input.characterId || row.characterId === input.characterId)
+      )
       for (const script of oldRegex) {
-        await db.resourceBindings.where('resourceId').equals(script.id).delete()
-        await db.regexScripts.delete(script.id)
+        const sourceBindings = (await db.resourceBindings.where('resourceId').equals(script.id).toArray())
+          .filter(binding => normalizedScope(binding) === 'character' && normalizedScopeId(binding) === input.characterId)
+        if (sourceBindings.length) await db.resourceBindings.bulkDelete(sourceBindings.map(binding => binding.id))
+        await db.regexScripts.update(script.id, {
+          characterId: undefined,
+          sourceCharacterId: undefined,
+          sourceCharacterName: script.sourceCharacterName || input.characterName,
+          updatedAt: now
+        })
       }
 
       const oldArchives = await db.communityResourceArchives
@@ -53,7 +83,9 @@ export async function replaceCharacterCardResources(input: ReplaceCharacterCardR
           ...sourceLorebook,
           id: lorebookId,
           worldId: input.worldId,
-          characterId: input.characterId,
+          characterId: undefined,
+          sourceCharacterId: input.characterId,
+          sourceCharacterName: input.characterName,
           name: input.imported.lorebookName || sourceLorebook.name || `${input.characterName} · 角色卡世界书`,
           description: sourceLorebook.description,
           sourceFileName: input.fileName || sourceLorebook.sourceFileName || undefined,
@@ -79,7 +111,7 @@ export async function replaceCharacterCardResources(input: ReplaceCharacterCardR
           id: crypto.randomUUID(),
           worldId: input.worldId,
           ...entry,
-          characterId: input.characterId,
+          characterId: undefined,
           lorebookId,
           priority: entry.priority ?? 50,
           insertionOrder: entry.insertionOrder ?? (100 - index),
@@ -95,7 +127,9 @@ export async function replaceCharacterCardResources(input: ReplaceCharacterCardR
           ...script,
           id: regexId,
           worldId: input.worldId,
-          characterId: input.characterId,
+          characterId: undefined,
+          sourceCharacterId: input.characterId,
+          sourceCharacterName: input.characterName,
           sourceFileName: input.fileName || script.sourceFileName,
           sourceFormat: 'character-card',
           createdAt: now,
@@ -142,8 +176,8 @@ export async function replaceCharacterCardResources(input: ReplaceCharacterCardR
             supported: [
               '原始角色卡字段',
               '原始 JSON/PNG metadata 归档',
-              '内嵌世界书',
-              '内嵌 Regex',
+              '内嵌世界书（共享资源库，可复用）',
+              '内嵌 Regex（共享资源库，可复用）',
               '未知扩展字段保留'
             ],
             warnings: [...input.imported.notes]

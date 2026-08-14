@@ -70,86 +70,6 @@ const embeddedPersonaName = ref('')
 const isSaving = ref(false)
 const errorMessage = ref('')
 
-// 可选性格模板
-const personalityPresets = [
-  {
-    label: '温柔治愈',
-    value: '温柔、细腻、善于倾听，会认真回应他人的情绪。'
-  },
-  {
-    label: '慢热克制',
-    value: '性格慢热、克制，不轻易表达感情，但会用行动关心别人。'
-  },
-  {
-    label: '活泼黏人',
-    value: '开朗活泼，分享欲很强，喜欢主动找用户聊天。'
-  },
-  {
-    label: '清冷理性',
-    value: '冷静理性，观察力强，情绪不外露，但内心很重感情。'
-  },
-  {
-    label: '毒舌傲娇',
-    value: '说话偶尔毒舌，嘴硬心软，不擅长直接表达关心。'
-  },
-  {
-    label: '成熟可靠',
-    value: '成熟稳重，有责任感，遇到问题时会先帮助用户分析和解决。'
-  }
-]
-
-// 可选说话方式
-const speakingStylePresets = [
-  {
-    label: '温柔自然',
-    value: '语气温柔自然，句子长度适中，会关注用户的感受。'
-  },
-  {
-    label: '简短克制',
-    value: '回复简短克制，很少使用表情，不说没有意义的客套话。'
-  },
-  {
-    label: '可爱活泼',
-    value: '语气活泼可爱，喜欢使用颜文字和表情，会主动分享日常。'
-  },
-  {
-    label: '幽默毒舌',
-    value: '擅长冷幽默和轻微吐槽，但不会真正伤害用户。'
-  },
-  {
-    label: '成熟稳重',
-    value: '表达清晰沉稳，遇到严肃话题时会认真分析，不敷衍。'
-  }
-]
-
-// 可选背景模板
-const backgroundPresets = [
-  {
-    label: '花店店主',
-    value: '经营一家安静的小花店，熟悉各种花的花期和寓意。'
-  },
-  {
-    label: '大学同学',
-    value: '和用户在大学里认识，彼此拥有许多共同经历。'
-  },
-  {
-    label: '自由撰稿人',
-    value: '是一名自由撰稿人，经常在书店和咖啡馆工作。'
-  },
-  {
-    label: '邻家朋友',
-    value: '从小和用户生活在同一个社区，对用户非常熟悉。'
-  },
-  {
-    label: '独立音乐人',
-    value: '是一名独立音乐人，经常记录生活中的声音和情绪。'
-  },
-  {
-    label: '异世界旅人',
-    value: '来自另一个世界，因为一场意外来到了用户所在的世界。'
-  }
-]
-
 const fieldAliases: Record<string, ParsedField> = {
   头像: 'avatar',
   表情: 'avatar',
@@ -177,6 +97,9 @@ const fieldAliases: Record<string, ParsedField> = {
   核心人设: 'persona',
   人物性格: 'persona',
   性格特点: 'persona',
+  角色介绍: 'persona',
+  人物介绍: 'persona',
+  角色设定: 'persona',
 
   说话方式: 'speakingStyle',
   说话风格: 'speakingStyle',
@@ -202,23 +125,6 @@ function normalizeLabel(value: string) {
   return value
     .replace(/\s/g, '')
     .toLowerCase()
-}
-
-function appendPreset(
-  target: 'persona' | 'speakingStyle' | 'background',
-  value: string
-) {
-  if (target === 'persona') {
-    persona.value = appendText(persona.value, value)
-  }
-
-  if (target === 'speakingStyle') {
-    speakingStyle.value = appendText(speakingStyle.value, value)
-  }
-
-  if (target === 'background') {
-    background.value = appendText(background.value, value)
-  }
 }
 
 function appendText(original: string, addition: string) {
@@ -371,7 +277,7 @@ function parseImportedCharacter() {
   if (matchedFields === 0) {
     persona.value = source
     parseMessage.value =
-      '没有识别到明确字段，已将整段内容放入“核心人设”。连接 AI 后会支持更智能的自由文本拆分。'
+      '没有识别到明确字段，已将整段内容原样放入“完整角色介绍”；不会为了填满界面强行拆分。'
     return
   }
 
@@ -708,7 +614,7 @@ async function save() {
           mood: '',
           activity: initialActivity,
 
-          groups: ['group-unassigned'],
+          groups: [],
           replySpeed: 'natural',
 
           createdAt: now,
@@ -851,7 +757,9 @@ async function save() {
             ...sourceLorebook,
             id: importedLorebookId,
             worldId: DEFAULT_WORLD_ID,
-            characterId,
+            characterId: undefined,
+            sourceCharacterId: characterId,
+            sourceCharacterName: trimmedName,
             name: importedSnapshot?.lorebookName || sourceLorebook.name || `${trimmedName}'s Lorebook`,
             description: sourceLorebook.description || '角色卡内嵌世界书',
             sourceFileName: importedCardFileName.value || sourceLorebook.sourceFileName || undefined,
@@ -879,7 +787,7 @@ async function save() {
               id: crypto.randomUUID(),
               worldId: DEFAULT_WORLD_ID,
               ...entry,
-              characterId,
+              characterId: undefined,
               lorebookId: importedLorebookId,
               priority: entry.priority ?? 50,
               insertionOrder: entry.insertionOrder ?? (100 - index),
@@ -896,7 +804,9 @@ async function save() {
               ...script,
               id: regexId,
               worldId: DEFAULT_WORLD_ID,
-              characterId,
+              characterId: undefined,
+              sourceCharacterId: characterId,
+              sourceCharacterName: trimmedName,
               sourceFileName: importedCardFileName.value || script.sourceFileName,
               sourceFormat: 'character-card',
               createdAt: now,
@@ -1075,9 +985,7 @@ async function save() {
 姓名：示例角色
 年龄：23
 身份：自由职业者
-性格：温柔慢热，观察力很强
-说话方式：语气自然，表达简洁
-背景：可以粘贴任意角色的人物介绍"
+角色介绍：可以直接粘贴完整人物设定；只有原文明确分栏时才拆分"
         ></textarea>
 
         <div class="button-row">
@@ -1106,63 +1014,7 @@ async function save() {
         </p>
       </section>
 
-      <details class="creation-card preset-card">
-        <summary>
-          没有灵感？点击选择角色模板
-        </summary>
 
-        <h4>性格</h4>
-
-        <div class="preset-grid">
-          <button
-            v-for="item in personalityPresets"
-            :key="item.label"
-            type="button"
-            class="preset-chip"
-            @click="appendPreset('persona', item.value)"
-          >
-            {{ item.label }}
-          </button>
-        </div>
-
-        <h4>说话方式</h4>
-
-        <div class="preset-grid">
-          <button
-            v-for="item in speakingStylePresets"
-            :key="item.label"
-            type="button"
-            class="preset-chip"
-            @click="
-              appendPreset(
-                'speakingStyle',
-                item.value
-              )
-            "
-          >
-            {{ item.label }}
-          </button>
-        </div>
-
-        <h4>人物背景</h4>
-
-        <div class="preset-grid">
-          <button
-            v-for="item in backgroundPresets"
-            :key="item.label"
-            type="button"
-            class="preset-chip"
-            @click="
-              appendPreset(
-                'background',
-                item.value
-              )
-            "
-          >
-            {{ item.label }}
-          </button>
-        </div>
-      </details>
 
       <h3 class="form-section-title">
         基础身份
@@ -1273,51 +1125,32 @@ async function save() {
         与用户的初始关系
         <input
           v-model="relationship"
-          list="relationship-options"
-          maxlength="30"
-          placeholder="可由角色卡识别，也可以自己填写，例如：师徒、夫妻、搭档"
+          maxlength="80"
+          placeholder="只填写角色卡或你明确设定的关系；留空也可以"
         />
-        <datalist id="relationship-options">
-          <option value="未设定"></option>
-          <option value="陌生人"></option>
-          <option value="朋友"></option>
-          <option value="挚友"></option>
-          <option value="师徒"></option>
-          <option value="恋人"></option>
-          <option value="夫妻"></option>
-          <option value="家人"></option>
-          <option value="同学"></option>
-          <option value="同事"></option>
-          <option value="搭档"></option>
-        </datalist>
       </label>
 
       <label>
-        核心人设
+        完整角色介绍
         <textarea
           v-model="persona"
-          rows="4"
-          placeholder="角色最核心、最稳定的性格特点。"
+          rows="10"
+          placeholder="把角色设定完整写在这里。无法可靠拆分时不要硬拆，保留原文即可。"
         ></textarea>
       </label>
 
-      <label>
-        说话方式
-        <textarea
-          v-model="speakingStyle"
-          rows="3"
-          placeholder="语气、句子长度、表情使用习惯、口癖等。"
-        ></textarea>
-      </label>
-
-      <label>
-        背景故事
-        <textarea
-          v-model="background"
-          rows="4"
-          placeholder="职业、成长经历、生活环境和与用户相识的过程。"
-        ></textarea>
-      </label>
+      <details class="optional-fields">
+        <summary>可选拆分字段</summary>
+        <p class="section-description">只有原卡本来就明确分开，或你自己想单独维护时再填写；留空不会自动生成。</p>
+        <label>
+          说话方式
+          <textarea v-model="speakingStyle" rows="3" placeholder="原卡明确写了语言风格时再填"></textarea>
+        </label>
+        <label>
+          背景故事
+          <textarea v-model="background" rows="4" placeholder="原卡明确把背景单独拆出来时再填"></textarea>
+        </label>
+      </details>
 
       <label>
         喜欢的事物
@@ -1544,4 +1377,5 @@ async function save() {
 .error-box {
   background: rgba(255, 225, 225, 0.85);
 }
+.optional-fields{display:grid;gap:10px;padding:12px;border-radius:14px;background:rgba(255,255,255,.55);border:1px solid rgba(217,111,155,.16)}.optional-fields summary{cursor:pointer;color:#8c6071;font-weight:800}.optional-fields[open] summary{margin-bottom:8px}
 </style>

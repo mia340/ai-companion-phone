@@ -552,54 +552,37 @@ onMounted(loadCharacter)
 
             <input
               v-model="form.relationship"
-              list="relationship-suggestions"
-              maxlength="40"
-              placeholder="按原卡填写；可以是师徒、宿敌、夫妻、陌生人等任意关系"
+              maxlength="80"
+              placeholder="只填写角色卡或你明确设定的关系；留空也可以"
             />
-            <datalist id="relationship-suggestions">
-              <option value="朋友" />
-              <option value="挚友" />
-              <option value="恋人" />
-              <option value="家人" />
-              <option value="同学" />
-              <option value="同事" />
-              <option value="陌生人" />
-            </datalist>
           </label>
         </section>
 
         <section class="form-card">
-          <h2>人物设定</h2>
+          <h2>角色介绍</h2>
+          <p class="field-note">不用为了界面把角色硬拆成“性格 / 说话方式 / 背景”。角色卡无法可靠拆分时，完整内容放在这里即可。</p>
 
           <label>
-            核心性格
-
+            完整角色介绍
             <textarea
               v-model="form.persona"
-              rows="5"
-              placeholder="描述性格、价值观和相处方式"
+              rows="10"
+              placeholder="完整粘贴角色设定、性格、身份、经历等；只写角色卡/你自己明确提供的内容"
             />
           </label>
 
-          <label>
-            说话方式
-
-            <textarea
-              v-model="form.speakingStyle"
-              rows="4"
-              placeholder="例如：语气温柔，回复自然，不会说教"
-            />
-          </label>
-
-          <label>
-            背景故事
-
-            <textarea
-              v-model="form.background"
-              rows="6"
-              placeholder="描述成长经历、生活环境和重要经历"
-            />
-          </label>
+          <details class="optional-fields" :open="Boolean(form.speakingStyle || form.background)">
+            <summary>可选拆分字段</summary>
+            <p class="field-note">只有原卡本来就明确分开，或你自己想单独维护时再填写；留空不会自动生成。</p>
+            <label>
+              说话方式
+              <textarea v-model="form.speakingStyle" rows="4" placeholder="原卡明确写了语言风格时再填" />
+            </label>
+            <label>
+              背景故事
+              <textarea v-model="form.background" rows="6" placeholder="原卡明确把背景单独拆出来时再填" />
+            </label>
+          </details>
         </section>
 
         <section class="form-card">
@@ -869,4 +852,5 @@ onMounted(loadCharacter)
     grid-template-columns: 1fr;
   }
 }
+.field-note{margin:0 0 10px;color:#9b7887;font-size:12px;line-height:1.65}.optional-fields{display:grid;gap:10px;margin-top:4px;padding:12px;border-radius:14px;background:#fff7fa;border:1px solid #f0e1e7}.optional-fields summary{cursor:pointer;color:#8c6071;font-weight:800}.optional-fields[open] summary{margin-bottom:10px}
 </style>

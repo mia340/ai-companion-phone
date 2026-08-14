@@ -94,7 +94,8 @@ export interface Character {
   rawCardExtensions?: Record<string, unknown>
   groupOnlyGreetings?: string[]
 
-  groups: UUID[]
+  // 旧版通讯录分组字段仅保留备份兼容；V0.4.4.2 起运行时不再使用。
+  groups?: UUID[]
   replySpeed: 'instant' | 'natural' | 'slow' | 'custom'
   modelRoute?: UUID
 
@@ -172,7 +173,10 @@ export interface LorebookResource {
   worldId: UUID
   name: string
   description?: string
+  // characterId 为旧版资源所有权字段，仅用于旧备份兼容；新版本通过 ResourceBinding 决定谁使用资源。
   characterId?: UUID
+  sourceCharacterId?: UUID
+  sourceCharacterName?: string
   sourceFileName?: string
   sourceFormat?: ResourceSourceFormat
   scanDepth?: number
@@ -260,7 +264,10 @@ export interface PromptPreset {
 export interface RegexScript {
   id: UUID
   worldId: UUID
+  // characterId 为旧版资源所有权字段，仅用于旧备份兼容；新版本通过 ResourceBinding 决定谁使用资源。
   characterId?: UUID
+  sourceCharacterId?: UUID
+  sourceCharacterName?: string
   name: string
   findRegex: string
   replaceString: string

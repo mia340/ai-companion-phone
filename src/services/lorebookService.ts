@@ -130,7 +130,7 @@ export async function listLorebooks(options?: { worldId?: string; characterId?: 
   const rows = await db.lorebooks.toArray()
   return rows
     .filter(item => !options?.worldId || item.worldId === options.worldId)
-    .filter(item => !options?.characterId || !item.characterId || item.characterId === options.characterId)
+    // 世界书是可复用资源；characterId 只影响绑定，不再限制资源可见性。
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 }
 
@@ -143,6 +143,8 @@ export async function saveLorebook(input: Partial<LorebookResource> & Pick<Loreb
     name: input.name.trim() || '未命名世界书',
     description: input.description?.trim() || undefined,
     characterId: input.characterId || undefined,
+    sourceCharacterId: input.sourceCharacterId || existing?.sourceCharacterId,
+    sourceCharacterName: input.sourceCharacterName || existing?.sourceCharacterName,
     sourceFileName: input.sourceFileName || existing?.sourceFileName,
     sourceFormat: input.sourceFormat || existing?.sourceFormat || 'native',
     scanDepth: input.scanDepth ?? existing?.scanDepth,
@@ -174,8 +176,13 @@ export async function listLorebookEntries(options?: {
   const rows = await db.lorebookEntries.toArray() as LorebookEntry[]
   return rows
     .filter(item => !options?.worldId || item.worldId === options.worldId)
-    .filter(item => !options?.characterId || !item.characterId || item.characterId === options.characterId)
     .filter(item => !options?.lorebookId || item.lorebookId === options.lorebookId)
+    .filter(item => {
+      if (options?.lorebookId) return true
+      if (!options?.characterId) return true
+      // 只有旧版“散装条目”仍按旧 characterId 兼容；有 lorebookId 的条目由资源绑定决定。
+      return Boolean(item.lorebookId) || !item.characterId || item.characterId === options.characterId
+    })
     .sort((a, b) => (a.insertionOrder ?? 100 - a.priority) - (b.insertionOrder ?? 100 - b.priority) || b.updatedAt.localeCompare(a.updatedAt))
 }
 
@@ -256,11 +263,11 @@ export async function buildLorebookPrompt(options: {
   const all = await db.lorebookEntries.toArray() as LorebookEntry[]
   const entries = all.filter(item => item.worldId === options.worldId)
     .filter(item => {
-      // 旧版本散装条目继续保持原行为。
+      // 旧版本散装条目继续按历史 characterId 兼容。
       if (!item.lorebookId) return !item.characterId || item.characterId === options.characterId
+      // 有 lorebookId 的条目完全由 ResourceBinding 决定；来源角色不限制复用。
       return allowedBookIds.has(item.lorebookId)
     })
-    .filter(item => !item.characterId || item.characterId === options.characterId)
 
   let activated = entries
     .filter(item => item.enabled)

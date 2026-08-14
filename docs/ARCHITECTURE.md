@@ -1,6 +1,32 @@
 # AI Companion Phone 架构文档
 
-> 当前架构版本：**V0.4.4.1**。下方早期章节保留历史记录，最新运行原则以文末 V0.4.4.1 章节为准。
+> 当前架构版本：**V0.4.4.2**。下方早期章节保留历史记录；当前资源原则是“共享资源本体 + ResourceBinding”，角色内容原则仍是 AI-only。
+
+
+## V0.4.4.2 · Shared Resource Library
+
+```text
+Character Card / 独立资源文件
+        │
+        ├─ provenance: sourceCharacterName / sourceFileName
+        ▼
+Shared Resource Library
+  ├─ LorebookResource + LorebookEntry
+  ├─ RegexScript
+  └─ PromptPreset
+        │
+        ▼
+ResourceBinding
+  ├─ global
+  ├─ character
+  ├─ conversation
+  └─ persona
+```
+
+- 资源“从哪张卡来”不等于“只能给哪张卡用”。`characterId` 仅保留旧备份兼容，V14 会迁移到 provenance + binding。
+- 删除角色 / 换角色卡只解除对应绑定；共享 WorldBook / Regex 本体继续保留，除非用户在资源库明确删除。
+- Contacts 不再使用本地 ContactGroup；V14 清空旧分组，Backup V9 继续识别但恢复时不重新启用。
+- Character UI 以完整介绍为主，不把没有可靠来源的内容强拆成说话方式、背景、喜好等字段。
 
 # AI Companion Phone 架构说明
 

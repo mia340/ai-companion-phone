@@ -25,7 +25,7 @@ const sections = [
     icon: '📚',
     title: '世界书 Lorebook',
     description: '按关键词触发人物、地点和世界设定',
-    path: '/settings/lorebook'
+    path: '/world?tab=lorebooks'
   },
   {
     icon: '🤖',

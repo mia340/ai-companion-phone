@@ -318,25 +318,57 @@ export async function deleteCharacterSafely(
         db.resourceBindings.where('scopeId').equals(characterId).delete()
       ])
 
-      // 删除角色自带世界书 / Regex；只删除明确归属于该角色的资源，不碰共享全局资源。
-      const characterLorebooks = await db.lorebooks.where('characterId').equals(characterId).toArray()
-      const characterLorebookIds = characterLorebooks.map(row => row.id)
-      if (characterLorebookIds.length) {
-        for (const lorebookId of characterLorebookIds) {
-          await db.lorebookEntries.where('lorebookId').equals(lorebookId).delete()
-          await db.resourceBindings.where('resourceId').equals(lorebookId).delete()
-        }
-        await db.lorebooks.bulkDelete(characterLorebookIds)
+      // V0.4.4.2：世界书 / Regex 是共享资源库资产，不再跟随来源角色删除。
+      // 删除角色只移除它自己的 ResourceBinding；资源本体保留，并把“来源角色”降级为文字溯源信息。
+      const allLorebooks = await db.lorebooks.toArray()
+      const sourcedLorebooks = allLorebooks.filter(row => row.sourceCharacterId === characterId || row.characterId === characterId)
+      for (const lorebook of sourcedLorebooks) {
+        await db.lorebooks.update(lorebook.id, {
+          characterId: undefined,
+          sourceCharacterId: undefined,
+          sourceCharacterName: lorebook.sourceCharacterName || character.name,
+          updatedAt: new Date().toISOString()
+        })
+        await db.lorebookEntries.where('lorebookId').equals(lorebook.id).modify({ characterId: undefined })
       }
-      await db.lorebookEntries.where('characterId').equals(characterId).delete()
 
-      const characterRegex = await db.regexScripts.where('characterId').equals(characterId).toArray()
-      const characterRegexIds = characterRegex.map(row => row.id)
-      if (characterRegexIds.length) {
-        for (const regexId of characterRegexIds) {
-          await db.resourceBindings.where('resourceId').equals(regexId).delete()
+      // 极老版本可能存在没有 lorebookId 的角色专属条目。删除角色前把它们收进一本共享世界书，
+      // 防止直接清空 characterId 后变成“无意全局常驻”。资源保留但不自动绑定给其它角色。
+      const looseLegacyEntries = await db.lorebookEntries
+        .where('characterId')
+        .equals(characterId)
+        .filter(entry => !entry.lorebookId)
+        .toArray()
+      if (looseLegacyEntries.length) {
+        const now = new Date().toISOString()
+        const legacyLorebookId = crypto.randomUUID()
+        await db.lorebooks.add({
+          id: legacyLorebookId,
+          worldId: character.worldId,
+          name: `${character.name} · 历史世界书`,
+          description: '由旧版角色专属世界书条目迁移而来；资源已进入共享资源库。',
+          characterId: undefined,
+          sourceCharacterId: undefined,
+          sourceCharacterName: character.name,
+          sourceFormat: 'legacy',
+          createdAt: now,
+          updatedAt: now
+        })
+        for (const entry of looseLegacyEntries) {
+          await db.lorebookEntries.update(entry.id, { lorebookId: legacyLorebookId, characterId: undefined, updatedAt: now })
         }
-        await db.regexScripts.bulkDelete(characterRegexIds)
+      }
+      await db.lorebookEntries.where('characterId').equals(characterId).modify({ characterId: undefined })
+
+      const allRegex = await db.regexScripts.toArray()
+      const sourcedRegex = allRegex.filter(row => row.sourceCharacterId === characterId || row.characterId === characterId)
+      for (const script of sourcedRegex) {
+        await db.regexScripts.update(script.id, {
+          characterId: undefined,
+          sourceCharacterId: undefined,
+          sourceCharacterName: script.sourceCharacterName || character.name,
+          updatedAt: new Date().toISOString()
+        })
       }
 
       await db.communityResourceArchives

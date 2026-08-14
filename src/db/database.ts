@@ -642,6 +642,189 @@ export class CompanionDatabase extends Dexie {
       await promptDebugTraces.toCollection().filter(row => row.provider === 'mock').delete()
     })
 
+    // V14：资源彻底去“角色所有权” + 通讯录去分组。
+    // 世界书 / Regex 的 characterId 只属于旧数据结构；升级后全部转成共享资源本体，
+    // 角色是否使用某资源只由 ResourceBinding 决定。contactGroups / Character.groups 仅保留备份兼容结构。
+    this.version(14).stores({
+      worlds: 'id, createdAt',
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt, status, type, proactiveSource',
+      userProfiles: 'id, updatedAt',
+      modelSettings: 'id, provider, updatedAt',
+      chatSettings: 'id, conversationId, updatedAt',
+      memories: 'id, conversationId, characterId, importance, layer, status, topicKey, dueAt, updatedAt',
+      conversationStates: 'id, updatedAt',
+      conversationStateHistory: 'id, conversationId, characterId, field, createdAt',
+      musicStates: 'id, updatedAt',
+      relationships: null,
+      relationshipEvents: null,
+      personas: 'id, isDefault, updatedAt',
+      lorebookEntries: 'id, worldId, lorebookId, characterId, enabled, priority, updatedAt',
+      lorebooks: 'id, worldId, characterId, name, updatedAt',
+      promptPresets: 'id, worldId, name, updatedAt',
+      regexScripts: 'id, worldId, characterId, enabled, name, updatedAt',
+      resourceBindings: 'id, worldId, characterId, scope, scopeId, resourceType, resourceId, enabled, updatedAt',
+      communityResourceArchives: 'id, worldId, kind, characterId, name, fileName, createdAt, updatedAt',
+      promptDebugTraces: 'id, conversationId, characterId, createdAt'
+    }).upgrade(async transaction => {
+      const characters = transaction.table('characters')
+      const contactGroups = transaction.table('contactGroups')
+      const lorebooks = transaction.table('lorebooks')
+      const lorebookEntries = transaction.table('lorebookEntries')
+      const regexScripts = transaction.table('regexScripts')
+      const resourceBindings = transaction.table('resourceBindings')
+
+      const now = new Date().toISOString()
+      const characterRows = await characters.toArray()
+      const characterMap = new Map(characterRows.map(row => [String(row.id), row]))
+
+      // “特别关心 / 未分组”等旧通讯录分组不再参与产品逻辑。
+      await contactGroups.clear()
+      await characters.toCollection().modify(row => {
+        row.groups = []
+
+        // 旧版本可能只把 personality 放进 persona，导致详情页只看到一小截。
+        // 有原卡 description / personality 时，把它们原样合成“完整角色介绍”；
+        // 只有 persona 明显仍是旧单字段值时才自动修复，避免覆盖用户后来手工改写的介绍。
+        const description = typeof row.cardDescription === 'string' ? row.cardDescription.trim() : ''
+        const personality = typeof row.cardPersonality === 'string' ? row.cardPersonality.trim() : ''
+        const persona = typeof row.persona === 'string' ? row.persona.trim() : ''
+        const parts = [description]
+          .filter(Boolean)
+        if (personality && !parts.some(item => item === personality || item.includes(personality))) parts.push(personality)
+        const combined = parts.join('\n\n')
+        if (combined && (!persona || persona === description || persona === personality)) row.persona = combined
+      })
+
+      const bindingRows = await resourceBindings.toArray()
+      const bindingKeys = new Set(bindingRows.map(row => {
+        const scope = row.scope || (row.characterId ? 'character' : 'global')
+        const scopeId = row.scopeId || row.characterId || ''
+        return `${row.resourceType}|${row.resourceId}|${scope}|${scopeId}`
+      }))
+
+      const ensureBinding = async (input: {
+        worldId: string
+        characterId?: string
+        scope: 'global' | 'character'
+        resourceType: 'lorebook' | 'regex'
+        resourceId: string
+      }) => {
+        const scopeId = input.scope === 'character' ? input.characterId : undefined
+        if (input.scope === 'character' && !scopeId) return
+        const key = `${input.resourceType}|${input.resourceId}|${input.scope}|${scopeId || ''}`
+        if (bindingKeys.has(key)) return
+        await resourceBindings.add({
+          id: crypto.randomUUID(),
+          worldId: input.worldId,
+          characterId: input.scope === 'character' ? scopeId : undefined,
+          scope: input.scope,
+          scopeId,
+          resourceType: input.resourceType,
+          resourceId: input.resourceId,
+          enabled: true,
+          order: 100,
+          createdAt: now,
+          updatedAt: now
+        })
+        bindingKeys.add(key)
+      }
+
+      // 旧“角色专属世界书”迁成：共享世界书本体 + 对原角色的默认绑定。
+      const lorebookRows = await lorebooks.toArray()
+      for (const row of lorebookRows) {
+        const legacyCharacterId = row.characterId ? String(row.characterId) : ''
+        if (!legacyCharacterId) continue
+        const sourceCharacter = characterMap.get(legacyCharacterId)
+        await lorebooks.update(row.id, {
+          characterId: undefined,
+          sourceCharacterId: row.sourceCharacterId || (sourceCharacter ? legacyCharacterId : undefined),
+          sourceCharacterName: row.sourceCharacterName || sourceCharacter?.name,
+          updatedAt: now
+        })
+        if (sourceCharacter) {
+          await ensureBinding({
+            worldId: String(row.worldId || sourceCharacter.worldId),
+            characterId: legacyCharacterId,
+            scope: 'character',
+            resourceType: 'lorebook',
+            resourceId: String(row.id)
+          })
+        }
+      }
+
+      // 有 lorebookId 的条目跟随“书”走，不再保存角色所有权。
+      await lorebookEntries.toCollection().modify(row => {
+        if (row.lorebookId) row.characterId = undefined
+      })
+
+      // 更老的数据可能只有 entry.characterId、没有 LorebookResource。
+      // 按原角色收拢成一本共享书；没有角色归属的 loose entries 收拢成全局共享书。
+      const looseRows = (await lorebookEntries.toArray()).filter(row => !row.lorebookId)
+      const looseGroups = new Map<string, typeof looseRows>()
+      for (const row of looseRows) {
+        const key = row.characterId ? String(row.characterId) : '__global__'
+        const list = looseGroups.get(key) || []
+        list.push(row)
+        looseGroups.set(key, list)
+      }
+      for (const [key, rows] of looseGroups) {
+        if (!rows.length) continue
+        const sourceCharacter = key === '__global__' ? undefined : characterMap.get(key)
+        const lorebookId = crypto.randomUUID()
+        const worldId = String(rows[0]?.worldId || sourceCharacter?.worldId || 'world-default')
+        await lorebooks.add({
+          id: lorebookId,
+          worldId,
+          name: sourceCharacter ? `${sourceCharacter.name} · 历史世界书` : '历史全局世界书',
+          description: '由 V14 从旧版散落世界书条目自动整理；现在是可复用的共享资源。',
+          characterId: undefined,
+          sourceCharacterId: sourceCharacter ? key : undefined,
+          sourceCharacterName: sourceCharacter?.name,
+          sourceFormat: 'legacy',
+          createdAt: now,
+          updatedAt: now
+        })
+        for (const entry of rows) {
+          await lorebookEntries.update(entry.id, {
+            lorebookId,
+            characterId: undefined,
+            updatedAt: now
+          })
+        }
+        if (sourceCharacter) {
+          await ensureBinding({ worldId, characterId: key, scope: 'character', resourceType: 'lorebook', resourceId: lorebookId })
+        } else {
+          await ensureBinding({ worldId, scope: 'global', resourceType: 'lorebook', resourceId: lorebookId })
+        }
+      }
+
+      // Regex 同样只保留来源信息，不保留“所有者”；原角色通过绑定继续使用。
+      const regexRows = await regexScripts.toArray()
+      for (const row of regexRows) {
+        const legacyCharacterId = row.characterId ? String(row.characterId) : ''
+        if (!legacyCharacterId) continue
+        const sourceCharacter = characterMap.get(legacyCharacterId)
+        await regexScripts.update(row.id, {
+          characterId: undefined,
+          sourceCharacterId: row.sourceCharacterId || (sourceCharacter ? legacyCharacterId : undefined),
+          sourceCharacterName: row.sourceCharacterName || sourceCharacter?.name,
+          updatedAt: now
+        })
+        if (sourceCharacter) {
+          await ensureBinding({
+            worldId: String(row.worldId || sourceCharacter.worldId),
+            characterId: legacyCharacterId,
+            scope: 'character',
+            resourceType: 'regex',
+            resourceId: String(row.id)
+          })
+        }
+      }
+    })
+
   }
 }
 

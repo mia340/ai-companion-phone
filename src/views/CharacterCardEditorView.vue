@@ -124,12 +124,15 @@ async function load() {
     const row = await db.characters.get(characterId.value)
     if (!row) throw new Error('没有找到这个角色。')
     character.value = row
-    const [lorebookEntries, bindings] = await Promise.all([
-      db.lorebookEntries.where('characterId').equals(row.id).count(),
+    const [allEntries, bindings] = await Promise.all([
+      db.lorebookEntries.toArray(),
       listResourceBindings(row.id)
     ])
+    const activeLorebookIds = new Set(bindings
+      .filter(item => item.enabled && item.resourceType === 'lorebook')
+      .map(item => item.resourceId))
     resourceStats.value = {
-      lorebookEntries,
+      lorebookEntries: allEntries.filter(item => Boolean(item.lorebookId && activeLorebookIds.has(item.lorebookId))).length,
       regexScripts: bindings.filter(item => item.enabled && item.resourceType === 'regex').length,
       presets: bindings.filter(item => item.enabled && item.resourceType === 'preset').length
     }
@@ -221,7 +224,7 @@ async function importCard(event: Event) {
       imported.lorebookEntries.length ? `世界书 ${imported.lorebookEntries.length} 条` : '',
       imported.regexScripts.length ? `Regex ${imported.regexScripts.length} 个` : ''
     ].filter(Boolean).join('、')
-    const hint = resourceHint ? `；角色卡自带资源会替换该角色此前由角色卡导入的资源（${resourceHint}）` : ''
+    const hint = resourceHint ? `；新卡资源会进入共享资源库并绑定当前角色（${resourceHint}），旧卡资源会保留在资源库但解除当前角色绑定` : ''
     if (!window.confirm(`识别为 ${imported.format}。导入会覆盖当前角色卡中同名字段${hint}，但保留聊天记录和用户手工创建的共享资源。继续吗？`)) return
 
     const current = character.value
@@ -335,14 +338,16 @@ onMounted(load)
 async function exportCard() {
   if (!character.value) return
   const row = character.value
-  const lorebooks = (await db.lorebooks.where('characterId').equals(row.id).toArray())
-    .filter(item => item.sourceFormat === 'character-card')
+  // 导出时只带回“这张原角色卡自身携带”的资源。
+  // 用户后来从共享资源库绑定过来的其它世界书 / Regex 不属于原卡，不能被误打包进去。
+  const lorebooks = (await db.lorebooks.toArray())
+    .filter(item => item.sourceFormat === 'character-card' && (item.sourceCharacterId === row.id || item.characterId === row.id))
   const lorebook = lorebooks[0]
   const lorebookEntries = lorebook
     ? await db.lorebookEntries.where('lorebookId').equals(lorebook.id).toArray()
     : []
-  const regexScripts = (await db.regexScripts.where('characterId').equals(row.id).toArray())
-    .filter(item => item.sourceFormat === 'character-card')
+  const regexScripts = (await db.regexScripts.toArray())
+    .filter(item => item.sourceFormat === 'character-card' && (item.sourceCharacterId === row.id || item.characterId === row.id))
   const blob = new Blob([
     exportCharacterAsSillyTavernV2(row, { lorebook, lorebookEntries, regexScripts })
   ], { type: 'application/json;charset=utf-8' })
@@ -457,7 +462,7 @@ async function exportCard() {
 
           <div class="linked-actions">
             <button type="button" @click="router.push(`/characters/${character.id}/edit`)">编辑基础资料</button>
-            <button type="button" @click="router.push(`/settings/lorebook?character=${character.id}`)">编辑角色世界书</button>
+            <button type="button" @click="router.push({ path: '/world', query: { character: character.id, tab: 'lorebooks' } })">管理共享世界书</button>
           </div>
 
           <p v-if="message" class="message">{{ message }}</p>

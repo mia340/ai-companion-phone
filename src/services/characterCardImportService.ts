@@ -82,6 +82,15 @@ function extractDepthPrompt(...extensions: Record<string, unknown>[]) {
   return undefined
 }
 
+function buildImportedCharacterIntroduction(description: string, personality: string) {
+  const parts: string[] = []
+  if (description.trim()) parts.push(description.trim())
+  if (personality.trim() && !parts.some(item => item === personality.trim() || item.includes(personality.trim()))) {
+    parts.push(personality.trim())
+  }
+  return parts.join('\n\n')
+}
+
 function inferRelationshipFromCard(firstMessage: string, embeddedUser?: ImportedPersonaPreview) {
   const normalized = firstMessage.replace(/<br\s*\/?\s*>/gi, '\n')
   const xml = normalized.match(/<(?:关系|关系状态|relationship|relation)>\s*([\s\S]{1,50}?)\s*<\/(?:关系|关系状态|relationship|relation)>/i)?.[1]?.trim()
@@ -571,11 +580,13 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
     JSON.stringify(rootExtensions || {})
   ].some(value => /\{\{user\}\}/i.test(value))
   const inferredRelationship = inferRelationshipFromCard(asText(data.first_mes), embeddedUser)
+  const characterIntroduction = buildImportedCharacterIntroduction(description, personality)
   const patch: Partial<Character> = {
     name: asText(data.name) || undefined,
     avatar: importableAvatar(data.avatar ?? record.avatar),
     relationship: inferredRelationship,
-    persona: personality || description || undefined,
+    // 无法可靠拆分成‘说话方式/背景故事’时，不猜字段；保留一份完整角色介绍用于展示与手动补充。
+    persona: characterIntroduction || undefined,
     cardDescription: description || undefined,
     cardPersonality: personality || undefined,
     scenario: asText(data.scenario) || undefined,
@@ -609,14 +620,14 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   if (!patch.exampleDialogues?.length) notes.push('角色卡没有可识别的示例对话。')
   if (!patch.firstMessage) notes.push('角色卡没有开场白。')
   if (inferredRelationship) notes.push(`从角色卡明确状态/用户设定识别到与用户关系：${inferredRelationship}。`)
-  if (lorebookEntries.length) notes.push(`检测到内嵌角色世界书 ${lorebookEntries.length} 条，将随角色一起导入。`)
+  if (lorebookEntries.length) notes.push(`检测到内嵌角色世界书 ${lorebookEntries.length} 条：将导入共享资源库，并默认绑定当前角色；之后可给其它角色复用。`)
   if (embeddedUser) {
     const sourceLabel = embeddedUserCandidate?.label || '角色卡'
     notes.push(`检测到${sourceLabel}中的独立 {{user}} 用户模板，可直接生成角色专属 Persona 并自动绑定聊天。`)
   } else if (hasUserPlaceholder) {
     notes.push('检测到 {{user}} 剧情占位，但没有可安全提取的独立用户姓名/Persona：不会猜名字；运行时使用当前聊天 Persona，角色卡与世界书中的剧情关系仍按本会话设定生效。')
   }
-  if (regexScripts.length) notes.push(`检测到内嵌正则 ${regexScripts.length} 条，将保存为角色专属正则并自动启用。`)
+  if (regexScripts.length) notes.push(`检测到内嵌正则 ${regexScripts.length} 条：将导入共享资源库，并默认绑定当前角色；之后可给其它角色复用。`)
   if (depthPrompt) notes.push('检测到 depth_prompt，将按角色卡扩展提示参与运行时 Prompt。')
   if (talkativeness != null) notes.push(`检测到 talkativeness=${talkativeness}，已保留原始数值供兼容运行时使用。`)
   if (worldBookHint) notes.push(`检测到角色卡 world 绑定提示“${worldBookHint}”，已保留供资源兼容与后续绑定。`)
