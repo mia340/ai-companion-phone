@@ -30,7 +30,7 @@ describe('interaction protocol V2', () => {
   it('parses scene actions and keeps remote actions independent', () => {
     const parsed = parseCompanionOutput('<companion_packet>{"messages":[{"kind":"scene_action","content":"他低头看了眼手机。"},{"kind":"text","content":"行李拿到了。我现在出来。"}],"status":{"presence":"remote"}}</companion_packet>')
     expect(parsed.messages[0].kind).toBe('scene_action')
-    const settings = createDefaultChatSettings('c')
+    const settings = { ...createDefaultChatSettings('c'), conversationPresentationMode: 'phone-split' as const }
     const state = { ...createDefaultConversationState('c'), presence: 'remote' as const }
     const shaped = shapeCompanionActions(parsed.messages, character, settings, true, state)
     expect(shaped.some(item => item.kind === 'scene_action')).toBe(true)
@@ -120,6 +120,18 @@ describe('interaction protocol V2', () => {
     expect(parsed.presenceResolution?.source).toBe('direct-contact')
   })
 
+
+  it('recognizes current Persona listed in role-card participants as together', () => {
+    const parsed = parseCompanionOutput('📆太初历3824年7月18｜7:00｜晨光熹微\n🗺天枢山后山菜园\n😶在场角色:测试角色；测试用户\n💛负手立于田埂\n♥内心:平静\n他正垂眸看着你。', { interpretNativeProtocol: false, userName: '测试用户' })
+    expect(parsed.status?.presence).toBe('together')
+    expect(parsed.presenceResolution?.source).toBe('ui-surroundings')
+  })
+
+  it('recognizes natural gaze wording such as 垂眸看着你 as co-presence', () => {
+    const parsed = parseCompanionOutput('他正垂眸看着你蹲在田垄里，一手泥地捧着刚刨出的地瓜。')
+    expect(parsed.status?.presence).toBe('together')
+    expect(parsed.presenceResolution?.source).toBe('co-presence')
+  })
   it('recognizes gaze on the user in the same room as co-presence', () => {
     const parsed = parseCompanionOutput('他目光落在你覆着白纱的双眼上，停了片刻，才缓缓开口。')
     expect(parsed.status?.presence).toBe('together')
@@ -130,24 +142,25 @@ describe('interaction protocol V2', () => {
 
 })
 
-it('V0.4.3.4 自动排版：远程默认分开、同场景默认合并且动作后不换行', () => {
-  const remote = createDefaultChatSettings('remote-layout')
-  const remoteState = { ...createDefaultConversationState('remote-layout'), presence: 'remote' as const }
-  const remoteRows = shapeCompanionActions([
-    { kind: 'scene_action', content: '低头看了一眼手机。' },
-    { kind: 'text', content: '我刚到。' }
-  ], character, remote, true, remoteState)
-  expect(remoteRows[0].kind).toBe('scene_action')
+it('V0.4.4.5 三种呈现方式与相处状态解耦', () => {
+  const remoteState = { ...createDefaultConversationState('layout'), presence: 'remote' as const }
+  const source = [
+    { kind: 'scene_action' as const, content: '低头看了一眼手机。' },
+    { kind: 'text' as const, content: '我刚到。' }
+  ]
 
-  const together = createDefaultChatSettings('together-layout')
-  const togetherState = { ...createDefaultConversationState('together-layout'), presence: 'together' as const }
-  const togetherRows = shapeCompanionActions([
-    { kind: 'scene_action', content: '翻过身，将你捞进怀里。' },
-    { kind: 'text', content: '我也没睡着。' }
-  ], character, together, true, togetherState)
-  expect(togetherRows).toHaveLength(1)
-  expect(togetherRows[0].content).toBe('（翻过身，将你捞进怀里。）我也没睡着。')
-  expect(togetherRows[0].content).not.toContain('\n')
+  const merged = { ...createDefaultChatSettings('merged'), conversationPresentationMode: 'scene-merged' as const }
+  const mergedRows = shapeCompanionActions(source, character, merged, true, remoteState)
+  expect(mergedRows).toHaveLength(1)
+  expect(mergedRows[0].content).toBe('（低头看了一眼手机。）我刚到。')
+
+  const phoneText = { ...createDefaultChatSettings('phone'), conversationPresentationMode: 'phone-text' as const }
+  const phoneRows = shapeCompanionActions(source, character, phoneText, true, remoteState)
+  expect(phoneRows).toEqual([{ kind: 'text', content: '我刚到。' }])
+
+  const split = { ...createDefaultChatSettings('split'), conversationPresentationMode: 'phone-split' as const }
+  const splitRows = shapeCompanionActions(source, character, split, true, remoteState)
+  expect(splitRows.map(item => item.kind)).toEqual(['scene_action', 'text'])
 })
 
 it('流式截断和带额外空格的 scene_action 标签都不会泄漏', () => {

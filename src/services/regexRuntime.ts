@@ -48,20 +48,57 @@ function expandReplacement(template: string, match: string, groups: string[]) {
   return output
 }
 
+
+function normalizeStructuralDelimitersForRegex(text: string, script: RegexScript) {
+  const source = script.findRegex || ''
+  // 只在作者 Regex 明确使用方括号结构时启用，避免把普通正文标点无条件改写。
+  if (!/(?:\\\[|\[)/.test(source)) return text
+  let normalized = text
+    .replace(/[【［]/g, '[')
+    .replace(/[】］]/g, ']')
+
+  // 某些卡用半角冒号写字段名，模型常输出全角冒号；只处理方括号字段头，不改正文里的冒号。
+  if (source.includes(':') && !source.includes('：')) {
+    normalized = normalized.replace(/(\[[^\]\n]{1,40})：/g, '$1:')
+  }
+  return normalized
+}
+
 export function applyRegexScript(text: string, script: RegexScript, macros?: { user?: string; char?: string }) {
   if (!script.enabled || !script.findRegex) return text
-  const pattern = parsePattern(substituteMacros(script.findRegex, script, macros))
-  if (!pattern) return text
+  const patternSource = substituteMacros(script.findRegex, script, macros)
   const replacement = substituteReplacementMacros(script.replaceString || '', macros)
-  return text.replace(pattern, (...args: unknown[]) => {
-    const match = String(args[0] ?? '')
-    const offset = typeof args.at(-2) === 'number' ? Number(args.at(-2)) : 0
-    void offset
-    const groupCount = Math.max(0, args.length - 3)
-    const groups = args.slice(1, 1 + groupCount).map(value => String(value ?? ''))
-    const trimmed = (script.trimStrings || []).reduce((current, item) => item ? current.split(item).join('') : current, match)
-    return expandReplacement(replacement, trimmed, groups)
-  })
+
+  const replaceWithPattern = (input: string) => {
+    const pattern = parsePattern(patternSource)
+    if (!pattern) return input
+    return input.replace(pattern, (...args: unknown[]) => {
+      const match = String(args[0] ?? '')
+      const offset = typeof args.at(-2) === 'number' ? Number(args.at(-2)) : 0
+      void offset
+      const groupCount = Math.max(0, args.length - 3)
+      const groups = args.slice(1, 1 + groupCount).map(value => String(value ?? ''))
+      const trimmed = (script.trimStrings || []).reduce((current, item) => item ? current.split(item).join('') : current, match)
+      return expandReplacement(replacement, trimmed, groups)
+    })
+  }
+
+  const direct = replaceWithPattern(text)
+  if (direct !== text) return direct
+
+  // V0.4.4.5：作者写 [字段]、模型输出 【字段】 时做本地确定性兼容。
+  // 只改变 Regex 的输入视图，不改作者 Regex，也不调用第二次 AI。
+  const compatibleInput = normalizeStructuralDelimitersForRegex(text, script)
+  if (compatibleInput === text) return text
+  const compatible = replaceWithPattern(compatibleInput)
+  return compatible !== compatibleInput ? compatible : text
+}
+
+export function regexExecutionOrder(script: RegexScript) {
+  if (Number.isFinite(script.order)) return Number(script.order)
+  const raw = script.raw || {}
+  const legacy = Number(raw.order ?? raw.priority)
+  return Number.isFinite(legacy) ? legacy : 0
 }
 
 export function applyRegexScripts(text: string, scripts: RegexScript[], macros?: { user?: string; char?: string }) {
@@ -87,7 +124,7 @@ export async function listActiveRegexScripts(characterId: string, target: RegexT
       if (item.promptOnly) return false
       return item.placement.length === 0 ? target === 'assistant-output' : item.placement.includes(placement)
     })
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .sort((a, b) => regexExecutionOrder(a) - regexExecutionOrder(b) || a.createdAt.localeCompare(b.createdAt))
 }
 
 

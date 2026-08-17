@@ -1,3 +1,37 @@
+# V0.4.4.5
+
+- 新增三种聊天呈现方式：`scene-merged`（动作+台词同气泡，默认）、`phone-text`（只显示语句）、`phone-split`（动作/台词分开）；不再由 presence 自动决定排版。
+- 自动相处状态补强当前 Persona 在“在场角色”中的识别，并扩展“垂眸看着你 / 凝视你 / 给你披外套”等明确同场证据。
+- 新增 Active Resource Session：用户显式打开按需 WorldBook 功能后，后续短消息自动延续当前资源；显式退出/返回普通聊天时结束；切换其它资源时自动切换。
+- 大型资源会话续聊不再重复发送整份 HTML 模板，只保留作者原始入口规则和会话延续指令；Prompt Debug 的节省统计改为“资源调度预计少注入”。
+- Regex 增加 `【】/［］ → []` 本地兼容，只在作者 Regex 明确使用方括号结构且原匹配失败时启用；孟时景论坛这类全角括号输出可直接进入作者 Regex UI。
+- HTML 固定合同增加本地确定性修复：状态事实与正文已存在但漏 HTML 外壳时，使用作者 exact template 恢复 UI；扩展栏目无内容则留空，不本地生成剧情。
+- 活跃社区资源 UI 会话强制暂停小手机私有协议整形，避免微信/论坛等界面在续聊时突然掉回普通 scene_action / companion_packet。
+- IndexedDB V14 / Backup V9 不变。
+
+# V0.4.4.4
+
+- 角色卡解析正式分成 Raw Card / Local Index / Prompt Compiler 三层：原始社区卡继续作为事实源；本地拆分只用于阅读、搜索和路由，不调用 AI，也不作为派生字段重复塞回 Prompt。
+- 新增“原卡阅读器”：以可读页面展示原始 description / personality / scenario / system prompt / post-history / creator notes / 示例对话、`{{user}}` 引用和世界书中的人物/人设条目；阅读与索引为 0 API Token。
+- 社区导入卡在 card-first 模式只注入作者原始角色字段；年龄、职业、关系、喜好、心情、活动等小手机本地补充字段默认不再重复注入，避免原文 + 拆分字段双份 Token。
+- 角色卡内嵌 `{{user}}` Persona 在 Prompt 中只发送作者原始用户模板一次；本地解析出的年龄/职业/性格等只作为索引，不再与原模板重复发送。
+- 新增通用 Resource Intent Router：从资源标题、keys / secondary keys 和作者自己写的触发说明中本地识别“打开/查看/发送/切换”等资源意图；不按具体角色名或具体社区卡写分支。
+- 大型、作者明确声明“按动作/关键词触发”的功能型 WorldBook 改为按需休眠；用户明确调用时提升为本轮 Focus。作者明确规定“每轮必须携带”的状态栏/固定 UI 合同仍保持常驻。
+- Prompt Debug 增加资源调度：展示“本轮 Focus / 已注入 / 按需休眠”、触发原因、字符数、本轮预计少注入的字符数；Provider 返回 usage 时同时记录真实输入/输出/总 Token，方便直接比较优化前后成本。
+- 社区角色编辑页默认折叠昵称、年龄、职业、关系、喜好、心情、活动等本地补充项，避免让用户误以为原角色卡缺字段；需要时仍可手动补充。
+- IndexedDB 仍为 V14，Backup 仍为 V9；本版不增加数据库结构。
+
+# V0.4.4.3
+
+- Community Runtime 重构：Regex 恢复为后处理器，不再仅因 `replaceString` 会生成 HTML 就推导“模型必须按 Regex 骨架输出”的强合同；只有角色卡 / 世界书 / Prompt 明确声明固定输出结构时才建立合同。
+- 原卡明确格式最多由 AI 自动纠偏一次；若仍未满足，保留第一版真实 AI 回复并安全降级 UI，绝不因为 UI / Regex 校验失败吞掉正文。
+- Safe Rich UI 增加本地安全编译器：第三方 JavaScript 仍不执行，但可从作者 HTML 中的静态 data container / 状态块恢复常见场景信息、角色状态和展开收起交互。
+- 无显式 UI 的角色卡增加“开场格式连续性”软提示：若原卡开场已有 3 个以上固定前置信息字段，AI 自行延续作者字段；应用只提示字段名，不生成地点、时间、心理等内容，也不做强校验。
+- WorldBook 条目编辑补齐常见社区字段，并在列表直接支持 enabled、priority、order；完整保留 position、depth、role、selective、probability、sticky/cooldown/delay、group 与 match-* 等字段。
+- Regex 资源增加脚本级启停、执行顺序 `order` 和完整编辑器；“脚本启用”与 ResourceBinding 的“给角色/全局应用”明确分离。
+- Regex 导入/导出保留 `order`；运行时按 order 从小到大执行，未命中时原样保留 AI 文本。
+- IndexedDB 仍为 V14，Backup 仍为 V9；本版无数据库结构升级。
+
 # V0.4.4.2
 
 - IndexedDB 升级 V14：清空旧通讯录“特别关心 / 未分组”，角色列表改为纯平铺；`Character.groups` / `contactGroups` 只保留 Backup V9 兼容结构。

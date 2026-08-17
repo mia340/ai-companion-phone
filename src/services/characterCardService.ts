@@ -77,32 +77,46 @@ export function buildCharacterCardPrompt(
     .map(value => compact(value))
     .filter(Boolean)
     .join(' ')
+  const importedCommunityCard = Boolean(
+    (character.importFormat && character.importFormat !== 'native') ||
+    character.sourceSpec ||
+    compact(character.cardDescription) ||
+    compact(character.cardPersonality)
+  )
+
+  // 社区导入卡只把作者原始字段送进 Prompt。本地阅读器为了好看而建立的年龄/职业/关系/喜好等派生字段
+  // 默认不重复注入，避免同一份设定被“原文 + 拆分字段”多次消耗 Token。原生角色仍使用本地字段。
+  const nativeDetails = importedCommunityCard && !phoneEnhanced
+    ? []
+    : [
+      compact(character.nickname) ? `角色昵称：${character.nickname}` : '',
+      compact(character.identity) ? `身份：${character.identity}` : '',
+      compact(character.age?.toString()) ? `年龄：${character.age}` : '',
+      compact(character.appearance) ? `外貌：${character.appearance}` : '',
+      compact(character.speakingStyle) ? `语言风格：${character.speakingStyle}` : '',
+      compact(character.background) ? `背景经历：${character.background}` : '',
+      compact(character.values) ? `价值观：${character.values}` : '',
+      compact(character.habits) ? `习惯与小动作：${character.habits}` : '',
+      compact(character.weaknesses) ? `弱点与不擅长：${character.weaknesses}` : '',
+      compact(character.secrets) ? `不会轻易说出的秘密：${character.secrets}` : '',
+      compact(character.boundaries) ? `角色边界：${character.boundaries}` : '',
+      listLine('喜欢', character.likes),
+      listLine('不喜欢', character.dislikes),
+      compact(character.relationship) ? `明确关系：${character.relationship}` : '',
+      compact(character.mood) ? `当前心情：${character.mood}` : '',
+      compact(character.activity) ? `当前活动：${character.activity}` : ''
+    ]
 
   return [
     `【角色设定${formatLabel ? ` · ${formatLabel}` : ''}】`,
     `角色名：${character.name}`,
-    compact(character.nickname) ? `角色昵称：${character.nickname}` : '',
-    compact(character.identity) ? `身份：${character.identity}` : '',
-    compact(character.age?.toString()) ? `年龄：${character.age}` : '',
-    compact(character.appearance) ? `外貌：${character.appearance}` : '',
     compact(character.cardDescription) ? `原卡 description：${character.cardDescription}` : '',
     compact(character.cardPersonality) ? `原卡 personality：${character.cardPersonality}` : '',
     !compact(character.cardDescription) && !compact(character.cardPersonality) && compact(character.persona)
       ? `角色原始设定：${character.persona}`
       : '',
-    compact(character.speakingStyle) ? `语言风格：${character.speakingStyle}` : '',
-    compact(character.background) ? `背景经历：${character.background}` : '',
-    compact(character.values) ? `价值观：${character.values}` : '',
-    compact(character.habits) ? `习惯与小动作：${character.habits}` : '',
-    compact(character.weaknesses) ? `弱点与不擅长：${character.weaknesses}` : '',
-    compact(character.secrets) ? `不会轻易说出的秘密：${character.secrets}` : '',
-    compact(character.boundaries) ? `角色边界：${character.boundaries}` : '',
-    listLine('喜欢', character.likes),
-    listLine('不喜欢', character.dislikes),
-    compact(character.relationship) ? `角色卡明确关系：${character.relationship}` : '',
-    compact(character.mood) ? `角色卡当前心情：${character.mood}` : '',
-    compact(character.activity) ? `角色卡当前活动：${character.activity}` : '',
-    compact(character.scenario) ? `当前场景：${character.scenario}` : '',
+    ...nativeDetails,
+    compact(character.scenario) ? `原卡 scenario：${character.scenario}` : '',
     character.talkativeness != null ? `原卡 talkativeness：${character.talkativeness}` : '',
     compact(character.worldBookHint) ? `原卡关联世界书提示：${character.worldBookHint}` : '',
     modeRule,

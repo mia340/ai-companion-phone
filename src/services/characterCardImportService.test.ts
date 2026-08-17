@@ -40,7 +40,7 @@ it('normalizes Tavo null optional collections to clone-safe empty arrays', () =>
     spec_version: '2.0',
     data: {
       name: '谢无矣',
-      description: '{{char}}:\n  职业: 娱乐圈老演员\n{{user}}:\n  职业: 娱乐圈新人女演员',
+      description: '{{char}}:\n  职业: 影视行业资深演员\n{{user}}:\n  职业: 影视行业新人演员',
       alternate_greetings: null,
       character_book: null,
       tags: [],
@@ -50,8 +50,8 @@ it('normalizes Tavo null optional collections to clone-safe empty arrays', () =>
   expect(result.patch.alternateGreetings).toEqual([])
   expect(result.patch.tags).toEqual([])
   expect(result.lorebookEntries).toEqual([])
-  expect(result.embeddedUser?.patch.occupation).toBe('娱乐圈新人女演员')
-  expect(result.embeddedUser?.rawTemplate).toContain('职业: 娱乐圈新人女演员')
+  expect(result.embeddedUser?.patch.occupation).toBe('影视行业新人演员')
+  expect(result.embeddedUser?.rawTemplate).toContain('职业: 影视行业新人演员')
   expect(() => structuredClone(result)).not.toThrow()
 })
 

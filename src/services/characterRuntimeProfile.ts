@@ -23,27 +23,34 @@ export function resolveCharacterRuntimeProfile(options: {
   character: Character
   settings: ChatSettings
   communityUiContract?: CommunityUiContract
+  resourceUiActive?: boolean
 }): CharacterRuntimeProfile {
-  const { character, settings, communityUiContract } = options
+  const { character, settings, communityUiContract, resourceUiActive = false } = options
   const origin: CharacterRuntimeOrigin = isCommunityCharacter(character) ? 'community' : 'native'
   const requested = settings.compatibilityMode || 'auto'
-  // 自动模式始终保持 AI/原卡输出优先。无论角色来自社区还是小手机原生创建，
-  // 都只有用户明确选择“phone-enhanced”时，应用才允许额外消息整形/隐藏互动协议。
-  const compatibilityMode = requested === 'auto' ? 'card-first' : requested
-  const preserveCardOutput = Boolean(communityUiContract?.active) || compatibilityMode === 'card-first'
+  const presentationMode = settings.conversationPresentationMode ?? 'scene-merged'
+  // 默认“场景合并”仍等价于原卡原样输出；用户在自动模式下明确改选“纯手机/动作分离”时，
+  // 这本身就是一次清晰的呈现偏好，因此可以启用小手机消息整形。显式 card-first 永远更高优先级。
+  const presentationOverride = requested === 'auto' && presentationMode !== 'scene-merged'
+  const compatibilityMode = requested === 'auto' ? (presentationOverride ? 'phone-enhanced' : 'card-first') : requested
+  const uiOwnsOutput = Boolean(communityUiContract?.active || resourceUiActive)
+  const preserveCardOutput = uiOwnsOutput || compatibilityMode === 'card-first'
   const useNativeInteractionProtocol = Boolean(
     settings.actionProtocolEnabled &&
     compatibilityMode === 'phone-enhanced' &&
-    !communityUiContract?.active
+    !uiOwnsOutput
   )
-  const allowNativeMessageReshaping = compatibilityMode === 'phone-enhanced' && !communityUiContract?.active
+  const allowNativeMessageReshaping = compatibilityMode === 'phone-enhanced' && !uiOwnsOutput
 
   const reasons = [
     origin === 'community' ? '角色来自社区角色卡/兼容格式' : '角色由小手机原生创建',
     requested === 'auto'
-      ? '自动模式保持 AI / 原卡原样输出，不启用小手机内容整形'
+      ? (presentationOverride
+          ? '用户选择了非默认聊天呈现方式，自动启用普通消息整形；原卡固定 UI 仍优先'
+          : '自动模式使用默认场景合并，保持 AI / 原卡原样输出')
       : `用户指定${compatibilityMode === 'card-first' ? '原卡优先' : '小手机增强'}策略`,
-    communityUiContract?.active ? '检测到原卡固定输出协议，强制原卡优先' : ''
+    communityUiContract?.active ? '检测到原卡固定输出协议，强制原卡优先' : '',
+    resourceUiActive ? '当前正在使用社区资源界面，会话期间暂停小手机私有消息整形' : ''
   ].filter(Boolean)
 
   return {

@@ -91,6 +91,7 @@ watch(conversationId, load)
 
         <details open class="debug-section">
           <summary>字符预算与截断</summary>
+          <p v-if="selected.tokenUsage?.totalTokens" class="ok">API 实际 Token：输入 {{ selected.tokenUsage.promptTokens || 0 }} · 输出 {{ selected.tokenUsage.completionTokens || 0 }} · 合计 {{ selected.tokenUsage.totalTokens }}<template v-if="selected.tokenUsage.successfulCalls && selected.tokenUsage.successfulCalls > 1"> · {{ selected.tokenUsage.successfulCalls }} 次成功调用累计</template></p>
           <article v-for="section in selected.promptSections || []" :key="section.key" class="budget-row">
             <div><b>{{ section.label }}</b><small>{{ section.characters }}{{ section.budget ? ` / 建议 ${section.budget}` : '' }}</small></div>
             <div class="budget-track"><i :style="{ width: `${Math.min(100, section.budget ? section.characters / section.budget * 100 : 25)}%` }" :class="{ over: section.truncated }"></i></div>
@@ -109,6 +110,16 @@ watch(conversationId, load)
           <summary>触发的世界书</summary>
           <article v-for="entry in selected.activatedLorebook" :key="entry.id" class="memory-row"><b>{{ entry.title }}</b><small>{{ entry.reason || '关键词或常驻规则触发' }}</small></article>
           <p v-if="!selected.activatedLorebook.length" class="empty">本轮没有触发世界书。</p>
+        </details>
+
+        <details v-if="selected.resourceRouting?.length" open class="debug-section">
+          <summary>资源调度与节省</summary>
+          <p v-if="selected.estimatedSavedCharacters" class="ok">本轮资源调度预计少注入 {{ selected.estimatedSavedCharacters }} 字符。</p>
+          <article v-for="entry in selected.resourceRouting" :key="`${entry.status}:${entry.id}`" class="memory-row">
+            <b>{{ entry.title }}</b>
+            <small>{{ entry.status === 'focused' ? '本轮 Focus' : entry.status === 'deferred' ? '按需休眠' : '已注入' }} · {{ entry.characters }} 字符</small>
+            <small>{{ entry.reason }}</small>
+          </article>
         </details>
 
         <details open class="debug-section">

@@ -291,6 +291,7 @@ export function parseRegexJson(text: string, fileName = '正则.json'): ParsedRe
     promptOnly: asBoolean(raw.promptOnly ?? raw.prompt_only, false),
     runOnEdit: asBoolean(raw.runOnEdit ?? raw.run_on_edit, false),
     substituteRegex: asNumber(raw.substituteRegex ?? raw.substitute_regex, 0),
+    order: asNumber(raw.order ?? raw.priority ?? index, index),
     minDepth: raw.minDepth == null ? undefined : asNumber(raw.minDepth, 0),
     maxDepth: raw.maxDepth == null ? undefined : asNumber(raw.maxDepth, 0),
     sourceFileName: fileName,
@@ -305,7 +306,7 @@ export function parseRegexJson(text: string, fileName = '正则.json'): ParsedRe
       format: 'SillyTavern / Tavo regex',
       name,
       summary: [`${scripts.length} 条正则`, `${scripts.filter(item => item.enabled).length} 条启用`],
-      supported: ['findRegex / replaceString', 'placement', 'promptOnly', 'markdownOnly', '深度字段保留', '显示 HTML 安全渲染'],
+      supported: ['findRegex / replaceString', 'placement', 'order / 执行顺序', 'promptOnly', 'markdownOnly', '深度字段保留', '显示 HTML 安全渲染'],
       warnings: ['第三方 JavaScript 不执行；HTML/CSS 会进入隔离的安全渲染器。']
     }
   }

@@ -70,7 +70,7 @@ import { buildLorebookPrompt } from '../services/lorebookService'
 import { composeRoleplaySystemPrompt } from '../services/promptComposer'
 import { applyRegexPipeline, applyRegexScripts, listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml } from '../services/regexRuntime'
 import { composeWithPromptPreset, getActivePromptPreset } from '../services/presetRuntime'
-import { buildCommunityUiPriorityPrompt, buildCommunityUiRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, sanitizeCommunityUiText } from '../services/communityUiRuntime'
+import { buildCommunityUiPriorityPrompt, buildCommunityUiRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, regexProducesRichUi, sanitizeCommunityUiText, tryRepairCommunityUiLocally } from '../services/communityUiRuntime'
 import { resolveCharacterRuntimeProfile } from '../services/characterRuntimeProfile'
 import { renderRoleplayText } from '../services/textMacroService'
 import { estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
@@ -1274,7 +1274,7 @@ async function requestAssistantReply(options?: {
       listActiveRegexScripts(activeCharacter.id, 'world-info'),
       listActiveRegexScripts(activeCharacter.id, 'prompt')
     ])
-    if (activeAssistantRegex.length) streamSession.suppressPreview = true
+    if (activeAssistantRegex.some(regexProducesRichUi)) streamSession.suppressPreview = true
     const latestUserText = [...messages.value].reverse().find(item => item.senderId === 'user')?.content ?? ''
     const memoryQuery = [latestUserText, options?.musicPrompt || '', conversationState.value?.unresolvedTopics?.join(' ') || ''].filter(Boolean).join('\n')
     const memoryHitDetails = settings.memoryEnabled
@@ -1291,9 +1291,10 @@ async function requestAssistantReply(options?: {
         messages: messages.value,
         latestText: [latestUserText, options?.musicPrompt || ''].filter(Boolean).join('\n'),
         character: activeCharacter,
-        persona
+        persona,
+        activeResourceEntryId: conversationState.value?.activeResourceEntryId
       })
-      : { prompt: '', activated: [] }
+      : { prompt: '', beforePrompt: '', afterPrompt: '', activated: [], focused: [], deferred: [], routingDecisions: [], estimatedSavedCharacters: 0, resourceSession: { continued: false, exitRequested: false } }
 
     const runtimeLorebookPrompt = activeWorldRegex.length
       ? applyRegexScripts(lorebook.prompt, activeWorldRegex, regexMacros).text
@@ -1308,12 +1309,13 @@ async function requestAssistantReply(options?: {
     const runtimeProfile = resolveCharacterRuntimeProfile({
       character: activeCharacter,
       settings,
-      communityUiContract
+      communityUiContract,
+      resourceUiActive: Boolean(lorebook.resourceSession.entryId)
     })
     streamSession.preserveRawOutput = runtimeProfile.compatibilityMode === 'card-first'
     streamSession.suppressPreview = Boolean(
       communityUiContract.active ||
-      activeAssistantRegex.length ||
+      activeAssistantRegex.some(regexProducesRichUi) ||
       (runtimeProfile.useNativeInteractionProtocol && settings.multiBubble && resolvePresenceMode(settings, conversationState.value) === 'remote')
     )
 
@@ -1440,6 +1442,13 @@ async function requestAssistantReply(options?: {
     let providerId = provider.id
     let usedModel = currentModelSettings.model
     let providerNotice = ''
+    const cumulativeTokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, successfulCalls: 0 }
+    const collectTokenUsage = (result: ChatResponse) => {
+      cumulativeTokenUsage.successfulCalls += 1
+      cumulativeTokenUsage.promptTokens += result.usage?.promptTokens || 0
+      cumulativeTokenUsage.completionTokens += result.usage?.completionTokens || 0
+      cumulativeTokenUsage.totalTokens += result.usage?.totalTokens || ((result.usage?.promptTokens || 0) + (result.usage?.completionTokens || 0))
+    }
 
     const runProvider = async (
       activeProvider: ModelProvider,
@@ -1460,6 +1469,8 @@ async function requestAssistantReply(options?: {
             systemPrompt,
             recentMessages,
             activatedLorebook: lorebook.activated.map(item => ({ id: item.id, title: item.title, reason: item.activationReason })),
+            resourceRouting: lorebook.routingDecisions,
+            estimatedSavedCharacters: lorebook.estimatedSavedCharacters,
             memoryHits: memoryHitDetails.map(item => ({ id: item.memory.id, content: item.memory.content, importance: item.memory.importance, layer: item.memory.layer, score: item.score, reason: item.reasons.join('；') })),
             imageCount: includeVisionCount(request),
             estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages),
@@ -1481,11 +1492,12 @@ async function requestAssistantReply(options?: {
 
       if (!useStreaming) {
         const result = await activeProvider.chat(request)
+        collectTokenUsage(result)
         if (visualMessage) visionStage.value = 'replying'
         return result
       }
 
-      return activeProvider.chatStream(
+      const result = await activeProvider.chatStream(
         request,
         {
           onDelta: chunk => {
@@ -1494,6 +1506,8 @@ async function requestAssistantReply(options?: {
           }
         }
       )
+      collectTokenUsage(result)
+      return result
     }
 
     try {
@@ -1553,7 +1567,9 @@ async function requestAssistantReply(options?: {
       return
     }
 
-    let parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol })
+    // 第一版真实 AI 回复永远保留为内容兜底。格式纠偏仍交给 AI，但纠偏失败不能吞掉第一版正文。
+    const initialAiResponse = response
+    let parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
     const applyVisibleMacrosToParsedOutput = () => {
       const replace = (value?: string) => renderRoleplayText(value, persona.name, activeCharacter.name)
       parsedOutput = {
@@ -1590,7 +1606,7 @@ async function requestAssistantReply(options?: {
     }
     applyVisibleMacrosToParsedOutput()
     let regexDisplay = await applyRegexPipeline({
-      text: communityUiContract.active ? response.text : parsedOutput.visibleText,
+      text: response.text,
       characterId: activeCharacter.id,
       target: 'assistant-output',
       userName: persona.name,
@@ -1607,53 +1623,68 @@ async function requestAssistantReply(options?: {
     })
 
     if (communityUiContract.active && !communityUiConforms() && !signal.aborted) {
-      const uiRepairRequest = createRequest(visionUsed)
-      uiRepairRequest.temperature = Math.min(uiRepairRequest.temperature ?? 0.8, 0.35)
-      uiRepairRequest.messages = [
-        ...uiRepairRequest.messages,
-        { role: 'system', content: buildCommunityUiRepairPrompt(communityUiContract, response.text) }
-      ]
-      try {
-        response = await provider.chat(uiRepairRequest)
-        parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol })
-        applyVisibleMacrosToParsedOutput()
-        regexDisplay = await applyRegexPipeline({
-          text: communityUiContract.active ? response.text : parsedOutput.visibleText,
-          characterId: activeCharacter.id,
-          target: 'assistant-output',
-          userName: persona.name,
-          characterName: activeCharacter.name
-        })
-        richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '') : ''
-        communityUiText = communityUiContract.active && !richReplyHtml ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, activeCharacter.name) || '') : ''
-      } catch (uiRepairError) {
-        if (isTokenLimitError(uiRepairError)) throw uiRepairError
-        parsedOutput.warnings.push(uiRepairError instanceof Error ? `社区 UI 自动纠偏失败：${uiRepairError.message}` : '社区 UI 自动纠偏失败。')
+      const localRepair = tryRepairCommunityUiLocally(communityUiContract, response.text)
+      if (localRepair.repaired) {
+        richReplyHtml = renderRoleplayText(normalizeRichHtml(localRepair.text), persona.name, activeCharacter.name) || ''
+        communityUiText = ''
+        parsedOutput.warnings.push(localRepair.reason)
+      } else {
+        // 只有本地无法确认“只是格式问题”时，才允许一次模型纠偏。
+        const uiRepairRequest = createRequest(visionUsed)
+        uiRepairRequest.temperature = Math.min(uiRepairRequest.temperature ?? 0.8, 0.35)
+        uiRepairRequest.messages = [
+          ...uiRepairRequest.messages,
+          { role: 'system', content: buildCommunityUiRepairPrompt(communityUiContract, response.text) }
+        ]
+        try {
+          response = await provider.chat(uiRepairRequest)
+          collectTokenUsage(response)
+          parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
+          applyVisibleMacrosToParsedOutput()
+          regexDisplay = await applyRegexPipeline({
+            text: response.text,
+            characterId: activeCharacter.id,
+            target: 'assistant-output',
+            userName: persona.name,
+            characterName: activeCharacter.name
+          })
+          richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '') : ''
+          communityUiText = communityUiContract.active && !richReplyHtml ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, activeCharacter.name) || '') : ''
+        } catch (uiRepairError) {
+          if (isAbortError(uiRepairError)) throw uiRepairError
+          if (isTokenLimitError(uiRepairError)) {
+            parsedOutput.warnings.push('社区 UI 自动纠偏因 Token / 上下文 / 额度限制未完成；第一版真实 AI 回复已保留。')
+            noticeMessage.value = 'AI 已完成第一版回复，但社区 UI 格式纠偏因 Token / 上下文 / 额度限制未完成；正文已保留，未使用本地补写。'
+          } else {
+            parsedOutput.warnings.push(uiRepairError instanceof Error ? `社区 UI 自动纠偏失败：${uiRepairError.message}` : '社区 UI 自动纠偏失败。')
+          }
+        }
       }
     }
 
     if (communityUiContract.active && !communityUiConforms()) {
-      if (debugTrace) {
-        try {
-          await patchPromptDebugTrace(debugTrace.id, {
-            provider: providerId,
-            model: usedModel,
-            rawOutput: response.text,
-            visibleOutput: '',
-            naturalnessWarnings: [
-              ...parsedOutput.warnings,
-              '社区 UI 校验失败：模型连续两次未按原卡协议输出，因此本轮没有写入聊天。请查看“原始输出”定位模型实际返回了什么。'
-            ]
-          })
-        } catch (debugError) {
-          console.warn('记录社区 UI 失败输出时，Prompt 调试写库失败：', debugError)
-        }
-      }
-      throw new Error('角色卡要求使用社区 UI / 固定输出格式，但模型连续两次没有按原卡协议输出。为避免把错误的普通文本写进聊天，本轮已停止保存；请点击重试。')
+      // 格式纠偏没有成功时，恢复第一版真实 AI 回复。UI 可以降级，正文不能被静默丢弃。
+      response = initialAiResponse
+      parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
+      applyVisibleMacrosToParsedOutput()
+      regexDisplay = await applyRegexPipeline({
+        text: response.text,
+        characterId: activeCharacter.id,
+        target: 'assistant-output',
+        userName: persona.name,
+        characterName: activeCharacter.name
+      })
+      richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text)
+        ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '')
+        : ''
+      communityUiText = !richReplyHtml
+        ? (renderRoleplayText(sanitizeCommunityUiText(response.text), persona.name, activeCharacter.name) || '')
+        : ''
+      parsedOutput.warnings.push('社区 UI 未完全匹配原卡格式：已保留第一版真实 AI 回复，未因 UI/Regex 失败丢弃正文。')
     }
 
     if (!communityUiContract.active && !richReplyHtml && regexDisplay.applied.length) {
-      const transformed = parseCompanionOutput(regexDisplay.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol })
+      const transformed = parseCompanionOutput(regexDisplay.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
       parsedOutput = { ...parsedOutput, messages: transformed.messages, visibleText: transformed.visibleText, actionSummary: transformed.actionSummary, status: transformed.status || parsedOutput.status, roleCardUi: transformed.roleCardUi || parsedOutput.roleCardUi, presenceResolution: transformed.presenceResolution?.resolvedPresence ? transformed.presenceResolution : parsedOutput.presenceResolution }
       applyVisibleMacrosToParsedOutput()
     }
@@ -1684,6 +1715,7 @@ async function requestAssistantReply(options?: {
         await patchPromptDebugTrace(debugTrace.id, {
           provider: providerId,
           model: usedModel,
+          tokenUsage: { ...cumulativeTokenUsage },
           rawOutput: response.text,
           visibleOutput: richReplyHtml || communityUiText || parsedOutput.visibleText,
           actionSummary: parsedOutput.actionSummary,
@@ -1703,10 +1735,24 @@ async function requestAssistantReply(options?: {
         console.warn('更新 Prompt 调试记录失败：', debugError)
       }
     }
-    if (!options?.alternativeTargetId && parsedOutput.status && conversationState.value) {
+    const resourceSessionPatch: Partial<ConversationState> = lorebook.resourceSession.exitRequested
+      ? { activeResourceEntryId: undefined, activeResourceTitle: undefined, activeResourceUpdatedAt: new Date().toISOString() }
+      : lorebook.resourceSession.entryId
+        ? {
+          activeResourceEntryId: lorebook.resourceSession.entryId,
+          activeResourceTitle: lorebook.resourceSession.title,
+          activeResourceUpdatedAt: new Date().toISOString()
+        }
+        : {}
+
+    if (!options?.alternativeTargetId && conversationState.value && (parsedOutput.status || Object.keys(resourceSessionPatch).length)) {
       const beforeState = conversationState.value
-      const statePatch = mergeStatusIntoConversationState(beforeState, parsedOutput.status, parsedOutput.presenceResolution)
-      const nextState = await patchConversationState(activeConversation.id, { ...statePatch, lastActionSummary: parsedOutput.actionSummary })
+      const statePatch = {
+        ...(parsedOutput.status ? mergeStatusIntoConversationState(beforeState, parsedOutput.status, parsedOutput.presenceResolution) : {}),
+        ...resourceSessionPatch,
+        lastActionSummary: parsedOutput.actionSummary
+      }
+      const nextState = await patchConversationState(activeConversation.id, statePatch)
       await recordConversationStateChanges({
         conversationId: activeConversation.id,
         characterId: activeCharacter.id,
@@ -1715,7 +1761,7 @@ async function requestAssistantReply(options?: {
         sourceMessageId: options?.sourceMessageId
       })
       conversationState.value = nextState
-      if (settings.memoryEnabled && (parsedOutput.status.relationshipNote || parsedOutput.status.innerThought)) {
+      if (parsedOutput.status && settings.memoryEnabled && (parsedOutput.status.relationshipNote || parsedOutput.status.innerThought)) {
         const observation = [parsedOutput.status.relationshipNote, parsedOutput.status.innerThought]
           .filter(Boolean)
           .join('；')
@@ -1728,9 +1774,11 @@ async function requestAssistantReply(options?: {
         })
         await refreshMemoryList()
       }
-      const characterPatch: Partial<Character> = { mood: parsedOutput.status.mood || activeCharacter.mood, activity: parsedOutput.status.activity || activeCharacter.activity, updatedAt: new Date().toISOString() }
-      await db.characters.update(activeCharacter.id, characterPatch)
-      character.value = { ...activeCharacter, ...characterPatch }
+      if (parsedOutput.status) {
+        const characterPatch: Partial<Character> = { mood: parsedOutput.status.mood || activeCharacter.mood, activity: parsedOutput.status.activity || activeCharacter.activity, updatedAt: new Date().toISOString() }
+        await db.characters.update(activeCharacter.id, characterPatch)
+        character.value = { ...activeCharacter, ...characterPatch }
+      }
     }
     if (options?.alternativeTargetId) {
       const target = messages.value.find(item => item.id === options.alternativeTargetId)
@@ -2166,8 +2214,8 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
     ? { content: plainSource, ui: extractRoleCardUiHints(plainSource) }
     : parseRoleCardUi(plainSource)
   const greetingUi = parsedUi.ui || extractRoleCardUiHints(plainSource)
-  const uiPatch = roleCardUiToConversationPatch(parsedUi.content, greetingUi)
-  const openingPresence = resolvePresenceFromRoleCardScene(rawGreeting, greetingUi).resolvedPresence
+  const uiPatch = roleCardUiToConversationPatch(parsedUi.content, greetingUi, [userName])
+  const openingPresence = resolvePresenceFromRoleCardScene(rawGreeting, greetingUi, undefined, [userName]).resolvedPresence
   if (openingPresence) uiPatch.presence = openingPresence
   const greetingActivity = inferCardInitialActivity(macroResolved)
   const greetingRelationship = inferCardInitialRelationship(macroResolved)

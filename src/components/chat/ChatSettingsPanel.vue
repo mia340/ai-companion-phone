@@ -227,7 +227,16 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-control">
-        <span><b>普通聊天动作</b><small>仅在角色没有社区 UI / 固定输出协议时生效</small></span>
+        <span><b>聊天呈现方式</b><small>只决定你怎么看回复，不再改变“是否同一现场”的世界事实；社区原卡 UI 仍然优先</small></span>
+        <select v-model="chatSettings.conversationPresentationMode" @change="emit('persist')">
+          <option value="scene-merged">场景合并 · 动作与台词同气泡</option>
+          <option value="phone-text">纯手机消息 · 只显示语句</option>
+          <option value="phone-split">动作 / 台词分开</option>
+        </select>
+      </label>
+
+      <label class="setting-control">
+        <span><b>普通聊天动作</b><small>控制动作是否可见；“纯手机消息”会始终隐藏动作。仅在角色没有社区 UI / 固定输出协议时生效</small></span>
         <select v-model="chatSettings.actionVisibility" @change="emit('persist')">
           <option value="always">始终显示</option>
           <option value="together">只在身边显示</option>

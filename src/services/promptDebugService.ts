@@ -122,6 +122,9 @@ export function buildPromptDebugReport(trace: PromptDebugTrace) {
     `- 角色模式：${trace.roleplayMode}`,
     `- Persona：${trace.personaName}`,
     `- 上下文字符：${trace.estimatedCharacters}`,
+    trace.tokenUsage?.promptTokens ? `- API 实际输入 Token：${trace.tokenUsage.promptTokens}` : '',
+    trace.tokenUsage?.completionTokens ? `- API 实际输出 Token：${trace.tokenUsage.completionTokens}` : '',
+    trace.tokenUsage?.totalTokens ? `- API 实际总 Token：${trace.tokenUsage.totalTokens}${trace.tokenUsage.successfulCalls && trace.tokenUsage.successfulCalls > 1 ? `（${trace.tokenUsage.successfulCalls} 次成功调用累计）` : ''}` : '',
     `- 图片：${trace.imageCount} 张`,
     '',
     '## 预算分区',
@@ -129,6 +132,12 @@ export function buildPromptDebugReport(trace: PromptDebugTrace) {
     '',
     '## 世界书触发',
     ...(trace.activatedLorebook.length ? trace.activatedLorebook.map(item => `- ${item.title}${item.reason ? `：${item.reason}` : ''}`) : ['- 无']),
+    '',
+    '## 资源调度',
+    ...(trace.resourceRouting?.length
+      ? trace.resourceRouting.map(item => `- ${item.title}：${item.status === 'focused' ? '本轮 Focus' : item.status === 'deferred' ? '按需休眠' : '已注入'} · ${item.characters} 字符 · ${item.reason}`)
+      : ['- 无额外资源调度']),
+    trace.estimatedSavedCharacters ? `- 本轮资源调度预计少注入 ${trace.estimatedSavedCharacters} 字符。` : '',
     '',
     '## 记忆命中',
     ...(trace.memoryHits.length ? trace.memoryHits.map(item => `- [${item.layer || '未分类'}] ${item.content}（重要度 ${item.importance}${item.score === undefined ? '' : `，分数 ${item.score}`}）${item.reason ? `：${item.reason}` : ''}`) : ['- 无']),

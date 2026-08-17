@@ -805,6 +805,7 @@ export function exportCharacterAsSillyTavernV2(character: Character, resources: 
       promptOnly: script.promptOnly,
       runOnEdit: script.runOnEdit,
       substituteRegex: script.substituteRegex,
+      order: script.order,
       minDepth: script.minDepth,
       maxDepth: script.maxDepth
     }))

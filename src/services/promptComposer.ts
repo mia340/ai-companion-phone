@@ -55,6 +55,22 @@ function naturalnessRules(settings: ChatSettings, options: { structuredOutput: b
   return lines.filter(Boolean).join('\n')
 }
 
+function buildOpeningFormatContinuity(character: Character, structuredOutput: boolean) {
+  if (structuredOutput || !character.firstMessage?.trim()) return ''
+  const labels = Array.from(new Set(
+    [...character.firstMessage.matchAll(/【\s*([^】：:]{1,20})\s*[：:]/gu)]
+      .map(match => match[1].trim())
+      .filter(Boolean)
+  )).slice(0, 12)
+  if (labels.length < 3) return ''
+  return [
+    '【原卡开场格式连续性】',
+    `原卡开场已经使用一组固定前置信息字段：${labels.join('、')}。`,
+    '若角色卡/世界书本轮没有明确切换到其它输出格式，请延续这些作者字段；具体值、措辞和剧情内容全部由你根据当前上下文自行生成，应用不提供或补写任何值。',
+    '这是风格连续性提示，不是应用 UI；不要因此新增原卡没有出现的字段。'
+  ].join('\n')
+}
+
 function visualRules(input: RoleplayPromptInput) {
   if (!input.hasImages) return ''
   const count = input.imageCount || 1
@@ -89,6 +105,7 @@ export function composeRoleplaySystemPrompt(input: RoleplayPromptInput): string 
       ? `【角色卡 Depth Prompt · depth ${input.character.depthPrompt.depth ?? 4} · ${input.character.depthPrompt.role || 'system'}】\n${input.character.depthPrompt.prompt.trim()}`
       : '',
     buildExampleDialoguePrompt(input.character.exampleDialogues),
+    buildOpeningFormatContinuity(input.character, structuredOutput),
     naturalnessRules(input.settings, { structuredOutput, phoneEnhanced: runtimeProfile.compatibilityMode === 'phone-enhanced' }),
     visualRules(input),
     runtimeProfile.useNativeInteractionProtocol

@@ -31,6 +31,8 @@ const isSaving = ref(false)
 
 const errorMessage = ref('')
 const successMessage = ref('')
+const sourceCharacter = ref<Character>()
+const isCommunityImported = computed(() => Boolean(sourceCharacter.value && ((sourceCharacter.value.importFormat && sourceCharacter.value.importFormat !== 'native') || sourceCharacter.value.sourceSpec || sourceCharacter.value.cardDescription || sourceCharacter.value.cardPersonality)))
 
 const characterId = computed(() =>
   String(route.params.id ?? '')
@@ -229,6 +231,7 @@ async function loadCharacter() {
       )
     }
 
+    sourceCharacter.value = character
     form.name = character.name
     form.nickname =
       character.nickname ?? ''
@@ -436,6 +439,14 @@ onMounted(loadCharacter)
       </p>
 
       <template v-else>
+        <section v-if="isCommunityImported" class="community-edit-note">
+          <div>
+            <b>这是社区导入角色卡</b>
+            <p>原卡内容请在“原卡阅读器 / 沉浸角色卡”里查看。下面空着的年龄、职业、喜好、心情等都是小手机本地补充项，不是角色卡缺失，也不要求填写。</p>
+          </div>
+          <button type="button" @click="router.push(`/characters/${characterId}`)">查看原卡</button>
+        </section>
+
         <section class="form-card avatar-card">
           <h2>角色头像</h2>
 
@@ -496,6 +507,9 @@ onMounted(loadCharacter)
             />
           </label>
 
+          <details class="local-supplement" :open="!isCommunityImported">
+            <summary>{{ isCommunityImported ? '本地补充资料（可选）' : '补充资料' }}</summary>
+            <p v-if="isCommunityImported" class="field-note">这些字段只方便你自己管理，不是社区角色卡标准；留空即可。</p>
           <label>
             昵称
 
@@ -556,37 +570,44 @@ onMounted(loadCharacter)
               placeholder="只填写角色卡或你明确设定的关系；留空也可以"
             />
           </label>
-        </section>
-
-        <section class="form-card">
-          <h2>角色介绍</h2>
-          <p class="field-note">不用为了界面把角色硬拆成“性格 / 说话方式 / 背景”。角色卡无法可靠拆分时，完整内容放在这里即可。</p>
-
-          <label>
-            完整角色介绍
-            <textarea
-              v-model="form.persona"
-              rows="10"
-              placeholder="完整粘贴角色设定、性格、身份、经历等；只写角色卡/你自己明确提供的内容"
-            />
-          </label>
-
-          <details class="optional-fields" :open="Boolean(form.speakingStyle || form.background)">
-            <summary>可选拆分字段</summary>
-            <p class="field-note">只有原卡本来就明确分开，或你自己想单独维护时再填写；留空不会自动生成。</p>
-            <label>
-              说话方式
-              <textarea v-model="form.speakingStyle" rows="4" placeholder="原卡明确写了语言风格时再填" />
-            </label>
-            <label>
-              背景故事
-              <textarea v-model="form.background" rows="6" placeholder="原卡明确把背景单独拆出来时再填" />
-            </label>
           </details>
         </section>
 
         <section class="form-card">
-          <h2>喜好与状态</h2>
+          <h2>{{ isCommunityImported ? '本地角色补充（可选）' : '角色介绍' }}</h2>
+          <p class="field-note">{{ isCommunityImported ? '社区卡的作者原文不会靠这些输入框重建；这里仅用于你主动追加本地资料。默认原卡优先时，这些派生字段不会重复送进 Prompt。' : '不用为了界面把角色硬拆成“性格 / 说话方式 / 背景”。角色卡无法可靠拆分时，完整内容放在这里即可。' }}</p>
+
+          <details class="local-supplement" :open="!isCommunityImported">
+            <summary>{{ isCommunityImported ? '展开本地角色补充' : '角色介绍内容' }}</summary>
+            <label>
+              完整角色介绍
+              <textarea
+                v-model="form.persona"
+                rows="10"
+                placeholder="只在你确实想追加本地设定时填写；社区卡原文请使用原卡阅读器查看"
+              />
+            </label>
+
+            <details class="optional-fields" :open="Boolean(form.speakingStyle || form.background)">
+              <summary>可选拆分字段</summary>
+              <p class="field-note">只有原卡本来就明确分开，或你自己想单独维护时再填写；留空不会自动生成。</p>
+              <label>
+                说话方式
+                <textarea v-model="form.speakingStyle" rows="4" placeholder="原卡明确写了语言风格时再填" />
+              </label>
+              <label>
+                背景故事
+                <textarea v-model="form.background" rows="6" placeholder="原卡明确把背景单独拆出来时再填" />
+              </label>
+            </details>
+          </details>
+        </section>
+
+        <section class="form-card">
+          <h2>喜好、状态与回复速度</h2>
+          <p v-if="isCommunityImported" class="field-note">这些都是小手机本地补充，不代表原卡缺少内容；社区卡无需为了填满界面而填写。</p>
+          <details class="local-supplement" :open="!isCommunityImported || Boolean(form.likesText || form.dislikesText || form.mood || form.activity)">
+            <summary>{{ isCommunityImported ? '展开本地补充' : '编辑喜好与状态' }}</summary>
 
           <label>
             喜欢
@@ -651,6 +672,7 @@ onMounted(loadCharacter)
               </option>
             </select>
           </label>
+          </details>
         </section>
 
         <p
@@ -853,4 +875,7 @@ onMounted(loadCharacter)
   }
 }
 .field-note{margin:0 0 10px;color:#9b7887;font-size:12px;line-height:1.65}.optional-fields{display:grid;gap:10px;margin-top:4px;padding:12px;border-radius:14px;background:#fff7fa;border:1px solid #f0e1e7}.optional-fields summary{cursor:pointer;color:#8c6071;font-weight:800}.optional-fields[open] summary{margin-bottom:10px}
+
+.community-edit-note{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 15px;border-radius:18px;background:#fff3f8;border:1px solid #efd9e3;color:#694b58}.community-edit-note p{margin:5px 0 0;color:#927381;font-size:12px;line-height:1.6}.community-edit-note button{flex:0 0 auto;border:0;border-radius:12px;background:#d96f9b;color:#fff;padding:9px 11px;font-weight:800}.local-supplement{display:grid;gap:12px;border-radius:14px;background:#fff9fb;border:1px solid #f0e0e7;padding:10px 12px}.local-supplement summary{cursor:pointer;font-weight:800;color:#a15c79}.local-supplement[open]>summary{margin-bottom:10px}
+
 </style>

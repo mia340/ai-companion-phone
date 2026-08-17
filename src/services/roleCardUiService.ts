@@ -130,13 +130,14 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
   return found >= 2 ? ui : undefined
 }
 
-const DIRECT_CONTACT_PATTERN = /(?:把你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|将你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|抱住你|抱着你|搂住你|搂着你|揽住你|揽着你|牵住你|牵着你|握住你|握着你的手|扣住你|环住你|圈住你|吻你|亲你|亲上你|吻上你|摸了摸你|抚过你|揉了揉你|拍了拍你|拍了下你|轻拍你|贴着你|贴近你|靠在你|靠着你|埋进你|埋在你|蹭着你|蹭了蹭你|鼻尖蹭着你|额头抵着你|抵住你|压住你|扶住你|拉住你|拽住你|替你掖|给你掖|躺在你身边|睡在你身边|和你同床|与你同床|彼此的呼吸|(?:捏|掐|托|抬|碰|触|擦|抚|按|扣)(?:着|住|了|过)?你(?:的)?(?:下巴|脸|脸颊|手|手腕|肩|腰|后背|额头|发顶|头发|膝|脚踝)|指腹(?:擦过|蹭过|抵着|按着)你(?:的)?(?:下巴|脸|脸颊|手|手腕)|(?:指尖|手指|手掌|掌心)?(?:轻轻)?(?:压在|按在|搭在|落在)你(?:的)?(?:手腕|腕脉|肩|额头|脸|脸颊|手背)|指尖在你(?:掌心|手心|手背|腕间|手腕)(?:不经意)?(?:一触|轻触|碰触))/
-const CO_PRESENCE_PATTERN = /(?:走到你身边|坐到你身边|坐在你旁边|坐在你床边|坐在你榻边|站在你面前|来到你面前|俯身看你|低头看你|看向你|望向你|目光落在你(?:的)?(?:脸|脸上|身上|眼睛|双眼|手|指尖|肩|身前)|目光落在你.{0,16}(?:脸|脸上|身上|眼睛|双眼|手|指尖|肩|身前)|看了你一眼|从你身边|递到你手里|放到你手边|与你同处(?:一室|一屋|房间|院中|巷中|车内)|和你同处(?:一室|一屋|房间|院中|巷中|车内))/
+const DIRECT_CONTACT_PATTERN = /(?:把你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|将你(?:抱|搂|揽|环|圈|捞|拉|拽|按|压|扶|牵|握|扣|拥)进|抱住你|抱着你|搂住你|搂着你|揽住你|揽着你|牵住你|牵着你|握住你|握着你的手|扣住你|环住你|圈住你|吻你|亲你|亲上你|吻上你|摸了摸你|抚过你|揉了揉你|拍了拍你|拍了下你|轻拍你|贴着你|贴近你|靠在你|靠着你|埋进你|埋在你|蹭着你|蹭了蹭你|鼻尖蹭着你|额头抵着你|抵住你|压住你|扶住你|拉住你|拽住你|替你掖|给你掖|(?:替你|给你|把[^，。]{0,12})披(?:上|在你(?:肩|身|背))|披在你(?:肩|身|背)|躺在你身边|睡在你身边|和你同床|与你同床|彼此的呼吸|(?:捏|掐|托|抬|碰|触|擦|抚|按|扣)(?:着|住|了|过)?你(?:的)?(?:下巴|脸|脸颊|手|手腕|肩|腰|后背|额头|发顶|头发|膝|脚踝)|指腹(?:擦过|蹭过|抵着|按着)你(?:的)?(?:下巴|脸|脸颊|手|手腕)|(?:指尖|手指|手掌|掌心)?(?:轻轻)?(?:压在|按在|搭在|落在)你(?:的)?(?:手腕|腕脉|肩|额头|脸|脸颊|手背)|指尖在你(?:掌心|手心|手背|腕间|手腕)(?:不经意)?(?:一触|轻触|碰触))/
+const CO_PRESENCE_PATTERN = /(?:走到你身边|坐到你身边|坐在你旁边|坐在你床边|坐在你榻边|站在你面前|来到你面前|俯身看你|低头看你|(?:垂眸|抬眸|抬眼|侧目|转头)?看着你|凝视(?:着)?你|盯着你|瞥了你一眼|看向你|望向你|目光落在你(?:的)?(?:脸|脸上|身上|眼睛|双眼|手|指尖|肩|身前)|目光落在你.{0,16}(?:脸|脸上|身上|眼睛|双眼|手|指尖|肩|身前)|看了你一眼|从你身边|递到你手里|放到你手边|与你同处(?:一室|一屋|房间|院中|巷中|车内)|和你同处(?:一室|一屋|房间|院中|巷中|车内))/
 
 export function resolvePresenceFromRoleCardScene(
   text: string,
   ui?: RoleCardUiState,
-  reportedPresence?: 'together' | 'remote'
+  reportedPresence?: 'together' | 'remote',
+  userNames: string[] = []
 ): PresenceResolution {
   const surroundings = ui?.surroundings?.trim() || ''
   const content = text
@@ -145,7 +146,13 @@ export function resolvePresenceFromRoleCardScene(
     .replace(/\s+/g, '')
   const hasDirectContact = DIRECT_CONTACT_PATTERN.test(content)
   const hasCoPresence = CO_PRESENCE_PATTERN.test(content)
-  const uiTogether = Boolean(surroundings && /(?:(?:用户|\{\{user\}\}|你|对方)在场|(?:和|与)(?:用户|\{\{user\}\}|你|对方)(?:同处|一起)|(?:用户|\{\{user\}\}|你|对方)(?:就在)?身边)/.test(surroundings))
+  const escapedNames = userNames.map(item => item.trim()).filter(Boolean).map(item => item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const userAliasPattern = ['用户', '\\{\\{user\\}\\}', '你', '对方', ...escapedNames].filter(Boolean).join('|')
+  const explicitUiAbsent = Boolean(surroundings && userAliasPattern && new RegExp(`(?:${userAliasPattern}).{0,8}(?:不在场|未在场|不在|离开|未到)|(?:没有|无).{0,6}(?:${userAliasPattern})`).test(surroundings))
+  const uiTogether = Boolean(surroundings && !explicitUiAbsent && (
+    new RegExp(`(?:(?:${userAliasPattern})在场|(?:和|与)(?:${userAliasPattern})(?:同处|一起)|(?:${userAliasPattern})(?:就在)?身边)`).test(surroundings)
+    || escapedNames.some(name => new RegExp(`(?:^|[，,、;；/|\s])${name}(?:$|[（(，,、;；/|\s])`).test(surroundings))
+  ))
   const uiAlone = /独处|独自|只有自己|无人/.test(surroundings)
 
   if (hasDirectContact) {
@@ -169,7 +176,9 @@ export function resolvePresenceFromRoleCardScene(
       source: 'ui-surroundings',
       conflict: reportedPresence === 'remote',
       uiSurroundings: surroundings,
-      reason: '角色卡“周围”字段明确表示用户在场，判定双方处于同一现场。'
+      reason: userNames.some(name => name && surroundings.includes(name))
+        ? `角色卡在场信息包含当前 Persona“${userNames.find(name => name && surroundings.includes(name))}”，判定双方处于同一现场。`
+        : '角色卡“周围/在场角色”字段明确表示用户在场，判定双方处于同一现场。'
     }
   }
 
@@ -206,17 +215,17 @@ export function resolvePresenceFromRoleCardScene(
   return { source: 'unknown', reason: '本轮没有足够场景证据，保持上一轮相处状态。', uiSurroundings: surroundings || undefined }
 }
 
-export function inferPresenceFromRoleCardScene(text: string, ui?: RoleCardUiState): 'together'|'remote'|undefined {
-  return resolvePresenceFromRoleCardScene(text, ui).resolvedPresence
+export function inferPresenceFromRoleCardScene(text: string, ui?: RoleCardUiState, userNames: string[] = []): 'together'|'remote'|undefined {
+  return resolvePresenceFromRoleCardScene(text, ui, undefined, userNames).resolvedPresence
 }
 
-export function roleCardUiToConversationPatch(text: string, ui?: RoleCardUiState): Partial<ConversationState> {
+export function roleCardUiToConversationPatch(text: string, ui?: RoleCardUiState, userNames: string[] = []): Partial<ConversationState> {
   if (!ui) return {}
   return {
     location: ui.location || undefined,
     innerThought: ui.inner || undefined,
     timePeriod: [ui.date, ui.time].filter(Boolean).join(' ') || undefined,
-    presence: inferPresenceFromRoleCardScene(text, ui),
+    presence: inferPresenceFromRoleCardScene(text, ui, userNames),
     shortTermGoals: ui.todos?.length ? ui.todos : undefined
   }
 }

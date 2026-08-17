@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PhoneFrame from '../components/PhoneFrame.vue'
 import CharacterAvatar from '../components/CharacterAvatar.vue'
@@ -7,6 +7,7 @@ import { db } from '../db/database'
 import { DEFAULT_WORLD_ID } from '../db/seed'
 import { deleteCommunityResource, deleteCommunityResourceArchive, importCommunityFile, listCommunityResources } from '../services/communityResourceService'
 import { setResourceBinding } from '../services/resourceBindingService'
+import { regexExecutionOrder } from '../services/regexRuntime'
 import type { Character, CommunityResourceArchive, ConversationState, LorebookResource, PromptPreset, RegexScript, ResourceBinding, ResourceType } from '../types/domain'
 
 const route = useRoute()
@@ -28,6 +29,22 @@ const importInput = ref<HTMLInputElement | null>(null)
 const message = ref('')
 const reports = ref<Array<{ name: string; summary: string[]; supported: string[]; warnings: string[] }>>([])
 const busy = ref(false)
+const editingRegex = ref<RegexScript | null>(null)
+const regexForm = reactive({
+  name: '',
+  findRegex: '',
+  replaceString: '',
+  trimStringsText: '',
+  placementText: '',
+  enabled: true,
+  markdownOnly: false,
+  promptOnly: false,
+  runOnEdit: false,
+  substituteRegex: 0,
+  order: 0,
+  minDepth: '',
+  maxDepth: ''
+})
 
 const selectedCharacter = computed(() => characters.value.find(item => item.id === selectedCharacterId.value))
 
@@ -67,7 +84,7 @@ async function refresh() {
   const resources = await listCommunityResources(DEFAULT_WORLD_ID)
   lorebooks.value = resources.lorebooks
   presets.value = resources.presets
-  regexes.value = resources.regexes
+  regexes.value = resources.regexes.slice().sort((a, b) => regexExecutionOrder(a) - regexExecutionOrder(b) || a.name.localeCompare(b.name, 'zh-CN'))
   bindings.value = resources.bindings
   archives.value = resources.archives
   characters.value = (await db.characters.where('worldId').equals(DEFAULT_WORLD_ID).toArray())
@@ -94,6 +111,84 @@ async function refresh() {
 
 function checkedFromEvent(event: Event) {
   return Boolean((event.target as HTMLInputElement | null)?.checked)
+}
+
+function numberFromEvent(event: Event, fallback = 0) {
+  const value = Number((event.target as HTMLInputElement | null)?.value)
+  return Number.isFinite(value) ? value : fallback
+}
+
+function optionalNumberFromText(value: string) {
+  if (!value.trim()) return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function parseNumberList(value: string) {
+  return value
+    .split(/[，,\s]+/)
+    .map(item => Number(item.trim()))
+    .filter(item => Number.isFinite(item) && item >= 0)
+}
+
+function openRegexEditor(script: RegexScript) {
+  editingRegex.value = script
+  regexForm.name = script.name
+  regexForm.findRegex = script.findRegex
+  regexForm.replaceString = script.replaceString
+  regexForm.trimStringsText = script.trimStrings.join('\n')
+  regexForm.placementText = script.placement.join(', ')
+  regexForm.enabled = script.enabled
+  regexForm.markdownOnly = script.markdownOnly
+  regexForm.promptOnly = script.promptOnly
+  regexForm.runOnEdit = script.runOnEdit
+  regexForm.substituteRegex = script.substituteRegex
+  regexForm.order = regexExecutionOrder(script)
+  regexForm.minDepth = script.minDepth == null ? '' : String(script.minDepth)
+  regexForm.maxDepth = script.maxDepth == null ? '' : String(script.maxDepth)
+}
+
+function closeRegexEditor() { editingRegex.value = null }
+
+async function toggleRegexScriptEnabled(script: RegexScript, enabled: boolean) {
+  await db.regexScripts.update(script.id, { enabled, updatedAt: new Date().toISOString() })
+  message.value = enabled ? `已启用正则脚本“${script.name}”。` : `已停用正则脚本“${script.name}”；绑定关系仍保留。`
+  await refresh()
+}
+
+async function updateRegexOrder(script: RegexScript, order: number) {
+  await db.regexScripts.update(script.id, { order, updatedAt: new Date().toISOString() })
+  message.value = `已更新“${script.name}”的执行顺序。`
+  await refresh()
+}
+
+async function saveRegexEditor() {
+  const original = editingRegex.value
+  if (!original) return
+  if (!regexForm.name.trim() || !regexForm.findRegex.trim()) {
+    message.value = '正则名称和 findRegex 不能为空。'
+    return
+  }
+  await db.regexScripts.put({
+    ...original,
+    name: regexForm.name.trim(),
+    findRegex: regexForm.findRegex,
+    replaceString: regexForm.replaceString,
+    trimStrings: regexForm.trimStringsText.split(/\r?\n/).map(item => item.trim()).filter(Boolean),
+    placement: parseNumberList(regexForm.placementText),
+    enabled: regexForm.enabled,
+    markdownOnly: regexForm.markdownOnly,
+    promptOnly: regexForm.promptOnly,
+    runOnEdit: regexForm.runOnEdit,
+    substituteRegex: Number.isFinite(Number(regexForm.substituteRegex)) ? Number(regexForm.substituteRegex) : 0,
+    order: Number.isFinite(Number(regexForm.order)) ? Number(regexForm.order) : 0,
+    minDepth: optionalNumberFromText(regexForm.minDepth),
+    maxDepth: optionalNumberFromText(regexForm.maxDepth),
+    updatedAt: new Date().toISOString()
+  })
+  message.value = `已保存正则脚本“${regexForm.name.trim()}”。`
+  editingRegex.value = null
+  await refresh()
 }
 
 async function toggleBinding(type: ResourceType, id: string, checked: boolean) {
@@ -296,10 +391,14 @@ onMounted(async () => {
       </section>
 
       <section v-else-if="tab==='regex'" class="resource-list">
-        <header class="section-head"><div><h2>正则</h2><p>所有 Regex 都可复用。来源角色只作标记，不限制你把它应用给其它角色；第三方 JavaScript 仍不执行。</p></div><button @click="tab='library'; chooseImport()">导入</button></header>
+        <header class="section-head"><div><h2>正则</h2><p>Regex 是后处理器：脚本启停决定它是否运行，“应用”只决定当前角色/全局是否使用。未命中时保留 AI 原文；第三方 JavaScript 仍不执行。</p></div><button @click="tab='library'; chooseImport()">导入</button></header>
         <article v-for="script in regexes" :key="script.id" class="resource-card">
-          <div class="resource-main"><div class="resource-icon">🧷</div><div><b>{{ script.name }}</b><small>{{ originLabel(script) }} · placement {{ script.placement.join(',') || '默认' }}</small><code>{{ script.findRegex.slice(0,120) }}{{ script.findRegex.length>120?'…':'' }}</code><span class="usage-line">{{ usageLabel('regex', script.id) }}</span></div></div>
-          <div class="resource-actions"><label class="toggle"><input type="checkbox" :checked="isBound('regex',script.id)" :disabled="bindingScope==='character' && !selectedCharacterId" @change="toggleBinding('regex',script.id,checkedFromEvent($event))" />应用</label><button class="danger" @click="remove('regex',script.id,script.name)">删除</button></div>
+          <div class="resource-main"><div class="resource-icon">🧷</div><div><b>{{ script.name }}</b><small>{{ originLabel(script) }} · placement {{ script.placement.join(',') || '默认' }} · order {{ regexExecutionOrder(script) }}</small><code>{{ script.findRegex.slice(0,120) }}{{ script.findRegex.length>120?'…':'' }}</code><span class="usage-line">{{ usageLabel('regex', script.id) }}</span></div></div>
+          <div class="regex-quick-controls">
+            <label class="toggle"><input type="checkbox" :checked="script.enabled" @change="toggleRegexScriptEnabled(script,checkedFromEvent($event))" />脚本启用</label>
+            <label class="order-control">执行顺序 <input type="number" :value="regexExecutionOrder(script)" @change="updateRegexOrder(script,numberFromEvent($event,regexExecutionOrder(script)))" /></label>
+          </div>
+          <div class="resource-actions"><label class="toggle"><input type="checkbox" :checked="isBound('regex',script.id)" :disabled="bindingScope==='character' && !selectedCharacterId" @change="toggleBinding('regex',script.id,checkedFromEvent($event))" />应用</label><button @click="openRegexEditor(script)">编辑</button><button class="danger" @click="remove('regex',script.id,script.name)">删除</button></div>
         </article><p v-if="!regexes.length" class="empty">还没有正则脚本。</p>
       </section>
 
@@ -318,9 +417,32 @@ onMounted(async () => {
         <section class="compat-card"><h3>兼容原则</h3><p>能识别 → 正确运行；部分支持 → 安全降级；暂不支持 → 原始资源仍在归档；危险脚本 → 不执行。</p><ul><li>HTML / CSS：隔离渲染</li><li>details / summary：可交互</li><li>外部图片：允许加载</li><li>script / onclick / iframe：阻止执行</li><li>未知社区扩展字段：保留原始资源，等待兼容器升级</li></ul></section>
       </section>
     </main>
+
+    <div v-if="editingRegex" class="regex-editor-backdrop" @click.self="closeRegexEditor">
+      <section class="regex-editor-sheet">
+        <header class="regex-editor-head"><div><small>REGEX · SHARED RESOURCE</small><h2>编辑正则</h2></div><button type="button" @click="closeRegexEditor">×</button></header>
+        <p class="regex-editor-note">这里只编辑社区 Regex 自己的字段。执行顺序越小越先运行；Regex 未命中不会阻止 AI 回复。</p>
+        <div class="regex-editor-fields">
+          <label>名称<input v-model="regexForm.name" /></label>
+          <label>findRegex<textarea v-model="regexForm.findRegex" rows="5" spellcheck="false" /></label>
+          <label>replaceString<textarea v-model="regexForm.replaceString" rows="7" spellcheck="false" /></label>
+          <label>trimStrings（每行一项）<textarea v-model="regexForm.trimStringsText" rows="3" /></label>
+          <div class="regex-editor-grid"><label>placement<input v-model="regexForm.placementText" placeholder="例如 1, 2" /></label><label>执行顺序 order<input v-model.number="regexForm.order" type="number" /></label></div>
+          <div class="regex-editor-grid"><label>minDepth<input v-model="regexForm.minDepth" type="number" placeholder="留空" /></label><label>maxDepth<input v-model="regexForm.maxDepth" type="number" placeholder="留空" /></label></div>
+          <label>substituteRegex<input v-model.number="regexForm.substituteRegex" type="number" /></label>
+          <div class="regex-editor-toggles">
+            <label><input v-model="regexForm.enabled" type="checkbox" />脚本启用</label>
+            <label><input v-model="regexForm.markdownOnly" type="checkbox" />markdownOnly</label>
+            <label><input v-model="regexForm.promptOnly" type="checkbox" />promptOnly</label>
+            <label><input v-model="regexForm.runOnEdit" type="checkbox" />runOnEdit</label>
+          </div>
+        </div>
+        <div class="regex-editor-actions"><button type="button" @click="closeRegexEditor">取消</button><button type="button" class="primary" @click="saveRegexEditor">保存 Regex</button></div>
+      </section>
+    </div>
   </PhoneFrame>
 </template>
 
 <style scoped>
-.world-center{min-height:100%;padding:14px 14px 40px;background:#f8f1f4;color:#5a404c}.hero-card{display:flex;gap:14px;align-items:center;padding:18px;border-radius:24px;background:linear-gradient(145deg,#fff,#fff6fa);box-shadow:0 10px 30px rgba(83,48,63,.07)}.hero-icon{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;background:#fbe5ef;font-size:29px}.hero-card small{color:#c06c90;font-weight:800;letter-spacing:.08em}.hero-card h1{margin:2px 0 4px;font-size:22px}.hero-card p,.section-head p,.apply-card span{margin:0;color:#9b7887;font-size:12px;line-height:1.6}.tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:12px 0;padding:4px;border-radius:16px;background:#eadfe4}.tabs button{border:0;border-radius:12px;background:transparent;padding:9px 2px;color:#92717f;font-size:11px}.tabs button.active{background:#fff;color:#684a57;font-weight:800;box-shadow:0 2px 10px rgba(78,45,59,.08)}.apply-card,.import-card,.compat-card,.report-card{padding:14px;border-radius:18px;background:#fff;margin-bottom:12px}.scope-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:10px;padding:4px;border-radius:13px;background:#f2e7ec}.scope-switch button{border:0;border-radius:10px;background:transparent;padding:8px;color:#987583}.scope-switch button.active{background:#fff;color:#9d5574;font-weight:800}.global-chip{padding:10px 11px;border-radius:12px;background:#fbf4f7;color:#8b6877;font-size:11px;line-height:1.55}.apply-card label{display:grid;gap:6px;font-size:12px;font-weight:800}.apply-card select{border:1px solid #ecdde4;border-radius:12px;background:#fffbfc;padding:10px;color:#614652}.character-chip{display:flex;align-items:center;gap:8px;margin-top:10px}.notice{padding:10px 12px;border-radius:12px;background:#fff2f7;color:#ad5a7d;font-size:12px}.resource-list{display:grid;gap:10px}.section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 2px}.section-head h2{margin:0 0 3px;font-size:18px}.section-head button,.resource-actions button,.legacy button{border:0;border-radius:10px;background:#f4e6ec;color:#a45375;padding:8px 10px}.resource-card,.state-card{padding:14px;border:1px solid rgba(103,67,83,.07);border-radius:18px;background:#fff;box-shadow:0 6px 20px rgba(81,48,62,.04)}.resource-main{display:flex;gap:10px}.resource-icon{width:40px;height:40px;display:grid;place-items:center;flex:0 0 auto;border-radius:12px;background:#faeaf1;font-size:20px}.resource-main b,.resource-main small{display:block}.resource-main small{margin-top:3px;color:#a17e8d;font-size:10px}.resource-main p{margin:7px 0 0;color:#795d69;font-size:12px;overflow-wrap:anywhere;word-break:break-word}.usage-line{display:block;margin-top:7px;color:#a35d79;font-size:10px;line-height:1.5}.resource-main code{display:block;margin-top:7px;max-width:300px;overflow:hidden;color:#866572;font-size:10px;white-space:nowrap}.resource-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;margin-top:11px}.toggle{display:flex;align-items:center;gap:5px;color:#9e5875;font-size:11px}.toggle input{accent-color:#d96a99}.fixed-tag{padding:5px 8px;border-radius:999px;background:#f6e8ee;color:#a96882;font-size:10px}.danger{color:#b54f65!important}.legacy{display:flex;align-items:center;justify-content:space-between}.legacy small{display:block;color:#9e7d8b}.state-title{display:flex;align-items:center;gap:8px}.presence{margin-left:auto;padding:4px 8px;border-radius:999px;background:#eee;color:#856b76;font-size:10px}.presence.together{background:#fbe3ed;color:#b24e78}.state-card dl{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 0}.state-card dl div{padding:9px;border-radius:11px;background:#fbf6f8}.state-card dt{color:#a17f8d;font-size:9px}.state-card dd{margin:3px 0 0;font-size:12px}.library{display:grid;gap:12px}.import-card{text-align:center;padding:24px 18px}.import-icon{font-size:40px}.import-card h2{margin:8px 0}.import-card p{color:#977482;line-height:1.6;font-size:12px}.import-card button{width:100%;border:0;border-radius:14px;background:#d96c9a;color:#fff;padding:12px;font-weight:800}.report-card h3,.compat-card h3{margin:0 0 8px}.report-card p,.report-ok,.report-warning,.compat-card p,.compat-card li{font-size:11px;line-height:1.6}.report-ok{color:#557a65}.report-warning{margin-top:6px;color:#aa6b40}.compat-card ul{margin:8px 0 0;padding-left:18px}.empty{text-align:center;padding:30px 10px;color:#a88996;font-size:12px}.archive-section{display:grid;gap:10px}.archive-count{min-width:28px;height:28px;display:grid;place-items:center;border-radius:999px;background:#f3e4ea;color:#a25978;font-size:11px;font-weight:800}.archive-card{padding:14px;border-radius:18px;background:#fff;border:1px solid rgba(103,67,83,.07)}.archive-head{display:flex;justify-content:space-between;gap:10px}.archive-head b,.archive-head small{display:block}.archive-head small{margin-top:3px;color:#a17e8d;font-size:10px}.archive-head>span{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#af8b99;font-size:9px}.archive-card p,.archive-supported{font-size:11px;line-height:1.55}.archive-supported{color:#557a65}.archive-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:10px}.archive-actions button{border:0;border-radius:10px;background:#f4e6ec;color:#9c5572;padding:8px 10px;font-size:10px}@media(max-width:390px){.tabs button{font-size:10px}.state-card dl{grid-template-columns:1fr}}
+.world-center{min-height:100%;padding:14px 14px 40px;background:#f8f1f4;color:#5a404c}.hero-card{display:flex;gap:14px;align-items:center;padding:18px;border-radius:24px;background:linear-gradient(145deg,#fff,#fff6fa);box-shadow:0 10px 30px rgba(83,48,63,.07)}.hero-icon{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;background:#fbe5ef;font-size:29px}.hero-card small{color:#c06c90;font-weight:800;letter-spacing:.08em}.hero-card h1{margin:2px 0 4px;font-size:22px}.hero-card p,.section-head p,.apply-card span{margin:0;color:#9b7887;font-size:12px;line-height:1.6}.tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:12px 0;padding:4px;border-radius:16px;background:#eadfe4}.tabs button{border:0;border-radius:12px;background:transparent;padding:9px 2px;color:#92717f;font-size:11px}.tabs button.active{background:#fff;color:#684a57;font-weight:800;box-shadow:0 2px 10px rgba(78,45,59,.08)}.apply-card,.import-card,.compat-card,.report-card{padding:14px;border-radius:18px;background:#fff;margin-bottom:12px}.scope-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:10px;padding:4px;border-radius:13px;background:#f2e7ec}.scope-switch button{border:0;border-radius:10px;background:transparent;padding:8px;color:#987583}.scope-switch button.active{background:#fff;color:#9d5574;font-weight:800}.global-chip{padding:10px 11px;border-radius:12px;background:#fbf4f7;color:#8b6877;font-size:11px;line-height:1.55}.apply-card label{display:grid;gap:6px;font-size:12px;font-weight:800}.apply-card select{border:1px solid #ecdde4;border-radius:12px;background:#fffbfc;padding:10px;color:#614652}.character-chip{display:flex;align-items:center;gap:8px;margin-top:10px}.notice{padding:10px 12px;border-radius:12px;background:#fff2f7;color:#ad5a7d;font-size:12px}.resource-list{display:grid;gap:10px}.section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 2px}.section-head h2{margin:0 0 3px;font-size:18px}.section-head button,.resource-actions button,.legacy button{border:0;border-radius:10px;background:#f4e6ec;color:#a45375;padding:8px 10px}.resource-card,.state-card{padding:14px;border:1px solid rgba(103,67,83,.07);border-radius:18px;background:#fff;box-shadow:0 6px 20px rgba(81,48,62,.04)}.resource-main{display:flex;gap:10px}.resource-icon{width:40px;height:40px;display:grid;place-items:center;flex:0 0 auto;border-radius:12px;background:#faeaf1;font-size:20px}.resource-main b,.resource-main small{display:block}.resource-main small{margin-top:3px;color:#a17e8d;font-size:10px}.resource-main p{margin:7px 0 0;color:#795d69;font-size:12px;overflow-wrap:anywhere;word-break:break-word}.usage-line{display:block;margin-top:7px;color:#a35d79;font-size:10px;line-height:1.5}.resource-main code{display:block;margin-top:7px;max-width:300px;overflow:hidden;color:#866572;font-size:10px;white-space:nowrap}.resource-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;margin-top:11px}.toggle{display:flex;align-items:center;gap:5px;color:#9e5875;font-size:11px}.toggle input{accent-color:#d96a99}.fixed-tag{padding:5px 8px;border-radius:999px;background:#f6e8ee;color:#a96882;font-size:10px}.danger{color:#b54f65!important}.legacy{display:flex;align-items:center;justify-content:space-between}.legacy small{display:block;color:#9e7d8b}.state-title{display:flex;align-items:center;gap:8px}.presence{margin-left:auto;padding:4px 8px;border-radius:999px;background:#eee;color:#856b76;font-size:10px}.presence.together{background:#fbe3ed;color:#b24e78}.state-card dl{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 0}.state-card dl div{padding:9px;border-radius:11px;background:#fbf6f8}.state-card dt{color:#a17f8d;font-size:9px}.state-card dd{margin:3px 0 0;font-size:12px}.library{display:grid;gap:12px}.import-card{text-align:center;padding:24px 18px}.import-icon{font-size:40px}.import-card h2{margin:8px 0}.import-card p{color:#977482;line-height:1.6;font-size:12px}.import-card button{width:100%;border:0;border-radius:14px;background:#d96c9a;color:#fff;padding:12px;font-weight:800}.report-card h3,.compat-card h3{margin:0 0 8px}.report-card p,.report-ok,.report-warning,.compat-card p,.compat-card li{font-size:11px;line-height:1.6}.report-ok{color:#557a65}.report-warning{margin-top:6px;color:#aa6b40}.compat-card ul{margin:8px 0 0;padding-left:18px}.empty{text-align:center;padding:30px 10px;color:#a88996;font-size:12px}.archive-section{display:grid;gap:10px}.archive-count{min-width:28px;height:28px;display:grid;place-items:center;border-radius:999px;background:#f3e4ea;color:#a25978;font-size:11px;font-weight:800}.archive-card{padding:14px;border-radius:18px;background:#fff;border:1px solid rgba(103,67,83,.07)}.archive-head{display:flex;justify-content:space-between;gap:10px}.archive-head b,.archive-head small{display:block}.archive-head small{margin-top:3px;color:#a17e8d;font-size:10px}.archive-head>span{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#af8b99;font-size:9px}.archive-card p,.archive-supported{font-size:11px;line-height:1.55}.archive-supported{color:#557a65}.archive-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:10px}.archive-actions button{border:0;border-radius:10px;background:#f4e6ec;color:#9c5572;padding:8px 10px;font-size:10px}.regex-quick-controls{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding:9px 10px;border-radius:11px;background:#fbf5f8}.order-control{display:flex;align-items:center;gap:6px;color:#8f6a79;font-size:10px}.order-control input{width:64px;border:1px solid #ecdde4;border-radius:8px;background:#fff;padding:5px 7px;color:#614652}.regex-editor-backdrop{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center;background:rgba(55,35,44,.35);backdrop-filter:blur(3px)}.regex-editor-sheet{width:min(100%,520px);max-height:88vh;overflow:auto;padding:18px;border-radius:24px 24px 0 0;background:#fff9fb;color:#5a404c;box-shadow:0 -18px 45px rgba(66,42,53,.18)}.regex-editor-head{display:flex;align-items:flex-start;justify-content:space-between}.regex-editor-head small{color:#bf6d8f;font-size:9px;font-weight:800;letter-spacing:.08em}.regex-editor-head h2{margin:2px 0 0}.regex-editor-head button{width:34px;height:34px;border:0;border-radius:999px;background:#f2e6eb;color:#7b5968;font-size:22px}.regex-editor-note{margin:10px 0 14px;padding:10px;border-radius:12px;background:#f8edf2;color:#8d6a79;font-size:11px;line-height:1.6}.regex-editor-fields{display:grid;gap:10px}.regex-editor-fields>label,.regex-editor-grid label{display:grid;gap:5px;color:#684a57;font-size:11px;font-weight:800}.regex-editor-fields input,.regex-editor-fields textarea{width:100%;border:1px solid #ead9e1;border-radius:11px;background:#fff;padding:9px;color:#5f4651;font:inherit;font-size:11px;box-sizing:border-box}.regex-editor-fields textarea{resize:vertical;line-height:1.5}.regex-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.regex-editor-toggles{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:10px;border-radius:12px;background:#fbf3f6}.regex-editor-toggles label{display:flex;align-items:center;gap:6px;color:#7f5d6b;font-size:10px}.regex-editor-toggles input{width:auto;accent-color:#d96a99}.regex-editor-actions{display:grid;grid-template-columns:1fr 1.5fr;gap:8px;margin-top:14px}.regex-editor-actions button{border:0;border-radius:12px;background:#efe4e9;color:#885e70;padding:11px;font-weight:800}.regex-editor-actions .primary{background:#d96c9a;color:white}@media(max-width:390px){.tabs button{font-size:10px}.state-card dl{grid-template-columns:1fr}}
 </style>

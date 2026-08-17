@@ -388,6 +388,12 @@ async function exportCard() {
           <p>PNG 会读取角色卡 metadata，并把卡面作为头像保存；不执行其中的第三方脚本，原始社区扩展会继续归档保留。</p>
         </section>
 
+        <section v-if="isCommunityCard" class="import-card token-note">
+          <b>原卡阅读与本地索引：0 Token</b>
+          <p>查看/拆分只是把 JSON 变成可读页面，不会调用 AI。聊天时默认只注入作者原始字段，不会把本地拆分结果再重复发送。</p>
+          <button type="button" @click="router.push(`/characters/${character.id}`)">打开原卡阅读器</button>
+        </section>
+
         <section v-if="embeddedUserPreview" class="embedded-user-section">
           <div class="embedded-head">
             <div>
@@ -410,16 +416,17 @@ async function exportCard() {
         </section>
 
         <form class="card-form" @submit.prevent="save">
-          <section class="form-section">
-            <h2>人格细节</h2>
-            <label>外貌与给人的感觉<textarea v-model="form.appearance" rows="4" placeholder="外貌、穿着、气质，以及角色如何看待自己的外表" /></label>
-            <label>价值观与底线<textarea v-model="form.values" rows="4" placeholder="最在意什么，会为什么坚持或妥协" /></label>
-            <label>习惯与小动作<textarea v-model="form.habits" rows="4" placeholder="口头习惯、沉默方式、紧张或亲密时的小动作" /></label>
-            <label>弱点与不擅长<textarea v-model="form.weaknesses" rows="3" placeholder="不擅长表达、害怕失去、容易嘴硬……" /></label>
-            <label>不会轻易说出的秘密<textarea v-model="form.secrets" rows="3" placeholder="角色知道但不应随便主动暴露的信息" /></label>
-            <label>角色边界<textarea v-model="form.boundaries" rows="3" placeholder="角色不会做什么、不会接受什么" /></label>
-            <label>标签<input v-model="form.tagsText" placeholder="慢热、年上、校园、治愈" /></label>
-          </section>
+          <details class="form-section advanced" :open="!isCommunityCard || Boolean(form.appearance || form.values || form.habits || form.weaknesses || form.secrets || form.boundaries)">
+            <summary>{{ isCommunityCard ? '本地人格补充（可选）' : '人格细节' }}</summary>
+            <p v-if="isCommunityCard" class="enhancement-note">这些不是社区角色卡必须字段，也不会因为为空而影响原卡。默认“原卡优先”时不会把这些派生补充与原文重复注入 Prompt。</p>
+            <label>外貌与给人的感觉<textarea v-model="form.appearance" rows="4" placeholder="只在你确实想本地补充时填写" /></label>
+            <label>价值观与底线<textarea v-model="form.values" rows="4" placeholder="只在你确实想本地补充时填写" /></label>
+            <label>习惯与小动作<textarea v-model="form.habits" rows="4" placeholder="只在你确实想本地补充时填写" /></label>
+            <label>弱点与不擅长<textarea v-model="form.weaknesses" rows="3" placeholder="只在你确实想本地补充时填写" /></label>
+            <label>不会轻易说出的秘密<textarea v-model="form.secrets" rows="3" placeholder="只在你确实想本地补充时填写" /></label>
+            <label>角色边界<textarea v-model="form.boundaries" rows="3" placeholder="只在你确实想本地补充时填写" /></label>
+            <label>标签<input v-model="form.tagsText" placeholder="原卡已有标签或你自己的本地标签" /></label>
+          </details>
 
           <section class="form-section">
             <h2>场景与开场</h2>
@@ -434,8 +441,8 @@ async function exportCard() {
             <textarea v-model="form.exampleDialoguesText" rows="14" placeholder="用户：你怎么还没睡？&#10;角色：刚写完一页。你呢，又在逞强？&#10;&#10;---&#10;&#10;用户：我今天有点想你。&#10;角色：……那你现在见到我了。别再皱眉。" />
           </section>
 
-          <section class="form-section">
-            <h2>小手机表达增强（可选）</h2>
+          <details class="form-section advanced">
+            <summary>小手机表达增强（可选）</summary>
             <p class="enhancement-note">这些字段不属于原角色卡。社区卡默认“原卡优先”时不会覆盖作者设定；只有你在聊天设置中明确启用“小手机增强”后才参与运行。</p>
             <div class="two-fields">
               <label>主动程度<select v-model="form.initiative"><option value="">跟随原卡 / 不覆盖</option><option value="low">偏被动</option><option value="natural">自然</option><option value="high">主动推动</option></select></label>
@@ -443,7 +450,7 @@ async function exportCard() {
               <label>表情频率<select v-model="form.emojiFrequency"><option value="">跟随原卡 / 不覆盖</option><option value="none">不用</option><option value="low">很少</option><option value="natural">自然</option><option value="high">较多</option></select></label>
               <label>提问频率<select v-model="form.questionFrequency"><option value="">跟随原卡 / 不覆盖</option><option value="low">很少</option><option value="natural">自然</option><option value="high">主动追问</option></select></label>
             </div>
-          </section>
+          </details>
 
           <section class="form-section">
             <h2>资源与社区信息</h2>
@@ -488,5 +495,8 @@ async function exportCard() {
 @media (max-width:390px){ .embedded-actions{grid-template-columns:1fr;} }
 
 .resource-score-tags{display:flex!important;justify-content:flex-start!important;gap:7px;flex-wrap:wrap;margin:2px 0 4px}.resource-score-tags span{padding:4px 8px;border-radius:999px;background:#fff0f6;color:#a85d7a;font-size:11px;font-weight:800}
+
+
+.token-note button{border:0;border-radius:12px;background:#f4e8ed;color:#9e5b77;padding:10px;font-weight:800}.token-note b{color:#6d4d5a}
 
 </style>

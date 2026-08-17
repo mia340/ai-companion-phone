@@ -198,8 +198,7 @@ function characterText(character: Character) {
     character.creatorNotes,
     character.scenario,
     character.firstMessage,
-    ...(character.alternateGreetings || []),
-    compact(character.rawCardExtensions)
+    ...(character.alternateGreetings || [])
   ].filter(Boolean).join('\n')
 }
 
@@ -226,7 +225,7 @@ export function detectCommunityUiContract(input: {
 }): CommunityUiContract {
   const reasons: string[] = []
   const assistantRegex = input.assistantRegex || []
-  const perReplyRichRegex = assistantRegex.filter(regexProducesRichUi).filter(regexLooksLikePerReplyUi)
+  const richRegex = assistantRegex.filter(regexProducesRichUi).filter(regexLooksLikePerReplyUi)
 
   const sources = [
     { label: '世界书', text: input.lorebookPrompt || '' },
@@ -234,29 +233,35 @@ export function detectCommunityUiContract(input: {
     { label: '角色卡', text: characterText(input.character) },
     { label: 'Prompt 正则', text: (input.promptRegex || []).map(item => `${item.findRegex}\n${item.replaceString}`).join('\n') }
   ]
+  // Regex 本身只是后处理器，不能仅因为 replaceString 会产出 HTML 就升级成“模型必须输出”的合同。
+  // 只有角色卡 / 世界书 / Prompt 真的明确声明了每轮输出结构时，才建立强合同。
   const strongSources = sources.filter(item => containsStrongOutputContract(item.text))
-  for (const source of strongSources) reasons.push(`${source.label}定义了固定输出结构`)
-  if (perReplyRichRegex.length) reasons.push(`检测到结构化输出 Regex：${perReplyRichRegex.map(item => item.name).slice(0, 3).join('、')}`)
+  for (const source of strongSources) reasons.push(`${source.label}明确要求固定输出结构`)
 
-  const contractSources = [
-    ...strongSources.map(item => item.text),
-    ...perReplyRichRegex.map(item => `${item.findRegex}\n${item.replaceString}`)
-  ].filter(Boolean)
-  const contractSource = contractSources.join('\n')
+  const strongText = strongSources.map(item => item.text).join('\n')
+  const strongTagNames = collectStructuredTags(strongText)
+  const strongLiteralTokens = Array.from(new Set(strongSources.flatMap(item => collectBraceFields(item.text)))).slice(0, 24)
+  const matchingRichRegex = strongSources.length
+    ? richRegex.filter(script => {
+        const tags = regexStructuredTagNames(script)
+        if (!tags.length || !strongTagNames.length) return false
+        return tags.some(tag => strongTagNames.includes(tag))
+      })
+    : []
+  if (matchingRichRegex.length) reasons.push(`固定结构可由 Regex 后处理：${matchingRichRegex.map(item => item.name).slice(0, 3).join('、')}`)
+
+  const contractSource = strongText
   const exactHtmlTemplate = strongSources.map(item => extractBalancedHtmlTemplate(item.text)).find(Boolean) || ''
   const structuredTemplate = strongSources.map(item => extractStructuredTemplate(item.text)).find(Boolean) || ''
-  const regexInputSkeleton = buildRegexInputSkeleton(perReplyRichRegex)
-  const requiredTagNames = Array.from(new Set([
-    ...perReplyRichRegex.flatMap(regexStructuredTagNames),
-    ...collectStructuredTags(contractSource)
-  ])).slice(0, 32)
-  const requiredLiteralTokens = Array.from(new Set(contractSources.flatMap(collectBraceFields))).slice(0, 24)
+  const regexInputSkeleton = buildRegexInputSkeleton(matchingRichRegex)
+  const requiredTagNames = strongTagNames.slice(0, 32)
+  const requiredLiteralTokens = strongLiteralTokens
   const requiredHtmlTags = collectHtmlShape(exactHtmlTemplate || contractSource)
   const requiredUiLabels = collectUiLabels(exactHtmlTemplate || contractSource)
 
   let mode: CommunityUiMode = 'none'
-  if (perReplyRichRegex.length) mode = 'regex-html'
-  else if (strongSources.some(item => hasRichHtml(item.text))) mode = 'html-contract'
+  if (strongSources.some(item => hasRichHtml(item.text))) mode = 'html-contract'
+  else if (strongSources.length && matchingRichRegex.length) mode = 'regex-html'
   else if (strongSources.length && (requiredTagNames.length || requiredLiteralTokens.length || structuredTemplate)) mode = 'structured-contract'
 
   return {
@@ -266,11 +271,86 @@ export function detectCommunityUiContract(input: {
     requiredTagNames,
     requiredHtmlTags,
     requiredUiLabels,
-    requiredRegexNames: perReplyRichRegex.map(item => item.name),
+    requiredRegexNames: matchingRichRegex.map(item => item.name),
     requiredLiteralTokens,
     exactHtmlTemplate: exactHtmlTemplate || undefined,
     structuredTemplate: structuredTemplate || undefined,
     regexInputSkeleton: regexInputSkeleton || undefined
+  }
+}
+
+
+function escapeHtmlText(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function splitStatusPrelude(raw: string) {
+  const source = raw
+    .replace(/^```(?:html|text)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+  const lines = source.split(/\r?\n/)
+  const status: string[] = []
+  let index = 0
+  let started = false
+  for (; index < lines.length; index += 1) {
+    const line = lines[index].trim()
+    if (!line && started) continue
+    if (/^(?:📆|🗓|🗺|😶|💛|🧡|💙|💚|💜|▪|•|♥|❤)/u.test(line)) {
+      started = true
+      status.push(line)
+      continue
+    }
+    if (started) break
+    if (line) break
+  }
+  return {
+    status,
+    body: lines.slice(index).join('\n').trim()
+  }
+}
+
+/**
+ * 只修“已有内容、缺 HTML 外壳”的确定性格式问题。
+ * 不生成剧情、不补角色互动内容，也不改作者模板样式。
+ */
+export function tryRepairCommunityUiLocally(contract: CommunityUiContract, rawText: string) {
+  if (contract.mode !== 'html-contract' || !contract.exactHtmlTemplate || hasRichHtml(rawText)) {
+    return { repaired: false, text: rawText, reason: '' }
+  }
+  if (!contract.exactHtmlTemplate.includes('状态信息') || !contract.exactHtmlTemplate.includes('正文')) {
+    return { repaired: false, text: rawText, reason: '' }
+  }
+
+  const parts = splitStatusPrelude(rawText)
+  if (parts.status.length < 3 || !parts.body) return { repaired: false, text: rawText, reason: '' }
+
+  let html = contract.exactHtmlTemplate
+  const statusHtml = parts.status.map(escapeHtmlText).join('<br>')
+  const bodyHtml = escapeHtmlText(parts.body).replace(/\n/g, '<br>')
+
+  const statusSlot = /(<summary\b[^>]*>\s*状态信息\s*<\/summary>\s*<div\b[^>]*>\s*<div\b[^>]*>)([\s\S]*?)(<\/div>)/i
+  const bodySlot = /(<div\b[^>]*>\s*正文\s*<\/div>\s*<div\b[^>]*>)([\s\S]*?)(<\/div>)/i
+  if (!statusSlot.test(html) || !bodySlot.test(html)) return { repaired: false, text: rawText, reason: '' }
+
+  html = html.replace(statusSlot, (_whole, prefix, _previous, suffix) => `${prefix}${statusHtml}${suffix}`)
+  html = html.replace(bodySlot, (_whole, prefix, _previous, suffix) => `${prefix}${bodyHtml}${suffix}`)
+
+  // 原回复没有这些栏目内容时只保留作者栏目外壳并置空，不伪造 NPC / 观众发言。
+  for (const label of ['角色互动', '场外观众席']) {
+    const escaped = escapeRegex(label)
+    const slot = new RegExp(`(<summary\\b[^>]*>\\s*${escaped}\\s*<\\/summary>\\s*<div\\b[^>]*>\\s*<div\\b[^>]*>)([\\s\\S]*?)(<\\/div>)`, 'i')
+    html = html.replace(slot, (_whole, prefix, _previous, suffix) => `${prefix}${suffix}`)
+  }
+
+  return {
+    repaired: true,
+    text: html,
+    reason: '检测到原卡状态字段与正文均已生成，仅缺少作者 HTML 外壳；已在本地套回原模板，未追加第二次 AI 调用。'
   }
 }
 
@@ -300,7 +380,7 @@ export function buildCommunityUiPriorityPrompt(contract?: CommunityUiContract) {
 
 export function buildCommunityUiRepairPrompt(contract: CommunityUiContract, previousOutput = '') {
   const modeRule = contract.mode === 'regex-html'
-    ? '上一版没有命中原卡的结构化输出 Regex。请重新生成完整回复，并严格输出 Regex 需要的原始标签结构。'
+    ? '上一版没有完整输出原卡明确要求的结构化标签。请重新生成完整回复；Regex 只负责后处理，不需要直接输出替换后的 HTML。'
     : contract.mode === 'html-contract'
       ? '上一版没有保留原卡 HTML 模板。请重新生成完整回复并按原模板填充。'
       : '上一版没有完整遵守原卡结构化字段。请重新生成完整回复并保留全部必需字段。'
@@ -323,13 +403,16 @@ export function communityUiOutputConforms(options: {
   renderedText?: string
   appliedRegex?: string[]
 }) {
-  const { contract, rawText, renderedText = '', appliedRegex = [] } = options
+  const { contract, rawText, renderedText = '' } = options
   if (!contract.active) return true
   if (contract.mode === 'regex-html') {
-    const matched = contract.requiredRegexNames.length
-      ? appliedRegex.some(name => contract.requiredRegexNames.includes(name))
-      : appliedRegex.length > 0
-    return matched && hasRichHtml(renderedText)
+    // Regex 是否命中属于后处理结果，不属于模型内容是否合规的判据。
+    // 只检查原卡明确要求的原始标签/字段；即使 UI 转换失败，也不能把 AI 正文判成无效并吞掉。
+    const tagHits = contract.requiredTagNames.filter(name => new RegExp(`<\\s*${escapeRegex(name)}(?:\\s[^>]*)?>`, 'i').test(rawText)).length
+    const fieldHits = contract.requiredLiteralTokens.filter(name => new RegExp(`\\{\\s*${escapeRegex(name)}\\s*[:：]`, 'i').test(rawText)).length
+    const expected = contract.requiredTagNames.length + contract.requiredLiteralTokens.length
+    if (expected) return tagHits + fieldHits >= Math.min(2, expected)
+    return hasStructuredShape(rawText)
   }
   if (contract.mode === 'html-contract') {
     const source = hasRichHtml(renderedText) ? renderedText : rawText

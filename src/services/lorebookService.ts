@@ -1,5 +1,6 @@
 import { db } from '../db/database'
 import { getCharacterResourceIds } from './resourceBindingService'
+import { buildResourceFocusInstruction, buildResourceSessionContinuationContent, looksLikeLargeFeatureModule, looksLikeMandatoryPerReplyContract, looksLikeOnDemandFeatureModule, routeLorebookIntent, shouldExitResourceSession, type ResourceRoutingDecision } from './resourceIntentRouter'
 import type { Character, LorebookEntry, LorebookResource, Message, UserPersona } from '../types/domain'
 
 function normalizeText(value: string, caseSensitive: boolean) {
@@ -191,6 +192,7 @@ export async function saveLorebookEntry(
 ): Promise<LorebookEntry> {
   const now = new Date().toISOString()
   const existing = input.id ? await db.lorebookEntries.get(input.id) : undefined
+  const has = (key: keyof LorebookEntry) => Object.prototype.hasOwnProperty.call(input, key)
   const entry: LorebookEntry = {
     id: input.id || crypto.randomUUID(),
     worldId: input.worldId,
@@ -206,18 +208,18 @@ export async function saveLorebookEntry(
     matchWholeWords: input.matchWholeWords ?? existing?.matchWholeWords,
     useRegex: input.useRegex ?? existing?.useRegex ?? false,
     selective: input.selective ?? existing?.selective ?? false,
-    selectiveLogic: input.selectiveLogic ?? existing?.selectiveLogic,
+    selectiveLogic: has('selectiveLogic') ? input.selectiveLogic : existing?.selectiveLogic,
     priority: Math.min(100, Math.max(0, Math.round(input.priority ?? existing?.priority ?? 50))),
-    insertionOrder: input.insertionOrder ?? existing?.insertionOrder,
-    position: input.position ?? existing?.position,
-    depth: input.depth ?? existing?.depth,
-    role: input.role ?? existing?.role,
+    insertionOrder: has('insertionOrder') ? input.insertionOrder : existing?.insertionOrder,
+    position: has('position') ? input.position : existing?.position,
+    depth: has('depth') ? input.depth : existing?.depth,
+    role: has('role') ? input.role : existing?.role,
     probability: input.probability ?? existing?.probability,
     useProbability: input.useProbability ?? existing?.useProbability,
     sticky: input.sticky ?? existing?.sticky,
     cooldown: input.cooldown ?? existing?.cooldown,
     delay: input.delay ?? existing?.delay,
-    group: input.group ?? existing?.group,
+    group: has('group') ? input.group : existing?.group,
     groupOverride: input.groupOverride ?? existing?.groupOverride,
     groupWeight: input.groupWeight ?? existing?.groupWeight,
     scanDepth: input.scanDepth ?? existing?.scanDepth,
@@ -231,8 +233,8 @@ export async function saveLorebookEntry(
     matchCharacterDepthPrompt: input.matchCharacterDepthPrompt ?? existing?.matchCharacterDepthPrompt,
     matchScenario: input.matchScenario ?? existing?.matchScenario,
     matchCreatorNotes: input.matchCreatorNotes ?? existing?.matchCreatorNotes,
-    sourceEntryId: input.sourceEntryId ?? existing?.sourceEntryId,
-    rawExtensions: input.rawExtensions ?? existing?.rawExtensions,
+    sourceEntryId: has('sourceEntryId') ? input.sourceEntryId : existing?.sourceEntryId,
+    rawExtensions: has('rawExtensions') ? input.rawExtensions : existing?.rawExtensions,
     createdAt: existing?.createdAt || now,
     updatedAt: now
   }
@@ -257,7 +259,18 @@ export async function buildLorebookPrompt(options: {
   character?: Character
   persona?: UserPersona
   maxEntries?: number
-}): Promise<{ prompt: string; beforePrompt: string; afterPrompt: string; activated: Array<LorebookEntry & { activationReason: string }> }> {
+  activeResourceEntryId?: string
+}): Promise<{
+  prompt: string
+  beforePrompt: string
+  afterPrompt: string
+  activated: Array<LorebookEntry & { activationReason: string }>
+  focused: Array<LorebookEntry & { activationReason: string }>
+  deferred: Array<LorebookEntry & { activationReason: string }>
+  routingDecisions: ResourceRoutingDecision[]
+  estimatedSavedCharacters: number
+  resourceSession: { entryId?: string; title?: string; continued: boolean; exitRequested: boolean }
+}> {
   const activeIds = await activeLorebookIds(options.characterId)
   const allowedBookIds = new Set(activeIds)
   const all = await db.lorebookEntries.toArray() as LorebookEntry[]
@@ -269,21 +282,115 @@ export async function buildLorebookPrompt(options: {
       return allowedBookIds.has(item.lorebookId)
     })
 
-  let activated = entries
-    .filter(item => item.enabled)
-    .flatMap(item => {
-      const details = entryMatchDetails(item, options.messages, options.latestText, options.character, options.persona)
-      return details.matched && probabilityPasses(item) ? [{ ...item, activationReason: details.reason }] : []
-    })
-  activated = applyGroups(activated)
-    .sort((a, b) => (a.insertionOrder ?? 100 - a.priority) - (b.insertionOrder ?? 100 - b.priority))
+  const explicitIntent = routeLorebookIntent(entries, options.latestText || '')
+  const activeSessionEntry = options.activeResourceEntryId
+    ? entries.find(item => item.id === options.activeResourceEntryId && item.enabled)
+    : undefined
+  const staleActiveSession = Boolean(options.activeResourceEntryId && !activeSessionEntry)
+  const exitRequested = staleActiveSession || shouldExitResourceSession(options.latestText || '', activeSessionEntry)
+  const focusedIds = new Set(explicitIntent.focusedIds)
+  const focusedAliases = new Map(explicitIntent.focusedAliases)
+  if (exitRequested && activeSessionEntry) {
+    focusedIds.delete(activeSessionEntry.id)
+    focusedAliases.delete(activeSessionEntry.id)
+  }
+  const continueSession = Boolean(
+    activeSessionEntry
+    && !exitRequested
+    && focusedIds.size === 0
+    && looksLikeOnDemandFeatureModule(activeSessionEntry)
+  )
+  if (continueSession && activeSessionEntry) {
+    focusedIds.add(activeSessionEntry.id)
+    focusedAliases.set(activeSessionEntry.id, activeSessionEntry.title)
+  }
+
+  const deferred: Array<LorebookEntry & { activationReason: string }> = []
+  const candidates: Array<LorebookEntry & { activationReason: string }> = []
+
+  for (const item of entries.filter(entry => entry.enabled)) {
+    const focusedAlias = focusedAliases.get(item.id)
+    if (focusedIds.has(item.id)) {
+      candidates.push({
+        ...item,
+        activationReason: continueSession && activeSessionEntry?.id === item.id
+          ? `资源会话延续：${item.title}`
+          : `用户意图 Focus：${focusedAlias || item.title}`
+      })
+      continue
+    }
+
+    const details = entryMatchDetails(item, options.messages, options.latestText, options.character, options.persona)
+    if (!details.matched) continue
+
+    // 大型“功能说明书/UI 模块”不再因为 constant 就每轮全文注入。
+    // 但作者明确规定“每轮必须输出”的状态栏/固定合同仍保持常驻，避免破坏原卡。
+    if (item.constant && looksLikeLargeFeatureModule(item) && looksLikeOnDemandFeatureModule(item) && !looksLikeMandatoryPerReplyContract(item)) {
+      deferred.push({ ...item, activationReason: '大型功能模块：本轮未明确调用，已按需休眠' })
+      continue
+    }
+
+    if (probabilityPasses(item)) candidates.push({ ...item, activationReason: details.reason })
+  }
+
+  const focusedCandidates = candidates.filter(item => focusedIds.has(item.id))
+  const normalCandidates = candidates.filter(item => !focusedIds.has(item.id))
+  const groupedNormal = applyGroups(normalCandidates)
+  let activated = [...focusedCandidates, ...groupedNormal]
+    .sort((a, b) => (a.insertionOrder ?? (100 - a.priority)) - (b.insertionOrder ?? (100 - b.priority)))
     .slice(0, options.maxEntries ?? 24)
 
-  const section = (rows: typeof activated) => rows.map((entry, index) => `${index + 1}. ${entry.title}\n${entry.content}`).join('\n\n')
-  const before = activated.filter(entry => entry.position === 'before_char' || entry.position === 0 || entry.position == null)
-  const after = activated.filter(entry => !before.includes(entry))
+  // Focus 不应被 maxEntries 挤掉；如果超限，优先保留用户明确调用的资源。
+  const keptFocusedIds = new Set(focusedCandidates.map(item => item.id))
+  if (focusedCandidates.length) {
+    const kept = new Map(activated.map(item => [item.id, item]))
+    for (const item of focusedCandidates) kept.set(item.id, item)
+    activated = [...kept.values()]
+      .sort((a, b) => keptFocusedIds.has(a.id) === keptFocusedIds.has(b.id)
+        ? (a.insertionOrder ?? (100 - a.priority)) - (b.insertionOrder ?? (100 - b.priority))
+        : keptFocusedIds.has(a.id) ? -1 : 1)
+      .slice(0, options.maxEntries ?? 24)
+  }
+
+  const focused = activated.filter(item => keptFocusedIds.has(item.id))
+  const normal = activated.filter(item => !keptFocusedIds.has(item.id))
+  const promptContent = (entry: (typeof activated)[number]) =>
+    entry.activationReason.startsWith('资源会话延续：')
+      ? buildResourceSessionContinuationContent(entry)
+      : entry.content
+  const section = (rows: typeof activated) => rows.map((entry, index) => `${index + 1}. ${entry.title}\n${promptContent(entry)}`).join('\n\n')
+  const before = normal.filter(entry => entry.position === 'before_char' || entry.position === 0 || entry.position == null)
+  const after = normal.filter(entry => !before.includes(entry))
+  const focusPrompt = focused.length
+    ? `${buildResourceFocusInstruction(focused)}\n\n${section(focused)}`
+    : ''
   const beforePrompt = before.length ? `【本轮触发的世界书 · Before】\n\n${section(before)}` : ''
   const afterPrompt = after.length ? `【本轮触发的世界书 · After】\n\n${section(after)}` : ''
-  const prompt = [beforePrompt, afterPrompt, activated.length ? '以上设定是当前启用资源产生的世界事实或玩法规则。自然遵守，不要向用户解释“世界书”或触发过程。' : ''].filter(Boolean).join('\n\n')
-  return { prompt, beforePrompt, afterPrompt, activated }
+  const prompt = [
+    focusPrompt,
+    beforePrompt,
+    afterPrompt,
+    activated.length ? '以上设定是当前启用资源产生的世界事实或玩法规则。自然遵守，不要向用户解释“世界书”或触发过程。' : ''
+  ].filter(Boolean).join('\n\n')
+
+  const routingDecisions: ResourceRoutingDecision[] = [
+    ...focused.map(item => ({ id: item.id, title: item.title, status: 'focused' as const, reason: item.activationReason, characters: promptContent(item).length })),
+    ...normal.map(item => ({ id: item.id, title: item.title, status: 'activated' as const, reason: item.activationReason, characters: item.content.length })),
+    ...deferred.map(item => ({ id: item.id, title: item.title, status: 'deferred' as const, reason: item.activationReason, characters: item.content.length }))
+  ]
+  const sessionSavedCharacters = focused.reduce((sum, item) => {
+    if (!item.activationReason.startsWith('资源会话延续：')) return sum
+    return sum + Math.max(0, item.content.length - promptContent(item).length)
+  }, 0)
+  const estimatedSavedCharacters = deferred.reduce((sum, item) => sum + item.content.length, 0) + sessionSavedCharacters
+  const sessionCandidate = focused.find(item => looksLikeOnDemandFeatureModule(item))
+  return {
+    prompt, beforePrompt, afterPrompt, activated, focused, deferred, routingDecisions, estimatedSavedCharacters,
+    resourceSession: {
+      entryId: exitRequested ? undefined : sessionCandidate?.id || (continueSession ? activeSessionEntry?.id : undefined),
+      title: exitRequested ? undefined : sessionCandidate?.title || (continueSession ? activeSessionEntry?.title : undefined),
+      continued: continueSession,
+      exitRequested
+    }
+  }
 }

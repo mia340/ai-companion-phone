@@ -1,6 +1,31 @@
 # AI Companion Phone 架构文档
 
-> 当前架构版本：**V0.4.4.2**。下方早期章节保留历史记录；当前资源原则是“共享资源本体 + ResourceBinding”，角色内容原则仍是 AI-only。
+> 当前架构版本：**V0.4.4.3**。下方早期章节保留历史记录；当前资源原则是“共享资源本体 + ResourceBinding”，角色内容原则仍是 AI-only。
+
+
+## V0.4.4.3 · Community Runtime
+
+```text
+AI raw reply
+   │
+   ├─ original card explicitly requires a structure? ─ yes → soft AI repair once
+   │                                                  └→ still invalid: keep first AI reply
+   │
+   ▼
+Regex postprocessors (enabled + binding + order)
+   │  no match → raw text unchanged
+   ▼
+Safe Rich UI
+   ├─ HTML / CSS isolated render
+   ├─ static data/status blocks compiled locally
+   ├─ common tabs/toggles/greeting switches reimplemented locally
+   └─ third-party JavaScript never executes
+```
+
+- Regex 是转换器，不是模型输出合同；只有角色卡、世界书或 Prompt 本身明确声明固定结构时才做结构校验。
+- UI 转换失败属于展示降级，不能成为丢弃真实 AI 正文的理由。
+- 社区脚本只允许提取可证明的静态数据/交互语义，由本地受控 DOM 操作重新实现；不 eval、不注入作者 JavaScript。
+- WorldBook 的 entry enabled / priority / insertion order 与 Regex 的 script enabled / order 都属于资源自身运行字段；ResourceBinding 只决定谁使用资源。
 
 
 ## V0.4.4.2 · Shared Resource Library

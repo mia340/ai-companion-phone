@@ -133,13 +133,10 @@ export function resolvePresenceMode(settings: ChatSettings, state?: Conversation
   return state?.presence === 'together' || state?.presence === 'remote' ? state.presence : undefined
 }
 
-function resolveAutomaticActionTextLayout(
-  settings: ChatSettings,
-  state?: ConversationState
-): 'separate' | 'merged' {
-  // 不持久化“分开/合并”角色设置；仅由当下场景自动决定。
-  // 原卡有 UI/固定输出协议时 ChatRoom 会在更上层直接绕过本整形。
-  return resolvePresenceMode(settings, state) === 'together' ? 'merged' : 'separate'
+function resolveConversationPresentationMode(settings: ChatSettings): 'scene-merged' | 'phone-text' | 'phone-split' {
+  // V0.4.4.5：呈现方式只回答“用户想怎么看”，不再由相处状态自动改写。
+  // 旧数据库没有该字段时默认采用场景合并，保持长文/沉浸聊天的默认体验。
+  return settings.conversationPresentationMode ?? 'scene-merged'
 }
 
 const SCENE_ACTION_FULL_PATTERN = /<\s*scene[_-]?action\b[^>]*>([\s\S]*?)<\s*\/\s*scene[_-]?action\s*>/gi
@@ -163,16 +160,18 @@ export function buildInteractionProtocolPrompt(
   const voiceAllowed = settings.autoReadAloud || Boolean(settings.voiceName)
   const presence = resolvePresenceMode(settings, state)
   const actionVisibility = settings.actionVisibility ?? 'always'
-  const actionTextLayout = resolveAutomaticActionTextLayout(settings, state)
-  const layoutRule = actionTextLayout === 'merged'
-    ? '动作与对白使用同一个剧情气泡：动作转成中文全角括号后直接接对白，中间不要插入换行。'
-    : '动作与对白分开显示：scene_action 是独立动作消息，对白保持 text；不要把动作复制进对白。'
+  const presentationMode = resolveConversationPresentationMode(settings)
+  const layoutRule = presentationMode === 'scene-merged'
+    ? '当前聊天呈现方式是“场景合并”：动作与对白使用同一个剧情气泡；scene_action 与相邻 text 会由界面合并，不要把动作复制进对白。'
+    : presentationMode === 'phone-text'
+      ? '当前聊天呈现方式是“纯手机消息”：只输出角色真正发送/说出的 text，不要输出 scene_action。角色仍可在内部保持动作与环境事实，但这些不作为可见动作消息。'
+      : '当前聊天呈现方式是“动作 / 台词分开”：scene_action 是独立动作消息，对白保持 text；不要把动作复制进对白。'
 
   const sceneRule = presence === 'together'
     ? [
       '当前相处状态：你与用户在同一现场。',
-      actionVisibility === 'off'
-        ? '当前关闭动作视角：不要输出 scene_action，只输出角色说的话。'
+      presentationMode === 'phone-text' || actionVisibility === 'off'
+        ? '当前可见动作关闭：不要输出 scene_action，只输出角色真正说出或发送的话。'
         : '你可以使用 scene_action 描写用户能直接看到的动作、表情、视线、距离变化和环境互动。',
       layoutRule,
       '同场景时不要为了“小手机感”强行把一句完整互动拆成很多气泡。'
@@ -180,16 +179,16 @@ export function buildInteractionProtocolPrompt(
     : presence === 'remote'
       ? [
         '当前相处状态：你与用户不在同一现场，通过当前世界观允许的远程方式联系。不要默认角色拥有手机、聊天软件或现代设备；若角色卡/世界观没有明确现代通讯设定，只描述角色自身状态与回复，不凭空加入设备动作。',
-        actionVisibility === 'always'
-          ? '可以输出有情境价值的 scene_action；不要为了满足协议机械补动作。'
-          : '当前动作视角不显示远程动作：不要输出 scene_action。',
+        presentationMode === 'phone-text' || actionVisibility !== 'always'
+          ? '当前可见动作关闭：不要输出 scene_action。'
+          : '可以输出有情境价值的 scene_action；不要为了满足协议机械补动作。',
         layoutRule,
         '远程对白保持自然完整。除非你明确想发送连续多条消息，否则不要为了“小手机感”把一个完整段落按句号、引号或换行机械拆成多条。'
       ]
       : [
         '当前相处状态尚未确定。必须根据原角色卡、当前剧情地点和本轮实际互动判断；不要默认远程，也不要默认同场。',
         '如果本轮出现明确身体接触或只能同场发生的近距离互动，presence 设为 together；如果明确分隔两地，presence 设为 remote；证据不足时不要强行改变状态。',
-        actionVisibility === 'off' ? '当前关闭动作视角：不要输出 scene_action。' : '只有自然需要时才输出 scene_action，不要机械补动作。',
+        presentationMode === 'phone-text' || actionVisibility === 'off' ? '当前可见动作关闭：不要输出 scene_action。' : '只有自然需要时才输出 scene_action，不要机械补动作。',
         '普通对白保持自然完整，不按标点机械拆分。'
       ]
 
@@ -200,7 +199,7 @@ export function buildInteractionProtocolPrompt(
     '隐藏数据块格式示例：',
     '<companion_packet>{"messages":[{"kind":"text","content":"<由角色自行生成>"}],"status":{"presence":"together|remote|省略"}}</companion_packet>',
     'messages 最多 8 个动作。kind 可用：text、scene_action、emoji、voice、typing_pause、recall_message、react_to_message、image_placeholder。',
-    'scene_action 只写动作本身，不要自带圆括号；界面会按当前相处状态决定“括号合并”还是“独立 Action”。',
+    'scene_action 只写动作本身，不要自带圆括号；界面会按用户选择的聊天呈现方式决定“同气泡 / 隐藏 / 独立 Action”，与相处状态分开处理。',
     'typing_pause 只表示停顿，delayMs 建议 250～1800；recall_message 用于偶尔撤回上一条角色消息；react_to_message 的 content 只放一个回应表情，targetMessageId 可用 latest_user；image_placeholder 描述角色想分享但当前没有真实文件的图片。',
     '撤回和回应表情只能偶尔使用，不能每轮出现。不要用撤回来操控、惩罚或制造焦虑。',
     voiceAllowed ? '可以偶尔使用 voice，内容必须是角色真正会说的话。' : '当前没有开启角色声音，通常不要使用 voice。',
@@ -238,6 +237,7 @@ export function visibleStreamingText(raw: string): string {
 
 export interface ParseCompanionOutputOptions {
   interpretNativeProtocol?: boolean
+  userName?: string
 }
 
 export function parseCompanionOutput(raw: string, options: ParseCompanionOutputOptions = {}): ParsedCompanionOutput {
@@ -245,8 +245,9 @@ export function parseCompanionOutput(raw: string, options: ParseCompanionOutputO
   if (!interpretNativeProtocol) {
     const visibleText = raw.trim()
     const roleCardUi = extractRoleCardUiHints(raw)
-    const uiPatch = roleCardUi ? roleCardUiToConversationPatch(raw, roleCardUi) : {}
-    const presenceResolution = resolvePresenceFromRoleCardScene(raw, roleCardUi)
+    const userNames = options.userName ? [options.userName] : []
+    const uiPatch = roleCardUi ? roleCardUiToConversationPatch(raw, roleCardUi, userNames) : {}
+    const presenceResolution = resolvePresenceFromRoleCardScene(raw, roleCardUi, undefined, userNames)
     const status: CompanionStatusPatch | undefined = Object.keys(uiPatch).length || presenceResolution.resolvedPresence
       ? {
         location: uiPatch.location,
@@ -344,11 +345,11 @@ export function parseCompanionOutput(raw: string, options: ParseCompanionOutputO
   let status = normalizeStatus(packet?.status)
   const reportedPresence = status?.presence
   if (roleCardUi) {
-    const uiPatch = roleCardUiToConversationPatch(visibleText || messages.map(item => item.content).join(' '), roleCardUi)
+    const uiPatch = roleCardUiToConversationPatch(visibleText || messages.map(item => item.content).join(' '), roleCardUi, options.userName ? [options.userName] : [])
     status = { ...(status || {}), ...uiPatch, innerThought: uiPatch.innerThought || status?.innerThought, location: uiPatch.location || status?.location, timePeriod: uiPatch.timePeriod || status?.timePeriod, presence: uiPatch.presence || status?.presence, shortTermGoals: uiPatch.shortTermGoals || status?.shortTermGoals }
   }
   const sceneEvidenceText = [raw, ...messages.map(item => item.content)].filter(Boolean).join('\n')
-  const presenceResolution = resolvePresenceFromRoleCardScene(sceneEvidenceText, roleCardUi, reportedPresence)
+  const presenceResolution = resolvePresenceFromRoleCardScene(sceneEvidenceText, roleCardUi, reportedPresence, options.userName ? [options.userName] : [])
   if (presenceResolution.resolvedPresence) {
     status = { ...(status || {}), presence: presenceResolution.resolvedPresence }
     if (presenceResolution.conflict) warnings.push(presenceResolution.reason)
@@ -493,24 +494,21 @@ export function shapeCompanionActions(
 ): CompanionActionMessage[] {
   const presence = resolvePresenceMode(settings, state)
   const actionVisibility = settings.actionVisibility ?? 'always'
-  const actionTextLayout = resolveAutomaticActionTextLayout(settings, state)
-  const showSceneActions = actionVisibility === 'always' || (actionVisibility === 'together' && presence === 'together')
+  const presentationMode = resolveConversationPresentationMode(settings)
+  const showSceneActions = presentationMode !== 'phone-text' && (actionVisibility === 'always' || (actionVisibility === 'together' && presence === 'together'))
   const expanded = expandInlineActions(actions)
 
-  if (actionTextLayout === 'merged') {
+  if (presentationMode === 'scene-merged') {
     return mergeTogetherActions(expanded, showSceneActions)
   }
 
-  // “分开”模式：同场景也保留独立 scene_action，不再强制合并。
-  if (presence === 'together') {
-    return expanded.filter(action => action.kind !== 'scene_action' || showSceneActions)
+  // 纯手机消息：世界状态照常维护，但动作不进入可见消息。
+  if (presentationMode === 'phone-text') {
+    return expanded.filter(action => action.kind !== 'scene_action')
   }
 
-  const visibleActions = expanded.filter(action => action.kind !== 'scene_action' || showSceneActions)
-  if (presence !== 'remote') return visibleActions
-
-  // 本地不再补写任何角色动作。模型没有输出动作，就保持没有动作。
-  return visibleActions
+  // 动作 / 台词分开：只根据动作可见设置筛选，不再由远程/同场自动改变排版。
+  return expanded.filter(action => action.kind !== 'scene_action' || showSceneActions)
 }
 
 export function estimateVoiceDuration(text: string) {

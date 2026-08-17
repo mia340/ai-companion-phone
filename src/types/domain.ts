@@ -15,6 +15,7 @@ export type EmojiFrequency = 'none' | 'low' | 'natural' | 'high'
 export type QuestionFrequency = 'low' | 'natural' | 'high'
 export type MessagePacing = 'off' | 'quick' | 'natural' | 'slow'
 export type PresenceMode = 'auto' | 'together' | 'remote'
+export type ConversationPresentationMode = 'scene-merged' | 'phone-text' | 'phone-split'
 export type CompatibilityMode = 'auto' | 'card-first' | 'phone-enhanced'
 export type ActionVisibility = 'off' | 'together' | 'always'
 export type CompanionMessageKind = 'text' | 'emoji' | 'voice' | 'scene_action'
@@ -278,6 +279,7 @@ export interface RegexScript {
   promptOnly: boolean
   runOnEdit: boolean
   substituteRegex: number
+  order?: number
   minDepth?: number
   maxDepth?: number
   sourceFileName?: string
@@ -469,9 +471,12 @@ export interface ChatSettings {
   messagePacing: MessagePacing
   promptDebugEnabled: boolean
 
-  // V0.4.2.1 场景距离与动作视角
+  // V0.4.2.1 场景距离与动作视角（旧字段继续兼容）
   presenceMode: PresenceMode
   actionVisibility: ActionVisibility
+
+  // V0.4.4.5：场景事实与聊天呈现彻底解耦。
+  conversationPresentationMode: ConversationPresentationMode
   compatibilityMode?: CompatibilityMode
   updatedAt: string
 }
@@ -527,6 +532,12 @@ export interface ConversationState {
   reportedPresence?: 'together' | 'remote'
   presenceResolutionReason?: string
   presenceResolutionSource?: 'manual' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
+
+  // V0.4.4.5：大型按需资源进入后保持会话，直到明确退出或切换其它资源。
+  activeResourceEntryId?: UUID
+  activeResourceTitle?: string
+  activeResourceUpdatedAt?: string
+
   relationshipNote?: string
   timePeriod?: string
   energy?: string
@@ -584,6 +595,9 @@ export interface PromptDebugTrace {
   systemPrompt: string
   recentMessages: PromptDebugMessage[]
   activatedLorebook: Array<{ id: UUID; title: string; reason?: string }>
+  resourceRouting?: Array<{ id: UUID; title: string; status: 'focused' | 'activated' | 'deferred'; reason: string; characters: number }>
+  estimatedSavedCharacters?: number
+  tokenUsage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number; successfulCalls?: number }
   memoryHits: Array<{ id: UUID; content: string; importance: number; layer?: MemoryLayer; score?: number; reason?: string }>
   imageCount: number
   estimatedCharacters: number

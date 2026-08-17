@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyRegexScript, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml } from './regexRuntime'
+import { applyRegexScript, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml, regexExecutionOrder } from './regexRuntime'
 import type { RegexScript } from '../types/domain'
 
 const script: RegexScript = {
@@ -24,6 +24,29 @@ describe('regex UI runtime', () => {
     const output = applyRegexScript('[UI]你好[/UI]', script)
     expect(output).toContain('<div class="card">你好</div>')
     expect(looksLikeRichHtml(output)).toBe(true)
+  })
+
+
+  it('locally tolerates Chinese full-width brackets when author Regex expects square brackets', () => {
+    const forum = {
+      ...script,
+      name: '论坛',
+      findRegex: '\\[折叠标题：([^\\]]+)\\]\\s*\\[主题：([^\\]]+)\\]\\s*\\[正文：([\\s\\S]+)',
+      replaceString: '<details><summary>$1</summary><div>$2 · $3</div></details>'
+    }
+    const output = applyRegexScript('【折叠标题：咖啡馆】\n【主题：下雨天】\n【正文：今天下雨了】', forum)
+    expect(output).toContain('<details>')
+    expect(output).toContain('咖啡馆')
+    expect(output).toContain('今天下雨了')
+  })
+  it('keeps authentic AI text unchanged when the regex does not match', () => {
+    const output = applyRegexScript('这是 AI 的普通正文，没有 UI 标签。', script)
+    expect(output).toBe('这是 AI 的普通正文，没有 UI 标签。')
+  })
+
+  it('recovers execution order from legacy raw regex data without a database migration', () => {
+    expect(regexExecutionOrder({ ...script, order: undefined, raw: { order: 7 } })).toBe(7)
+    expect(regexExecutionOrder({ ...script, order: 2, raw: { order: 7 } })).toBe(2)
   })
 
   it('removes whole html code fences before render', () => {

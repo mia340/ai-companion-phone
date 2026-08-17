@@ -5,6 +5,7 @@ import PhoneFrame from '../components/PhoneFrame.vue'
 import { db } from '../db/database'
 import { deleteCharacterSafely, getOrCreateSingleConversation } from '../services/characterService'
 import { listResourceBindings } from '../services/resourceBindingService'
+import { buildCharacterCardLocalIndex, type CharacterCardLocalIndex } from '../services/characterCardIndexService'
 import { renderRoleplayText } from '../services/textMacroService'
 import type { Character } from '../types/domain'
 
@@ -16,13 +17,14 @@ const isDeleting = ref(false)
 const errorMessage = ref('')
 const resourceStats = ref({ lorebookEntries: 0, lorebooks: 0, regexScripts: 0, presets: 0, hasDepthPrompt: false })
 const boundPersonaName = ref('')
+const cardIndex = ref<CharacterCardLocalIndex>()
 const showDeletePanel = ref(false)
 const deleteConfirmName = ref('')
 const characterId = computed(() => String(route.params.id ?? ''))
 
 const canDelete = computed(() => Boolean(character.value && deleteConfirmName.value.trim() === character.value.name))
-const hasStatus = computed(() => Boolean(character.value?.mood?.trim() || character.value?.activity?.trim()))
-const hasLikes = computed(() => Boolean(character.value?.likes?.length || character.value?.dislikes?.length))
+const hasStatus = computed(() => Boolean(!cardIndex.value && (character.value?.mood?.trim() || character.value?.activity?.trim())))
+const hasLikes = computed(() => Boolean(!cardIndex.value && (character.value?.likes?.length || character.value?.dislikes?.length)))
 const hasBoundResources = computed(() => Boolean(
   resourceStats.value.lorebooks || resourceStats.value.regexScripts || resourceStats.value.presets || resourceStats.value.hasDepthPrompt
 ))
@@ -75,12 +77,14 @@ async function loadCharacter() {
     if (!result) throw new Error('这个角色不存在或已经被删除。')
     character.value = result
 
-    const [bindings, boundPersona, allEntries] = await Promise.all([
+    const [bindings, boundPersona, allEntries, localIndex] = await Promise.all([
       listResourceBindings(result.id),
       db.personas.filter(item => item.boundCharacterId === result.id).first(),
-      db.lorebookEntries.toArray()
+      db.lorebookEntries.toArray(),
+      buildCharacterCardLocalIndex(result)
     ])
     boundPersonaName.value = boundPersona?.name || ''
+    cardIndex.value = localIndex
     const activeLorebookIds = new Set(bindings.filter(item => item.enabled && item.resourceType === 'lorebook').map(item => item.resourceId))
     resourceStats.value = {
       lorebookEntries: allEntries.filter(item => Boolean(item.lorebookId && activeLorebookIds.has(item.lorebookId))).length,
@@ -164,9 +168,9 @@ onMounted(loadCharacter)
             <h1>{{ character.name }}</h1>
             <p v-if="character.nickname">昵称：{{ character.nickname }}</p>
             <div class="profile-tags">
-              <span v-if="character.relationship?.trim()">{{ renderVisible(character.relationship) }}</span>
-              <span v-if="character.identity">{{ renderVisible(character.identity) }}</span>
-              <span v-if="character.age">{{ character.age }} 岁</span>
+              <span v-if="!cardIndex && character.relationship?.trim()">{{ renderVisible(character.relationship) }}</span>
+              <span v-if="!cardIndex && character.identity">{{ renderVisible(character.identity) }}</span>
+              <span v-if="!cardIndex && character.age">{{ character.age }} 岁</span>
             </div>
           </div>
         </section>
@@ -194,17 +198,55 @@ onMounted(loadCharacter)
           <button class="resource-manage" type="button" @click="router.push({ path: '/world', query: { character: character.id, tab: 'lorebooks' } })">管理共享资源</button>
         </section>
 
-        <section v-if="characterIntroduction" class="info-card intro-card">
+        <section v-if="cardIndex" class="info-card card-reader-card">
+          <div class="reader-head">
+            <div>
+              <h2>原卡阅读器</h2>
+              <p>把社区角色卡转换成可读页面；解析、索引和查看都在本地完成，不消耗 API Token，也不会把拆分结果重复塞给 AI。</p>
+            </div>
+            <span>0 Token</span>
+          </div>
+          <div class="resource-tags">
+            <span>{{ cardIndex.sourceFormat }}</span>
+            <span v-if="cardIndex.greetingCount">开场 {{ cardIndex.greetingCount }}</span>
+            <span v-if="cardIndex.lorebookCount">世界书 {{ cardIndex.lorebookCount }} 本</span>
+            <span v-if="cardIndex.regexCount">Regex {{ cardIndex.regexCount }}</span>
+          </div>
+          <small v-if="cardIndex.sourceFileName" class="reader-file">来源：{{ cardIndex.sourceFileName }}</small>
+
+          <details v-for="section in cardIndex.sections" :key="section.key" class="reader-detail" :open="section.key === 'description'">
+            <summary>{{ section.label }}</summary>
+            <pre>{{ renderVisible(section.content) }}</pre>
+          </details>
+
+          <details class="reader-detail">
+            <summary>User 相关 · {{ cardIndex.userMentionCount }} 处 <span v-pre>{{user}}</span></summary>
+            <p v-if="cardIndex.userTemplate">检测到可独立查看的用户模板；是否建立 Persona 由你决定，不会为了填表强行猜姓名。</p>
+            <p v-else-if="cardIndex.userMentionCount">原卡包含 User 剧情/关系引用，但没有可安全建立独立 Persona 的模板时，只作为原卡设定使用。</p>
+            <p v-else>原卡没有检测到 User 占位。</p>
+            <pre v-if="cardIndex.userTemplate">{{ cardIndex.userTemplate }}</pre>
+          </details>
+
+          <details v-if="cardIndex.characterDefinitionEntries.length" class="reader-detail">
+            <summary>世界书中的人物 / 人设条目 · {{ cardIndex.characterDefinitionEntries.length }}</summary>
+            <details v-for="entry in cardIndex.characterDefinitionEntries" :key="entry.id" class="reader-nested">
+              <summary>{{ entry.title }}</summary>
+              <pre>{{ renderVisible(entry.content) }}</pre>
+            </details>
+          </details>
+        </section>
+
+        <section v-if="characterIntroduction && !cardIndex" class="info-card intro-card">
           <h2>角色介绍</h2>
           <p>{{ characterIntroduction }}</p>
         </section>
 
-        <section v-if="character.speakingStyle?.trim()" class="info-card">
+        <section v-if="!cardIndex && character.speakingStyle?.trim()" class="info-card">
           <h2>说话方式</h2>
           <p>{{ renderVisible(character.speakingStyle) }}</p>
         </section>
 
-        <section v-if="character.background?.trim()" class="info-card">
+        <section v-if="!cardIndex && character.background?.trim()" class="info-card">
           <h2>背景故事</h2>
           <p>{{ renderVisible(character.background) }}</p>
         </section>
@@ -508,5 +550,8 @@ onMounted(loadCharacter)
 .resource-tags span { padding: 5px 9px; border-radius: 999px; background: #fff0f6; color: #a85d7a; font-size: 12px; font-weight: 700; }
 .resource-manage{margin-top:12px;border:0;border-radius:12px;background:#f4e7ed;color:#a45675;padding:9px 12px;font-weight:700}.intro-card p{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 
+
+
+.card-reader-card{display:grid;gap:10px}.reader-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.reader-head h2{margin:0 0 5px}.reader-head p{margin:0;color:#8f7280;line-height:1.6}.reader-head>span{flex:0 0 auto;border-radius:999px;background:#eef8f1;color:#4f8065;padding:5px 9px;font-size:11px;font-weight:800}.reader-file{color:#9b7e8a;word-break:break-all}.reader-detail{border-radius:14px;background:#fff8fb;border:1px solid #f0e1e7;padding:10px 12px}.reader-detail summary,.reader-nested summary{cursor:pointer;color:#9e5b77;font-weight:800}.reader-detail pre,.reader-nested pre{margin:10px 0 0;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.7;color:#654b56}.reader-detail p{color:#856a76;line-height:1.6}.reader-nested{margin-top:9px;border-top:1px dashed #ead8e0;padding-top:9px}
 
 </style>

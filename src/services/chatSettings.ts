@@ -40,6 +40,7 @@ export function createDefaultChatSettings(
     promptDebugEnabled: true,
     presenceMode: 'auto',
     actionVisibility: 'always',
+    conversationPresentationMode: 'scene-merged',
     compatibilityMode: 'auto',
     updatedAt: new Date().toISOString()
   }
@@ -64,6 +65,7 @@ export async function getChatSettings(
       promptDebugEnabled: row.promptDebugEnabled ?? true,
       presenceMode: row.presenceMode ?? 'auto',
       actionVisibility: row.actionVisibility ?? 'always',
+      conversationPresentationMode: row.conversationPresentationMode ?? 'scene-merged',
       compatibilityMode: row.compatibilityMode ?? 'auto',
       proactiveFrequency: row.proactiveFrequency ?? 'natural',
       proactiveQuietHoursEnabled: row.proactiveQuietHoursEnabled ?? true,
@@ -89,6 +91,7 @@ export async function saveChatSettings(
     proactiveAllowedSources: value.proactiveAllowedSources?.length ? value.proactiveAllowedSources : ['continue-topic', 'promise-reminder', 'daily-share', 'care', 'story-event'],
     presenceMode: value.presenceMode ?? 'auto',
     actionVisibility: value.actionVisibility ?? 'always',
+    conversationPresentationMode: value.conversationPresentationMode ?? 'scene-merged',
     compatibilityMode: value.compatibilityMode ?? 'auto',
     voiceRate: Math.min(1.4, Math.max(0.7, Number(value.voiceRate ?? 1))),
     recentMessageLimit: Math.min(

@@ -196,6 +196,27 @@ export async function bindPersonaToCharacterChats(characterId: string, personaId
 }
 
 export function buildPersonaPrompt(persona: UserPersona): string {
+  const cardTemplateRaw = persona.isCardTemplate
+    ? (persona.sourceUserTemplate?.trim() || persona.description?.trim() || '')
+    : ''
+
+  // 角色卡内嵌的 {{user}} Persona 以作者原模板作为事实源。
+  // 本地为阅读/筛选解析出的年龄、职业、性格等字段不再和原模板重复注入，避免一份 User 人设占两遍 Token。
+  if (cardTemplateRaw) {
+    return [
+      `用户使用的人设名：${persona.name}`,
+      persona.personaScope === 'character' && persona.boundCharacterName
+        ? `这是“${persona.boundCharacterName}”角色卡专属 Persona，只在该角色相关聊天中作为用户身份使用。`
+        : '',
+      `【角色卡自带 {{user}} 模板原文】\n${cardTemplateRaw}`,
+      persona.relationshipNote ? `用户手动补充的关系说明：${persona.relationshipNote}` : '',
+      persona.characterKnowledge ? `角色已知的用户信息：${persona.characterKnowledge}` : '',
+      persona.boundaries ? `用户手动补充的边界：${persona.boundaries}` : '',
+      '【用户事实约束】没有出现在本 Persona 原文、长期记忆或用户当前/历史消息中的用户习惯、偏好、经历、公司地点、作息、家庭和关系事实，一律视为未知。不得为了显得熟悉而自行补全。',
+      '不得替用户决定行为、台词、心理或感受；只描写角色自身。'
+    ].filter(Boolean).join('\n')
+  }
+
   const basic = [
     persona.title ? `用户人设标题：${persona.title}` : '',
     persona.identity ? `用户身份：${persona.identity}` : '',
@@ -217,12 +238,8 @@ export function buildPersonaPrompt(persona: UserPersona): string {
     persona.lifestyle ? `用户生活状态：${persona.lifestyle}` : '',
     persona.background ? `用户背景：${persona.background}` : ''
   ].filter(Boolean)
-  const rawDescription = persona.description
-    ? persona.isCardTemplate
-      ? `角色卡自带 {{user}} 模板原文：${persona.description}`
-      : !detail.length
-        ? `用户人设描述：${persona.description}`
-        : ''
+  const rawDescription = persona.description && !detail.length
+    ? `用户人设描述：${persona.description}`
     : ''
   return [
     `用户使用的人设名：${persona.name}`,
