@@ -655,7 +655,7 @@ async function testVision() {
   display: grid;
   align-content: start;
   gap: 14px;
-  background: #fff7fb;
+  background: #f8fcff;
 }
 
 .setting-card {
@@ -696,7 +696,7 @@ async function testVision() {
 }
 
 small {
-  color: #92717f;
+  color: #73889c;
   line-height: 1.5;
 }
 
@@ -856,7 +856,7 @@ small {
 
 .error-reference dd {
   margin: 0;
-  color: #92717f;
+  color: #73889c;
 }
 
 button:disabled {

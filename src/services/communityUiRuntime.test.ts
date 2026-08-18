@@ -3,6 +3,7 @@ import {
   buildCommunityUiPriorityPrompt,
   communityUiOutputConforms,
   detectCommunityUiContract,
+  enforceUserMessageOwnershipInRichHtml,
   sanitizeCommunityUiText,
   tryRepairCommunityUiLocally
 } from './communityUiRuntime'
@@ -135,4 +136,30 @@ describe('community UI priority', () => {
     const text = '<日期>10月15日</日期><地点>公寓</地点>\n<scene_action>抬眼看你</scene_action>\n<companion_packet>{"messages":[]}</companion_packet>'
     expect(sanitizeCommunityUiText(text)).toBe(text)
   })
+})
+
+
+it('V0.4.4.6 社区聊天 HTML 不得凭空新增用户侧消息', () => {
+  const html = `<!-- 自己文字消息 (靠右-有气泡) --><div class="mine">我真实说过的话</div>
+<!-- 对方文字消息 (靠左-有气泡) --><div>角色回复</div>
+<!-- 自己文字消息 (靠右-有气泡) --><div class="mine">AI 擅自替用户补的话</div>`
+  const safe = enforceUserMessageOwnershipInRichHtml(html, ['我真实说过的话'])
+  expect(safe).toContain('我真实说过的话')
+  expect(safe).toContain('角色回复')
+  expect(safe).not.toContain('AI 擅自替用户补的话')
+})
+
+it('V0.4.4.7 Community UI Compiler V2 可用紧凑状态和正文恢复作者固定 HTML 外壳', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    lorebookPrompt: `每次回复必须携带状态栏格式UI：<div><details><summary>状态信息</summary><div><div>状态占位</div></div></details><div><div>正文</div><div>正文占位</div></div><details><summary>角色互动</summary><div><div>互动占位</div></div></details></div>`
+  })
+  const priority = buildCommunityUiPriorityPrompt(contract)
+  expect(priority).toContain('Community UI Compiler V2')
+  expect(priority).toContain('不要重复输出整段 HTML/CSS')
+  const repaired = tryRepairCommunityUiLocally(contract, '📆2027.08.31｜21:00\n🗺A市小巷\n♥内心:平静\n【正文】\n他看向你。“走吧。”')
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('2027.08.31')
+  expect(repaired.text).toContain('他看向你。“走吧。”')
+  expect(repaired.text).not.toContain('互动占位')
 })

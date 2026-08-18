@@ -23,3 +23,13 @@ describe('state protocol V2 helpers', () => {
     expect(patch.lastCompletedEvent).toContain('面试')
   })
 })
+
+it('V0.4.4.7 用户明确移动可切换当前 Presence，弱意图不提前切换', async () => {
+  const { deriveUserSceneTransition } = await import('./stateHistoryService')
+  expect(deriveUserSceneTransition('（没看你，回家）好久不见')?.presence).toBe('remote')
+  expect(deriveUserSceneTransition('（上车）')?.presence).toBe('together')
+  expect(deriveUserSceneTransition('我到家了')?.presence).toBe('remote')
+  expect(deriveUserSceneTransition('来到你身边')?.presence).toBe('together')
+  expect(deriveUserSceneTransition('我快到了')).toBeUndefined()
+  expect(deriveUserSceneTransition('我想见你')).toBeUndefined()
+})

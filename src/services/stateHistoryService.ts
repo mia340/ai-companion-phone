@@ -125,6 +125,62 @@ export function buildConversationStatePrompt(state?: ConversationState) {
   return lines.join('\n')
 }
 
+
+export interface UserSceneTransition {
+  presence: 'together' | 'remote'
+  reason: string
+  evidence: string
+}
+
+/**
+ * V0.4.4.7：只识别用户本轮“明确改变物理位置”的强证据。
+ * 这是通用场景状态机，不根据角色名/卡名做判断；弱语句（例如“想见你”“我快到了”）不会提前切状态。
+ */
+export function deriveUserSceneTransition(text: string, previous?: ConversationState): UserSceneTransition | undefined {
+  const source = text.replace(/\r\n/g, '\n').trim()
+  if (!source) return undefined
+  const compact = source.replace(/\s+/g, '')
+  const makeTransition = (presence: 'together' | 'remote', reason: string, evidence: string): UserSceneTransition => ({
+    presence,
+    reason: previous?.presence === presence ? `${reason}（确认当前状态）` : reason,
+    evidence
+  })
+
+  const togetherPatterns: Array<[RegExp, string]> = [
+    [/(?:^|[（(])(?:我)?上车(?:[）)]|$)|坐进(?:副驾|车里|车内)|钻进(?:车里|车内)/u, '用户明确进入同一车辆'],
+    [/(?:走|来到|跑到|挪到|坐到|站到)(?:了)?你(?:的)?(?:身边|面前|旁边|对面)/u, '用户明确来到角色身边'],
+    [/(?:抱住|搂住|牵住|握住|亲了|吻了|扑进)你/u, '用户主动发生直接身体接触'],
+    [/(?:推门|开门)(?:走|进)|走进(?:你的|你所在的)|进入(?:你的|你所在的)(?:房间|办公室|病房|家里)/u, '用户明确进入角色所在空间']
+  ]
+  for (const [pattern, reason] of togetherPatterns) {
+    const match = compact.match(pattern)
+    if (match) return makeTransition('together', reason, match[0])
+  }
+
+  const remotePatterns: Array<[RegExp, string]> = [
+    [/(?:^|[（(])(?:没看你[,，]?)?(?:我)?(?:先)?回家(?:了|去)?(?:[）)]|$)/u, '用户明确离开当前现场回家'],
+    [/(?:我先走了|我走了|我回去了|先回去了|转身离开|离开这里|离开你|回自己家|已经到家了|我到家了)/u, '用户明确离开角色所在现场'],
+    [/(?:挂了|挂电话|结束通话|关掉视频|退出通话)/u, '用户明确结束当前实时同场/通话互动']
+  ]
+  for (const [pattern, reason] of remotePatterns) {
+    const match = compact.match(pattern)
+    if (match) return makeTransition('remote', reason, match[0])
+  }
+
+  return undefined
+}
+
+export function buildUserSceneTransitionPrompt(transition?: UserSceneTransition) {
+  if (!transition) return ''
+  return [
+    '【用户本轮明确场景变化 · 高优先级】',
+    `用户本轮已经明确把物理相处状态切换为：${transition.presence === 'together' ? '同一现场' : '不在同一现场 / 远程'}。`,
+    `证据：${transition.evidence}。${transition.reason}。`,
+    '这是当前剧情事实，优先于 first_mes、开场 scenario 或旧状态。不要把已经离开的用户重新写回旧现场，也不要在尚未重新见面时制造身体接触。',
+    '只有用户后续再次明确改变位置，或剧情中出现无歧义的新事实时，才继续改变相处状态。'
+  ].join('\n')
+}
+
 export function deriveUserStatePatch(text: string, state?: ConversationState): Partial<ConversationState> {
   const normalized = text.replace(/\s+/g, ' ').trim()
   if (!normalized) return {}

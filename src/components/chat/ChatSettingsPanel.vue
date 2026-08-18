@@ -49,6 +49,7 @@ const emit = defineEmits<{
   openPromptDebug: []
   openMemoryManager: []
   useGreeting: [greeting: string]
+  useFreeGreeting: []
 }>()
 </script>
 
@@ -218,7 +219,7 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-control">
-        <span><b>当前相处状态</b><small>用于场景与记忆判断；社区 UI 的排版与标签不会被这里改写</small></span>
+        <span><b>当前相处状态</b><small>表示“当前”物理相处状态，不是永久锁；用户后续明确离开/进入同一空间时会自动更新</small></span>
         <select v-model="chatSettings.presenceMode" @change="emit('persist')">
           <option value="auto">自动 · 当前 {{ conversationState?.presence === 'together' ? '在身边' : conversationState?.presence === 'remote' ? '远程' : '未确定' }}</option>
           <option value="together">在身边 / 同一现场</option>
@@ -227,16 +228,16 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-control">
-        <span><b>聊天呈现方式</b><small>只决定你怎么看回复，不再改变“是否同一现场”的世界事实；社区原卡 UI 仍然优先</small></span>
+        <span><b>聊天呈现方式</b><small>只决定你怎么看回复，不再改变“是否同一现场”的世界事实；场景合并保留原 UI，手机式模式不把状态 UI 混进聊天流</small></span>
         <select v-model="chatSettings.conversationPresentationMode" @change="emit('persist')">
           <option value="scene-merged">场景合并 · 动作与台词同气泡</option>
-          <option value="phone-text">纯手机消息 · 只显示语句</option>
+          <option value="phone-text">纯手机消息 · 只显示角色语句</option>
           <option value="phone-split">动作 / 台词分开</option>
         </select>
       </label>
 
       <label class="setting-control">
-        <span><b>普通聊天动作</b><small>控制动作是否可见；“纯手机消息”会始终隐藏动作。仅在角色没有社区 UI / 固定输出协议时生效</small></span>
+        <span><b>普通聊天动作</b><small>控制动作是否可见；“纯手机消息”始终隐藏动作与状态 UI，动作分离只显示真正动作</small></span>
         <select v-model="chatSettings.actionVisibility" @change="emit('persist')">
           <option value="always">始终显示</option>
           <option value="together">只在身边显示</option>
@@ -280,7 +281,8 @@ const emit = defineEmits<{
 
       <div v-if="greetings.length" class="greeting-picker">
         <b>角色开场白</b>
-        <small>切换开场会清空当前剧情分支，并从所选开场重新开始，避免旧开场继续影响回复</small>
+        <small>开场属于当前聊天，不属于角色永久状态。你可以随时重置为自由开局，或换一个作者开场。</small>
+        <button type="button" @click="emit('useFreeGreeting')"><span>自由开局</span>不使用 first_mes，从下一条用户消息重新建立当前场景</button>
         <button v-for="(greeting, index) in greetings" :key="`${index}-${greeting.slice(0, 12)}`" type="button" @click="emit('useGreeting', greeting)">
           <span>{{ index === 0 ? '默认' : `备用 ${index}` }}</span>
           {{ greeting }}
@@ -372,7 +374,7 @@ const emit = defineEmits<{
   overflow-y: auto;
   padding: 8px 18px 24px;
   border-radius: 26px 26px 0 0;
-  background: #fffafb;
+  background: #f9fcff;
   box-shadow: 0 -18px 50px rgba(70,42,55,.18);
   transition: transform .24s cubic-bezier(.22, .8, .24, 1);
   will-change: transform;
@@ -399,7 +401,7 @@ const emit = defineEmits<{
   height: 5px;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: #dccbd2;
+  background: #d9e7f2;
 }
 
 .panel-handle:active { cursor: grabbing; }
@@ -412,14 +414,14 @@ const emit = defineEmits<{
 }
 
 .panel-title-row h2 { margin: 2px 0 16px; }
-.panel-title-row small { color: #a17c8d; }
+.panel-title-row small { color: #7f95aa; }
 .panel-title-row > button {
   width: 36px;
   height: 36px;
   border: 0;
   border-radius: 50%;
-  background: #f3e9ed;
-  color: #765864;
+  background: #edf5fb;
+  color: #5c748b;
   font-size: 22px;
 }
 
@@ -429,7 +431,7 @@ const emit = defineEmits<{
   gap: 6px;
   padding: 5px;
   border-radius: 15px;
-  background: #f2e9ed;
+  background: #edf5fb;
 }
 
 .settings-tabs button {
@@ -437,12 +439,12 @@ const emit = defineEmits<{
   border: 0;
   border-radius: 11px;
   background: transparent;
-  color: #8d707c;
+  color: #74899d;
 }
 
 .settings-tabs button.active {
   background: #fff;
-  color: #5e414d;
+  color: #40566a;
   box-shadow: 0 3px 10px rgba(75,45,58,.07);
 }
 
@@ -469,7 +471,7 @@ const emit = defineEmits<{
 
 .setting-control small,
 .setting-switch small {
-  color: #9d7f8c;
+  color: #7d91a5;
   font-size: 11px;
 }
 
@@ -485,7 +487,7 @@ const emit = defineEmits<{
 .setting-switch > input {
   width: 20px;
   height: 20px;
-  accent-color: #d96b99;
+  accent-color: #78add8;
 }
 
 .memory-add {
@@ -504,7 +506,7 @@ const emit = defineEmits<{
 
 .memory-add button {
   border: 0;
-  background: #d96b99;
+  background: #78add8;
   color: #fff;
 }
 
@@ -513,10 +515,10 @@ const emit = defineEmits<{
   margin: 9px 0;
   padding: 12px 48px 12px 13px;
   border-radius: 14px;
-  background: #f5edf1;
+  background: #eef6fc;
 }
 
-.memory-list article small { color: #a57a8e; }
+.memory-list article small { color: #7f98ae; }
 .memory-list article p { margin: 5px 0 0; line-height: 1.55; }
 .memory-list article button {
   position: absolute;
@@ -524,7 +526,7 @@ const emit = defineEmits<{
   right: 10px;
   border: 0;
   background: transparent;
-  color: #b26178;
+  color: #6b91b4;
 }
 
 .danger-row {
@@ -533,8 +535,8 @@ const emit = defineEmits<{
   padding: 12px;
   border: 0;
   border-radius: 13px;
-  background: #fff0f2;
-  color: #b34f69;
+  background: #f3f9fe;
+  color: #a45a69;
 }
 
 .advanced-card {
@@ -543,11 +545,11 @@ const emit = defineEmits<{
   gap: 4px;
   padding: 15px;
   border-radius: 16px;
-  background: #f5edf1;
+  background: #eef6fc;
 }
 
 .advanced-card small,
-.advanced-card span { color: #927684; }
+.advanced-card span { color: #788ca0; }
 
 .technical-note,
 .technical-error,
@@ -560,26 +562,26 @@ const emit = defineEmits<{
 }
 
 .technical-note { background: #fff5e7; color: #8c6a37; }
-.technical-error { background: #fff0f2; color: #9f4d63; }
+.technical-error { background: #f3f9fe; color: #9f4d63; }
 .technical-error p { margin: 5px 0 0; }
 .technical-ok { background: #edf8f1; color: #547663; }
 
-.greeting-picker{display:grid;gap:7px;padding:12px;border-radius:15px;background:#f8edf1}.greeting-picker small{color:#9a7b88}.greeting-picker button{max-height:76px;overflow:hidden;border:0;border-radius:11px;background:#fff;padding:9px;text-align:left;color:#725461;line-height:1.45}.greeting-picker button span{display:block;color:#c05e86;font-size:10px;font-weight:800}
-.roleplay-links{display:grid;gap:8px}.roleplay-links button{padding:11px;border:0;border-radius:13px;background:#f5e8ee;color:#a05d79;font-weight:700}
+.greeting-picker{display:grid;gap:7px;padding:12px;border-radius:15px;background:#eef7fd}.greeting-picker small{color:#71899f}.greeting-picker button{max-height:76px;overflow:hidden;border:0;border-radius:11px;background:#fff;padding:9px;text-align:left;color:#566f86;line-height:1.45}.greeting-picker button span{display:block;color:#6b9bc4;font-size:10px;font-weight:800}
+.roleplay-links{display:grid;gap:8px}.roleplay-links button{padding:11px;border:0;border-radius:13px;background:#eaf4fb;color:#668fb3;font-weight:700}
 
 .panel-primary {
   width: 100%;
   padding: 12px 14px;
   border: 0;
   border-radius: 15px;
-  background: #d96b99;
+  background: #78add8;
   color: #fff;
   font-weight: 700;
 }
 
 .panel-empty {
   padding: 28px 8px;
-  color: #9a7d8a;
+  color: #748b9e;
   text-align: center;
   font-size: 12px;
   line-height: 1.65;
@@ -591,15 +593,15 @@ const emit = defineEmits<{
   padding: 11px 14px;
   border: 0;
   border-radius: 13px;
-  background: #f3e8ed;
-  color: #7d5668;
+  background: #e8f2f9;
+  color: #5c748d;
   font-weight: 700;
 }
 
 .vision-capability {
   margin-top: 3px;
 }
-.debug-button{width:100%;margin:0 0 9px;padding:12px 14px;border:0;border-radius:15px;background:#f2e6ec;color:#955a74;font-weight:800}
+.debug-button{width:100%;margin:0 0 9px;padding:12px 14px;border:0;border-radius:15px;background:#f2e6ec;color:#688fb2;font-weight:800}
 
-.quiet-hours-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.quiet-hours-row label{display:grid;gap:5px;padding:10px;border-radius:13px;background:#f8eff3;color:#8c6d79;font-size:11px}.quiet-hours-row input{width:100%;min-width:0;border:0;background:transparent;color:#654c57}.source-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0;padding:12px;border:1px solid #eedfe5;border-radius:15px}.source-options legend{padding:0 5px;color:#8e6d7b;font-size:11px}.source-options label{display:flex;align-items:center;gap:6px;color:#755866;font-size:12px}.source-options input{accent-color:#d96b99}
+.quiet-hours-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.quiet-hours-row label{display:grid;gap:5px;padding:10px;border-radius:13px;background:#f0f6fb;color:#70869a;font-size:11px}.quiet-hours-row input{width:100%;min-width:0;border:0;background:transparent;color:#526b82}.source-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0;padding:12px;border:1px solid #dceaf5;border-radius:15px}.source-options legend{padding:0 5px;color:#70869a;font-size:11px}.source-options label{display:flex;align-items:center;gap:6px;color:#5c748d;font-size:12px}.source-options input{accent-color:#78add8}
 </style>

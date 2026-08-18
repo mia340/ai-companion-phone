@@ -3,11 +3,11 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PhoneFrame from '../components/PhoneFrame.vue'
 import { db } from '../db/database'
-import { deleteCharacterSafely, getOrCreateSingleConversation } from '../services/characterService'
+import { createSingleConversation, deleteCharacterSafely, getOrCreateSingleConversation, listSingleConversations } from '../services/characterService'
 import { listResourceBindings } from '../services/resourceBindingService'
 import { buildCharacterCardLocalIndex, type CharacterCardLocalIndex } from '../services/characterCardIndexService'
 import { renderRoleplayText } from '../services/textMacroService'
-import type { Character } from '../types/domain'
+import type { Character, Conversation } from '../types/domain'
 
 const route = useRoute()
 const router = useRouter()
@@ -20,6 +20,7 @@ const boundPersonaName = ref('')
 const cardIndex = ref<CharacterCardLocalIndex>()
 const showDeletePanel = ref(false)
 const deleteConfirmName = ref('')
+const conversations = ref<Conversation[]>([])
 const characterId = computed(() => String(route.params.id ?? ''))
 
 const canDelete = computed(() => Boolean(character.value && deleteConfirmName.value.trim() === character.value.name))
@@ -77,13 +78,15 @@ async function loadCharacter() {
     if (!result) throw new Error('这个角色不存在或已经被删除。')
     character.value = result
 
-    const [bindings, boundPersona, allEntries, localIndex] = await Promise.all([
+    const [bindings, boundPersona, allEntries, localIndex, chatRows] = await Promise.all([
       listResourceBindings(result.id),
       db.personas.filter(item => item.boundCharacterId === result.id).first(),
       db.lorebookEntries.toArray(),
-      buildCharacterCardLocalIndex(result)
+      buildCharacterCardLocalIndex(result),
+      listSingleConversations(result.id, result.worldId)
     ])
     boundPersonaName.value = boundPersona?.name || ''
+    conversations.value = chatRows
     cardIndex.value = localIndex
     const activeLorebookIds = new Set(bindings.filter(item => item.enabled && item.resourceType === 'lorebook').map(item => item.resourceId))
     resourceStats.value = {
@@ -110,6 +113,28 @@ async function openChat() {
     console.error('打开聊天失败：', error)
     errorMessage.value = error instanceof Error ? error.message : '无法打开聊天。'
   }
+}
+
+async function createNewChat() {
+  if (!character.value) return
+  try {
+    const conversation = await createSingleConversation(character.value, {
+      openingMode: (character.value.firstMessage?.trim() || character.value.alternateGreetings?.some(item => item.trim())) ? 'pending' : 'free'
+    })
+    router.push(`/chat/${conversation.id}`)
+  } catch (error) {
+    console.error('新建聊天失败：', error)
+    errorMessage.value = error instanceof Error ? error.message : '无法新建聊天。'
+  }
+}
+
+function openConversation(row: Conversation) {
+  router.push(`/chat/${row.id}`)
+}
+
+function conversationLabel(row: Conversation, index: number) {
+  if (row.branchFromMessageId) return row.title || `${character.value?.name || '聊天'} · 分支`
+  return row.title || `${character.value?.name || '聊天'} · ${conversations.value.length - index}`
 }
 
 function openCard() {
@@ -181,9 +206,19 @@ onMounted(loadCharacter)
         </section>
 
         <section class="action-grid">
-          <button type="button" class="primary-action" @click="openChat">💬 发消息</button>
+          <button type="button" class="primary-action" @click="openChat">💬 继续最近聊天</button>
+          <button type="button" class="secondary-action" @click="createNewChat">＋ 新建聊天</button>
           <button type="button" class="secondary-action" @click="openEdit">✏️ 编辑资料</button>
           <button type="button" class="secondary-action roleplay-action" @click="openCard">🎭 沉浸角色卡</button>
+        </section>
+
+        <section v-if="conversations.length" class="info-card conversation-card">
+          <h2>聊天记录 · {{ conversations.length }}</h2>
+          <p>同一角色可以拥有多份独立剧情。新建聊天不会复制旧剧情；聊天分支会从指定消息处复制当时的消息、状态与记忆。</p>
+          <button v-for="(row, index) in conversations" :key="row.id" type="button" class="conversation-row" @click="openConversation(row)">
+            <span><b>{{ conversationLabel(row, index) }}</b><small>{{ row.openingMode === 'free' ? '自由开局' : row.openingMode === 'greeting' ? `开场 ${Number(row.greetingIndex ?? 0) + 1}` : row.openingMode === 'pending' ? '等待选择开场' : '旧版聊天' }}</small></span>
+            <time>{{ new Date(row.updatedAt).toLocaleDateString('zh-CN') }}</time>
+          </button>
         </section>
 
         <section v-if="hasBoundResources" class="info-card community-resource-card">
@@ -285,7 +320,7 @@ onMounted(loadCharacter)
   display: grid;
   align-content: start;
   gap: 15px;
-  background: #fff7fb;
+  background: #f8fcff;
 }
 
 .profile-card,
@@ -313,7 +348,7 @@ onMounted(loadCharacter)
   border-radius: 26px;
   display: grid;
   place-items: center;
-  background: #ffe2ee;
+  background: #e6f2fc;
   font-size: 42px;
 }
 
@@ -347,7 +382,7 @@ onMounted(loadCharacter)
 .profile-tags span {
   padding: 5px 9px;
   border-radius: 999px;
-  background: #fff0f6;
+  background: #eef7fd;
   color: #a95377;
   font-size: 12px;
 }
@@ -364,7 +399,7 @@ onMounted(loadCharacter)
   min-width: 0;
   padding: 12px;
   border-radius: 16px;
-  background: #fff0f6;
+  background: #eef7fd;
 }
 
 .status-card small {
@@ -400,13 +435,13 @@ onMounted(loadCharacter)
 }
 
 .secondary-action {
-  background: #ffe2ee;
-  color: #a85075;
+  background: #e6f2fc;
+  color: #5f8fb7;
 }
 
 .roleplay-action {
   grid-column: 1 / -1;
-  background: linear-gradient(135deg, #f2d7e3, #f8e9ef);
+  background: linear-gradient(135deg, #e2f1fc, #f5faff);
 }
 
 .info-card {
@@ -465,7 +500,7 @@ onMounted(loadCharacter)
   display: grid;
   gap: 12px;
   border-radius: 17px;
-  background: #fff0f2;
+  background: #f3f9fe;
 }
 
 .delete-confirm-panel strong {
@@ -529,7 +564,7 @@ onMounted(loadCharacter)
 }
 
 .error-message {
-  background: #ffe5e8;
+  background: #edf6fd;
   color: #ab4052;
 }
 
@@ -543,15 +578,16 @@ onMounted(loadCharacter)
 .community-resource-card {
   display: grid;
   gap: 10px;
-  border: 1px solid rgba(217, 111, 155, 0.16);
+  border: 1px solid rgba(121, 173, 216, 0.16);
 }
 .community-resource-card p { margin: 0; line-height: 1.65; }
 .resource-tags { display: flex; flex-wrap: wrap; gap: 7px; }
-.resource-tags span { padding: 5px 9px; border-radius: 999px; background: #fff0f6; color: #a85d7a; font-size: 12px; font-weight: 700; }
-.resource-manage{margin-top:12px;border:0;border-radius:12px;background:#f4e7ed;color:#a45675;padding:9px 12px;font-weight:700}.intro-card p{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+.resource-tags span { padding: 5px 9px; border-radius: 999px; background: #eef7fd; color: #678eae; font-size: 12px; font-weight: 700; }
+.resource-manage{margin-top:12px;border:0;border-radius:12px;background:#e8f3fb;color:#628fb4;padding:9px 12px;font-weight:700}.intro-card p{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 
 
 
-.card-reader-card{display:grid;gap:10px}.reader-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.reader-head h2{margin:0 0 5px}.reader-head p{margin:0;color:#8f7280;line-height:1.6}.reader-head>span{flex:0 0 auto;border-radius:999px;background:#eef8f1;color:#4f8065;padding:5px 9px;font-size:11px;font-weight:800}.reader-file{color:#9b7e8a;word-break:break-all}.reader-detail{border-radius:14px;background:#fff8fb;border:1px solid #f0e1e7;padding:10px 12px}.reader-detail summary,.reader-nested summary{cursor:pointer;color:#9e5b77;font-weight:800}.reader-detail pre,.reader-nested pre{margin:10px 0 0;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.7;color:#654b56}.reader-detail p{color:#856a76;line-height:1.6}.reader-nested{margin-top:9px;border-top:1px dashed #ead8e0;padding-top:9px}
+.card-reader-card{display:grid;gap:10px}.reader-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.reader-head h2{margin:0 0 5px}.reader-head p{margin:0;color:#8f7280;line-height:1.6}.reader-head>span{flex:0 0 auto;border-radius:999px;background:#eef8f1;color:#4f8065;padding:5px 9px;font-size:11px;font-weight:800}.reader-file{color:#9b7e8a;word-break:break-all}.reader-detail{border-radius:14px;background:#fff8fb;border:1px solid #e2eef7;padding:10px 12px}.reader-detail summary,.reader-nested summary{cursor:pointer;color:#628bad;font-weight:800}.reader-detail pre,.reader-nested pre{margin:10px 0 0;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.7;color:#654b56}.reader-detail p{color:#856a76;line-height:1.6}.reader-nested{margin-top:9px;border-top:1px dashed #ead8e0;padding-top:9px}
 
+.conversation-card{display:grid;gap:10px}.conversation-card>p{margin:0;color:#71839a;font-size:12px;line-height:1.65}.conversation-row{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px;border:0;border-bottom:1px solid rgba(78,111,150,.12);background:transparent;color:#40546b;text-align:left}.conversation-row span{display:flex;min-width:0;flex-direction:column;gap:4px}.conversation-row b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.conversation-row small,.conversation-row time{color:#8da0b6;font-size:11px}.conversation-row time{flex:0 0 auto}
 </style>

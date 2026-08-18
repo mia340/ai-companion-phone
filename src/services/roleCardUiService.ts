@@ -6,6 +6,9 @@ export interface RoleCardUiState {
   location?: string
   inner?: string
   surroundings?: string
+  participants?: string
+  relativePosition?: string
+  attire?: string
   todos?: string[]
 }
 
@@ -17,6 +20,7 @@ function clean(value: unknown): string {
     .replace(/<\/?[a-z][^>]*>/gi, '')
     .replace(/[\t ]+/g, ' ')
     .replace(/ *\n */g, '\n')
+    .replace(/[】］]\s*$/u, '')
     .trim()
 }
 
@@ -90,7 +94,7 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
   const source = text.replace(/\r\n/g, '\n').replace(/<br\s*\/?\s*>/gi, '\n')
   const ui: RoleCardUiState = {}
   let found = 0
-  const linePattern = /^\s*(日期|时间|地点|内心|心声|周围|待办)\s*[|：:]\s*(.+?)\s*$/gm
+  const linePattern = /^\s*(?:[^\p{L}\p{N}\n]{0,3})?(日期|时间|地点|内心|心声|周围|待办|人物|在场人物|在场角色|相对位置|衣着|穿着)\s*[|：:∶﹕︰]\s*(.+?)\s*$/gmu
   for (const match of source.matchAll(linePattern)) {
     const key = match[1]
     const value = clean(match[2])
@@ -101,6 +105,9 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
     else if (key === '地点') ui.location = value
     else if (key === '内心' || key === '心声') ui.inner = value
     else if (key === '周围') ui.surroundings = value
+    else if (key === '人物' || key === '在场人物' || key === '在场角色') ui.participants = value
+    else if (key === '相对位置') ui.relativePosition = value
+    else if (key === '衣着' || key === '穿着') ui.attire = value
     else if (key === '待办') ui.todos = parseTodos(value)
   }
 
@@ -113,10 +120,14 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
   }
   const location = source.match(/(?:^|\n)\s*🗺(?:️)?\s*([^\n]+)/)?.[1]?.trim()
   if (!ui.location && location) { ui.location = location; found += 1 }
-  const inner = source.match(/(?:^|\n)\s*[♥❤💗]\s*内心\s*[:：]\s*([^\n]+)/)?.[1]?.trim()
+  const inner = source.match(/(?:^|\n)\s*[♥❤💗]\s*内心\s*[:：∶﹕︰]\s*([^\n]+)/)?.[1]?.trim()
   if (!ui.inner && inner) { ui.inner = inner; found += 1 }
-  const present = source.match(/(?:^|\n)\s*😶\s*(?:在场角色|周围)\s*[:：]\s*([^\n]+)/)?.[1]?.trim()
-  if (!ui.surroundings && present) { ui.surroundings = present; found += 1 }
+  const present = source.match(/(?:^|\n)\s*😶\s*(?:在场角色|在场人物|人物|周围)\s*[:：∶﹕︰]\s*([^\n]+)/)?.[1]?.trim()
+  if (present) {
+    if (!ui.participants) ui.participants = present
+    if (!ui.surroundings) ui.surroundings = present
+    found += 1
+  }
 
   // XML 状态栏只提取世界状态，不在这里删除标签；后续 Regex 仍可用完整 XML 渲染社区 UI。
   const xmlValue = (tag: string) => source.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*<\\/${tag}>`, 'i'))?.[1]?.trim()
@@ -139,7 +150,10 @@ export function resolvePresenceFromRoleCardScene(
   reportedPresence?: 'together' | 'remote',
   userNames: string[] = []
 ): PresenceResolution {
-  const surroundings = ui?.surroundings?.trim() || ''
+  const surroundings = [ui?.surroundings, ui?.participants, ui?.relativePosition]
+    .map(item => item?.trim())
+    .filter(Boolean)
+    .join('；')
   const content = text
     .replace(/\{\{\s*user\s*\}\}/gi, '你')
     .replace(/<\s*\/?\s*scene[_-]?action\b[^>]*>/gi, '')
@@ -151,6 +165,8 @@ export function resolvePresenceFromRoleCardScene(
   const explicitUiAbsent = Boolean(surroundings && userAliasPattern && new RegExp(`(?:${userAliasPattern}).{0,8}(?:不在场|未在场|不在|离开|未到)|(?:没有|无).{0,6}(?:${userAliasPattern})`).test(surroundings))
   const uiTogether = Boolean(surroundings && !explicitUiAbsent && (
     new RegExp(`(?:(?:${userAliasPattern})在场|(?:和|与)(?:${userAliasPattern})(?:同处|一起)|(?:${userAliasPattern})(?:就在)?身边)`).test(surroundings)
+    || new RegExp(`(?:${userAliasPattern}).{0,40}(?:站在|坐在|蹲在|躺在|靠在|位于).{0,30}(?:面前|旁边|身边|对面|门口|桌边|床边|车内|房间|现场)`).test(surroundings)
+    || new RegExp(`(?:站在|坐在|蹲在|躺在|靠在).{0,30}(?:${userAliasPattern})(?:面前|旁边|身边|对面)`).test(surroundings)
     || escapedNames.some(name => new RegExp(`(?:^|[，,、;；/|\s])${name}(?:$|[（(，,、;；/|\s])`).test(surroundings))
   ))
   const uiAlone = /独处|独自|只有自己|无人/.test(surroundings)

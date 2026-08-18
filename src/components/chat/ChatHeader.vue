@@ -64,7 +64,7 @@ const emit = defineEmits<{
 .chat-header-button {
   border: 0;
   background: transparent;
-  color: #5f4651;
+  color: #40566a;
   cursor: pointer;
 }
 

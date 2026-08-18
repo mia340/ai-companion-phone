@@ -12,6 +12,7 @@ import { applyRegexScript, looksLikeRichHtml, normalizeCommunityPlainText, norma
 import { createDefaultChatSettings } from '../services/chatSettings'
 import { inferCardInitialActivity } from '../services/characterInitialStateService'
 import { collectCharacterGreetings } from '../services/characterGreetingService'
+import { createSingleConversation } from '../services/characterService'
 import { ensureDefaultPersona } from '../services/personaService'
 import type { Character, CommunityResourceArchive, RegexScript, UserPersona } from '../types/domain'
 
@@ -65,6 +66,8 @@ const cardImportMessage = ref('')
 const isImportingCard = ref(false)
 const createEmbeddedUserPersona = ref(true)
 const embeddedPersonaName = ref('')
+const duplicateCharacterId = ref('')
+const duplicateCharacterName = ref('')
 
 // 页面状态
 const isSaving = ref(false)
@@ -183,6 +186,20 @@ async function handleCharacterCardImport(event: Event) {
     importedCard.value = imported
     importedCardFileName.value = file.name
     importedCardRawText.value = imported.rawSourceJson || (file.name.toLowerCase().endsWith('.json') ? await file.text() : '')
+    duplicateCharacterId.value = ''
+    duplicateCharacterName.value = ''
+    if (importedCardRawText.value.trim()) {
+      const sameArchive = await db.communityResourceArchives
+        .filter(row => row.kind === 'character-card' && Boolean(row.characterId) && row.rawText === importedCardRawText.value)
+        .first()
+      if (sameArchive?.characterId) {
+        const sameCharacter = await db.characters.get(sameArchive.characterId)
+        if (sameCharacter) {
+          duplicateCharacterId.value = sameCharacter.id
+          duplicateCharacterName.value = sameCharacter.name
+        }
+      }
+    }
     applyImportedCardToForm(imported)
     if (!imported.patch.relationship?.trim()) relationship.value = ''
     createEmbeddedUserPersona.value = Boolean(imported.embeddedUser)
@@ -190,10 +207,13 @@ async function handleCharacterCardImport(event: Event) {
     cardImportMessage.value = [
       `已识别 ${imported.format}：${imported.patch.name || file.name}。`,
       `备用开场 ${imported.patch.alternateGreetings?.length || 0} 条，示例对话 ${imported.patch.exampleDialogues?.length || 0} 组，内嵌世界书 ${imported.lorebookEntries.length} 条，正则 ${imported.regexScripts.length} 条。`,
+      ...(duplicateCharacterId.value ? [`检测到同一份原卡已经存在为“${duplicateCharacterName.value}”，如果只是想重新开始剧情，建议打开已有角色后使用“新建聊天”。`] : []),
       ...imported.notes
     ].join(' ')
   } catch (error) {
     importedCard.value = undefined
+    duplicateCharacterId.value = ''
+    duplicateCharacterName.value = ''
     importedCardFileName.value = ''
     importedCardRawText.value = ''
     cardImportMessage.value = error instanceof Error ? error.message : '角色卡导入失败。'
@@ -204,6 +224,8 @@ async function handleCharacterCardImport(event: Event) {
 
 function clearImportedCardReference() {
   importedCard.value = undefined
+  duplicateCharacterId.value = ''
+  duplicateCharacterName.value = ''
   importedCardFileName.value = ''
   importedCardRawText.value = ''
   cardImportMessage.value = ''
@@ -463,6 +485,20 @@ function removePhotoAvatar() {
   avatarImage.value = ''
 }
 
+async function createChatFromDuplicate() {
+  if (!duplicateCharacterId.value) return
+  const existing = await db.characters.get(duplicateCharacterId.value)
+  if (!existing) {
+    duplicateCharacterId.value = ''
+    duplicateCharacterName.value = ''
+    cardImportMessage.value = '已有角色记录已不存在，可以继续创建这张角色卡。'
+    return
+  }
+  const greetings = collectCharacterGreetings(existing.firstMessage, existing.alternateGreetings)
+  const conversation = await createSingleConversation(existing, { openingMode: greetings.length ? 'pending' : 'free' })
+  await router.push(`/chat/${conversation.id}`)
+}
+
 async function save() {
   if (isSaving.value) return
 
@@ -523,7 +559,7 @@ async function save() {
     const importedRawText = importedCardRawText.value
     const openingMessage = firstMessage.value.trim() || importedPatch.firstMessage?.trim() || ''
     const greetingChoices = collectCharacterGreetings(openingMessage, importedPatch.alternateGreetings || [])
-    const deferGreetingSelection = greetingChoices.length > 1
+    const deferGreetingSelection = greetingChoices.length > 0
     const initialActivity = deferGreetingSelection ? '' : inferCardInitialActivity(openingMessage)
 
     await db.transaction(
@@ -630,6 +666,8 @@ async function save() {
           pinned: false,
           muted: false,
           unread: 0,
+          openingMode: greetingChoices.length ? 'pending' : 'free',
+          createdAt: now,
           updatedAt: now
         })
 
@@ -940,6 +978,14 @@ async function save() {
           </div>
           <p>{{ importedCardFileName }}</p>
           <p>备用开场 {{ importedCard.patch.alternateGreetings?.length || 0 }} 条 · 示例对话 {{ importedCard.patch.exampleDialogues?.length || 0 }} 组 · 内嵌世界书 {{ importedCard.lorebookEntries.length }} 条 · 正则 {{ importedCard.regexScripts.length }} 条</p>
+          <div v-if="duplicateCharacterId" class="duplicate-card-hint">
+            <b>检测到同一份原卡已经存在：{{ duplicateCharacterName }}</b>
+            <span>如果只是想重开剧情，不需要再次导入；同一个角色现在可以新建多份独立聊天。</span>
+            <div class="duplicate-card-actions">
+              <button type="button" @click="createChatFromDuplicate">用已有角色新建聊天</button>
+              <button type="button" @click="router.push(`/characters/${duplicateCharacterId}`)">打开已有角色详情</button>
+            </div>
+          </div>
 
           <div v-if="importedCard.embeddedUser" class="embedded-user-card">
             <div class="embedded-user-title">
@@ -1239,23 +1285,23 @@ async function save() {
 
 .character-card-import { display: grid; gap: 10px; }
 .import-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.format-badge { flex: 0 0 auto; padding: 5px 9px; border-radius: 999px; background: rgba(217,111,155,.12); color: #b8567f; font-size: 11px; font-weight: 800; }
+.format-badge { flex: 0 0 auto; padding: 5px 9px; border-radius: 999px; background: rgba(121,173,216,.12); color: #628fb4; font-size: 11px; font-weight: 800; }
 .card-import-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 9px; }
-.card-import-button { display: flex; align-items: center; justify-content: center; min-height: 42px; border-radius: 13px; background: #d96f9b; color: white; font-weight: 800; cursor: pointer; }
+.card-import-button { display: flex; align-items: center; justify-content: center; min-height: 42px; border-radius: 13px; background: #79add8; color: white; font-weight: 800; cursor: pointer; }
 .visually-hidden-file { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
-.card-import-preview { padding: 11px 12px; border: 1px solid rgba(217,111,155,.18); border-radius: 14px; background: rgba(255,248,251,.82); }
+.card-import-preview { padding: 11px 12px; border: 1px solid rgba(121,173,216,.18); border-radius: 14px; background: rgba(255,248,251,.82); }
 .card-import-preview > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.card-import-preview span, .card-import-preview p { color: #9b7183; font-size: 12px; }
+.card-import-preview span, .card-import-preview p { color: #73889c; font-size: 12px; }
 .card-import-preview p { margin: 5px 0 0; }
-.embedded-user-card { margin-top: 10px; padding: 11px; border-radius: 13px; background: rgba(217,111,155,.08); display: grid; gap: 9px; }
+.embedded-user-card { margin-top: 10px; padding: 11px; border-radius: 13px; background: rgba(121,173,216,.08); display: grid; gap: 9px; }
 .embedded-user-title { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: flex-start; }
 .embedded-user-title > div { display: grid; gap: 3px; }
-.embedded-user-title small { color: #9b7183; line-height: 1.45; }
-.embedded-user-switch { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; font-size: 12px; font-weight: 800; color: #b8567f; }
+.embedded-user-title small { color: #73889c; line-height: 1.45; }
+.embedded-user-switch { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; font-size: 12px; font-weight: 800; color: #628fb4; }
 .embedded-persona-name { display: grid; gap: 5px; font-size: 12px; color: #8e6577; }
-.embedded-persona-name input { min-height: 38px; border: 1px solid rgba(217,111,155,.18); border-radius: 11px; padding: 0 10px; background: rgba(255,255,255,.86); }
-.embedded-user-card details { border-top: 1px solid rgba(217,111,155,.12); padding-top: 8px; }
-.embedded-user-card summary { cursor: pointer; color: #b8567f; font-weight: 800; font-size: 12px; }
+.embedded-persona-name input { min-height: 38px; border: 1px solid rgba(121,173,216,.18); border-radius: 11px; padding: 0 10px; background: rgba(255,255,255,.86); }
+.embedded-user-card details { border-top: 1px solid rgba(121,173,216,.12); padding-top: 8px; }
+.embedded-user-card summary { cursor: pointer; color: #628fb4; font-weight: 800; font-size: 12px; }
 .embedded-user-card pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; font: inherit; font-size: 12px; line-height: 1.55; color: #634b56; }
 @media (max-width: 390px) { .card-import-actions { grid-template-columns: 1fr; } .embedded-user-title { grid-template-columns: 1fr; } .embedded-user-switch { justify-self: start; } }
 
@@ -1377,5 +1423,6 @@ async function save() {
 .error-box {
   background: rgba(255, 225, 225, 0.85);
 }
-.optional-fields{display:grid;gap:10px;padding:12px;border-radius:14px;background:rgba(255,255,255,.55);border:1px solid rgba(217,111,155,.16)}.optional-fields summary{cursor:pointer;color:#8c6071;font-weight:800}.optional-fields[open] summary{margin-bottom:8px}
+.optional-fields{display:grid;gap:10px;padding:12px;border-radius:14px;background:rgba(255,255,255,.55);border:1px solid rgba(121,173,216,.16)}.optional-fields summary{cursor:pointer;color:#8c6071;font-weight:800}.optional-fields[open] summary{margin-bottom:8px}
+.duplicate-card-hint{display:grid;gap:7px;padding:11px 12px;border:1px solid #cfe3f5;border-radius:13px;background:#f1f8ff;color:#58718a}.duplicate-card-hint span{font-size:11px;line-height:1.55}.duplicate-card-hint button{justify-self:start;padding:7px 10px;border:0;border-radius:9px;background:#dceefa;color:#567b9e;font-weight:700}.duplicate-card-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.duplicate-card-actions button{justify-self:stretch}@media(max-width:390px){.duplicate-card-actions{grid-template-columns:1fr}}
 </style>

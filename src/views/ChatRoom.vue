@@ -68,15 +68,15 @@ import { getOrCreateUserProfile } from '../services/userProfile'
 import { getPersonaForChat, listPersonas } from '../services/personaService'
 import { buildLorebookPrompt } from '../services/lorebookService'
 import { composeRoleplaySystemPrompt } from '../services/promptComposer'
-import { applyRegexPipeline, applyRegexScripts, listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml } from '../services/regexRuntime'
+import { applyRegexScripts, listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml } from '../services/regexRuntime'
 import { composeWithPromptPreset, getActivePromptPreset } from '../services/presetRuntime'
-import { buildCommunityUiPriorityPrompt, buildCommunityUiRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, regexProducesRichUi, sanitizeCommunityUiText, tryRepairCommunityUiLocally } from '../services/communityUiRuntime'
+import { buildCommunityUiPriorityPrompt, buildCommunityUiRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, enforceUserMessageOwnershipInRichHtml, regexProducesRichUi, sanitizeCommunityUiText, tryRepairCommunityUiLocally } from '../services/communityUiRuntime'
 import { resolveCharacterRuntimeProfile } from '../services/characterRuntimeProfile'
 import { renderRoleplayText } from '../services/textMacroService'
-import { estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
+import { buildPresentationOverridePrompt, estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
 import { extractRoleCardUiHints, parseRoleCardUi, resolvePresenceFromRoleCardScene, roleCardUiToConversationPatch } from '../services/roleCardUiService'
 import { analyzePromptSections, buildRuleInfluences, buildTruncationNotes, estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
-import { buildConversationStatePrompt, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
+import { buildConversationStatePrompt, buildUserSceneTransitionPrompt, deriveUserSceneTransition, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
 import type {
   Character,
   CharacterMemory,
@@ -174,8 +174,7 @@ const availableGreetings = computed(() => collectCharacterGreetings(
 const requiresInitialGreetingChoice = computed(() => Boolean(
   conversation.value &&
   character.value &&
-  availableGreetings.value.length > 1 &&
-  messages.value.length <= 1 &&
+  conversation.value.openingMode === 'pending' &&
   messages.value.every(item => item.senderId !== 'user')
 ))
 const currentTrackLabel = computed(() => {
@@ -742,10 +741,17 @@ async function loadConversation(conversationId: string) {
     await restoreScrollPosition(conversationId)
     await nextTick()
     const greetingRows = collectCharacterGreetings(characterRow?.firstMessage, characterRow?.alternateGreetings)
-    const hasMultipleGreetings = greetingRows.length > 1
     const hasUserHistory = recoveredMessageRows.some(item => item.senderId === 'user')
-    const looksLikeOnlySeed = recoveredMessageRows.length <= 1 && !hasUserHistory
-    if (hasMultipleGreetings && looksLikeOnlySeed) activePanel.value = 'greeting'
+    if (conversationRow.openingMode === 'pending' && !hasUserHistory) {
+      if (greetingRows.length) activePanel.value = 'greeting'
+      else {
+        await db.conversations.update(conversationRow.id, { openingMode: 'free' })
+        conversation.value = { ...conversationRow, openingMode: 'free' }
+      }
+    } else if (!conversationRow.openingMode && greetingRows.length > 1 && recoveredMessageRows.length <= 1 && !hasUserHistory) {
+      // 旧版多开场会话继续兼容原逻辑。
+      activePanel.value = 'greeting'
+    }
     chatComposerRef.value?.resize()
     updateScrollButton()
     applyAudioState()
@@ -984,9 +990,11 @@ async function finishStreamingMessage(
   session.text = actions.map(item => item.content).join('\n\n')
   const canReuse = Boolean(session.messageId) && actions.length === 1 && actions[0].kind === 'text' && session.type !== 'voice' && session.type !== 'emoji'
   if (canReuse && session.messageId) {
-    await db.messages.update(session.messageId, { content: actions[0].content, status: 'delivered', provider: session.provider, model: session.model, errorText: undefined, protocolVersion: output.rawPacket ? 2 : undefined, roleCardUi: output.roleCardUi, proactiveSource: session.proactiveSource })
+    const visibleRoleCardUi = chatSettings.value?.conversationPresentationMode === 'scene-merged' ? output.roleCardUi : undefined
+    await db.messages.update(session.messageId, { content: actions[0].content, rawContent: session.rawText || undefined, status: 'delivered', provider: session.provider, model: session.model, errorText: undefined, protocolVersion: output.rawPacket ? 2 : undefined, roleCardUi: visibleRoleCardUi, proactiveSource: session.proactiveSource })
   } else {
-    await saveAssistantActions({ actions, provider: session.provider, model: session.model, type: session.type, replaceMessageId: session.messageId, roleCardUi: output.roleCardUi, proactiveSource: session.proactiveSource })
+    const visibleRoleCardUi = chatSettings.value?.conversationPresentationMode === 'scene-merged' ? output.roleCardUi : undefined
+    await saveAssistantActions({ actions, provider: session.provider, model: session.model, type: session.type, replaceMessageId: session.messageId, roleCardUi: visibleRoleCardUi, proactiveSource: session.proactiveSource, rawContent: session.rawText || undefined })
   }
   messages.value = await db.messages.where('conversationId').equals(session.conversation.id).sortBy('createdAt')
   streamingMessageId.value = ''
@@ -1087,11 +1095,12 @@ function resolveActionTarget(targetMessageId: string | undefined, sender: 'user'
   const wantUser = targetMessageId === 'latest_user' || sender === 'user'
   return [...messages.value].reverse().find(item => wantUser ? item.senderId === 'user' : item.senderId !== 'user')
 }
-async function saveAssistantActions(options: { actions: CompanionActionMessage[]; provider: string; model: string; type?: Message['type']; signal?: AbortSignal; replaceMessageId?: string; roleCardUi?: Message['roleCardUi']; proactiveSource?: ProactiveSource }) {
+async function saveAssistantActions(options: { actions: CompanionActionMessage[]; provider: string; model: string; type?: Message['type']; signal?: AbortSignal; replaceMessageId?: string; roleCardUi?: Message['roleCardUi']; proactiveSource?: ProactiveSource; rawContent?: string }) {
   if (!conversation.value || !options.actions.length) return
   const activeConversation = conversation.value
   const groupId = crypto.randomUUID()
   let roleCardUiAssigned = false
+  let rawContentAssigned = false
   if (options.replaceMessageId) {
     await db.messages.delete(options.replaceMessageId)
     messages.value = messages.value.filter(item => item.id !== options.replaceMessageId)
@@ -1142,6 +1151,7 @@ async function saveAssistantActions(options: { actions: CompanionActionMessage[]
       senderId: activeConversation.memberIds[0],
       type,
       content: action.kind === 'image_placeholder' ? '' : action.content,
+      rawContent: !rawContentAssigned && options.rawContent ? options.rawContent : undefined,
       status: 'delivered',
       createdAt: now,
       roleCardUi: !roleCardUiAssigned && options.roleCardUi ? options.roleCardUi : undefined,
@@ -1155,6 +1165,7 @@ async function saveAssistantActions(options: { actions: CompanionActionMessage[]
       protocolVersion: 2
     }
     if (message.roleCardUi) roleCardUiAssigned = true
+    if (message.rawContent) rawContentAssigned = true
     await db.transaction('rw', db.messages, db.conversations, async () => {
       await db.messages.add(message)
       await db.conversations.update(activeConversation.id, { updatedAt: now })
@@ -1299,23 +1310,32 @@ async function requestAssistantReply(options?: {
     const runtimeLorebookPrompt = activeWorldRegex.length
       ? applyRegexScripts(lorebook.prompt, activeWorldRegex, regexMacros).text
       : lorebook.prompt
-    const communityUiContract = detectCommunityUiContract({
+    const detectedCommunityUiContract = detectCommunityUiContract({
       character: activeCharacter,
       lorebookPrompt: runtimeLorebookPrompt,
       preset: activePreset,
       assistantRegex: activeAssistantRegex,
       promptRegex: activePromptRegex
     })
+    const presentationHidesCommunityUi = settings.conversationPresentationMode !== 'scene-merged'
+    const communityUiContract = presentationHidesCommunityUi
+      ? { ...detectedCommunityUiContract, active: false, mode: 'none' as const }
+      : detectedCommunityUiContract
+    // 手机式呈现不运行“把整条回复变成 HTML UI”的 Regex；普通文本 Regex 继续生效。
+    const displayAssistantRegex = presentationHidesCommunityUi
+      ? activeAssistantRegex.filter(item => !regexProducesRichUi(item))
+      : activeAssistantRegex
     const runtimeProfile = resolveCharacterRuntimeProfile({
       character: activeCharacter,
       settings,
-      communityUiContract,
+      communityUiContract: detectedCommunityUiContract,
       resourceUiActive: Boolean(lorebook.resourceSession.entryId)
     })
-    streamSession.preserveRawOutput = runtimeProfile.compatibilityMode === 'card-first'
+    streamSession.preserveRawOutput = runtimeProfile.preserveCardOutput
     streamSession.suppressPreview = Boolean(
+      presentationHidesCommunityUi ||
       communityUiContract.active ||
-      activeAssistantRegex.some(regexProducesRichUi) ||
+      displayAssistantRegex.some(regexProducesRichUi) ||
       (runtimeProfile.useNativeInteractionProtocol && settings.multiBubble && resolvePresenceMode(settings, conversationState.value) === 'remote')
     )
 
@@ -1382,13 +1402,15 @@ async function requestAssistantReply(options?: {
         lorebookPrompt: runtimeLorebookPrompt,
         currentSummary: conversationState.value?.summary || '',
         statePrompt: buildConversationStatePrompt(conversationState.value ? { ...conversationState.value, presence: resolvePresenceMode(settings, conversationState.value) } : undefined),
+        sceneTransitionPrompt: buildUserSceneTransitionPrompt(deriveUserSceneTransition(latestUserText, conversationState.value)),
         conversationState: conversationState.value ? { ...conversationState.value, presence: resolvePresenceMode(settings, conversationState.value) } : undefined,
         deviceTimeContext: buildDeviceTimeContext(),
         memoryWriteNotice: options?.memoryWriteNotice,
         hasImages: includeVision && Boolean(visualMessage),
         imageCount: includeVision && visualMessage ? getMessageImageUrls(visualMessage).length : 0,
         isAlternativeReply: Boolean(options?.alternativeTargetId),
-        communityUiContract
+        communityUiContract,
+        openingMode: activeConversation.openingMode
       }), activePreset, {
         char: activeCharacter.name,
         user: persona.name,
@@ -1402,7 +1424,9 @@ async function requestAssistantReply(options?: {
       const proactivePrompt = options?.proactivePrompt?.trim()
       const withProactive = proactivePrompt ? `${transformed}\n\n${proactivePrompt}` : transformed
       const uiPriority = buildCommunityUiPriorityPrompt(communityUiContract)
-      return uiPriority ? `${withProactive}\n\n${uiPriority}` : withProactive
+      const withUiPriority = uiPriority ? `${withProactive}\n\n${uiPriority}` : withProactive
+      const presentationOverride = buildPresentationOverridePrompt(settings)
+      return presentationOverride ? `${withUiPriority}\n\n${presentationOverride}` : withUiPriority
     }
 
     const createRequest = (includeVision: boolean): ChatRequest => ({
@@ -1605,15 +1629,13 @@ async function requestAssistantReply(options?: {
       }
     }
     applyVisibleMacrosToParsedOutput()
-    let regexDisplay = await applyRegexPipeline({
-      text: response.text,
-      characterId: activeCharacter.id,
-      target: 'assistant-output',
-      userName: persona.name,
-      characterName: activeCharacter.name
-    })
-    let richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '') : ''
-    let communityUiText = communityUiContract.active && !richReplyHtml ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, activeCharacter.name) || '') : ''
+    let regexDisplay = applyRegexScripts(response.text, displayAssistantRegex, regexMacros)
+    let richReplyHtml = !presentationHidesCommunityUi && (regexDisplay.rich || looksLikeRichHtml(regexDisplay.text))
+      ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '')
+      : ''
+    let communityUiText = !presentationHidesCommunityUi && communityUiContract.active && !richReplyHtml
+      ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, activeCharacter.name) || '')
+      : ''
 
     const communityUiConforms = () => communityUiOutputConforms({
       contract: communityUiContract,
@@ -1641,15 +1663,21 @@ async function requestAssistantReply(options?: {
           collectTokenUsage(response)
           parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
           applyVisibleMacrosToParsedOutput()
-          regexDisplay = await applyRegexPipeline({
-            text: response.text,
-            characterId: activeCharacter.id,
-            target: 'assistant-output',
-            userName: persona.name,
-            characterName: activeCharacter.name
-          })
-          richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text) ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '') : ''
-          communityUiText = communityUiContract.active && !richReplyHtml ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, activeCharacter.name) || '') : ''
+          regexDisplay = applyRegexScripts(response.text, displayAssistantRegex, regexMacros)
+          richReplyHtml = !presentationHidesCommunityUi && (regexDisplay.rich || looksLikeRichHtml(regexDisplay.text))
+            ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '')
+            : ''
+          communityUiText = !presentationHidesCommunityUi && communityUiContract.active && !richReplyHtml
+            ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, activeCharacter.name) || '')
+            : ''
+          if (!communityUiConforms()) {
+            const repairedAfterAi = tryRepairCommunityUiLocally(communityUiContract, response.text)
+            if (repairedAfterAi.repaired) {
+              richReplyHtml = renderRoleplayText(normalizeRichHtml(repairedAfterAi.text), persona.name, activeCharacter.name) || ''
+              communityUiText = ''
+              parsedOutput.warnings.push(repairedAfterAi.reason.replace('未追加第二次 AI 调用', '使用一次 AI 内容纠偏后由本地编译完成'))
+            }
+          }
         } catch (uiRepairError) {
           if (isAbortError(uiRepairError)) throw uiRepairError
           if (isTokenLimitError(uiRepairError)) {
@@ -1667,20 +1695,22 @@ async function requestAssistantReply(options?: {
       response = initialAiResponse
       parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
       applyVisibleMacrosToParsedOutput()
-      regexDisplay = await applyRegexPipeline({
-        text: response.text,
-        characterId: activeCharacter.id,
-        target: 'assistant-output',
-        userName: persona.name,
-        characterName: activeCharacter.name
-      })
-      richReplyHtml = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text)
+      regexDisplay = applyRegexScripts(response.text, displayAssistantRegex, regexMacros)
+      richReplyHtml = !presentationHidesCommunityUi && (regexDisplay.rich || looksLikeRichHtml(regexDisplay.text))
         ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '')
         : ''
-      communityUiText = !richReplyHtml
+      communityUiText = !presentationHidesCommunityUi && !richReplyHtml
         ? (renderRoleplayText(sanitizeCommunityUiText(response.text), persona.name, activeCharacter.name) || '')
         : ''
       parsedOutput.warnings.push('社区 UI 未完全匹配原卡格式：已保留第一版真实 AI 回复，未因 UI/Regex 失败丢弃正文。')
+    }
+
+    if (richReplyHtml) {
+      const realUserMessages = messages.value
+        .filter(item => item.senderId === 'user' && !item.recalledAt)
+        .slice(-24)
+        .map(item => item.content)
+      richReplyHtml = enforceUserMessageOwnershipInRichHtml(richReplyHtml, realUserMessages)
     }
 
     if (!communityUiContract.active && !richReplyHtml && regexDisplay.applied.length) {
@@ -1710,6 +1740,25 @@ async function requestAssistantReply(options?: {
       }
     }
 
+    const renderStateForDisplay = parsedOutput.status?.presence
+      ? ({ ...(conversationState.value || {}), presence: parsedOutput.status.presence } as ConversationState)
+      : conversationState.value
+    const projectedActions = runtimeProfile.allowNativeMessageReshaping
+      ? shapeCompanionActions(parsedOutput.messages.slice(), activeCharacter, settings, Boolean(parsedOutput.rawPacket), renderStateForDisplay)
+      : parsedOutput.messages.slice()
+    const projectedVisibleText = projectedActions
+      .filter(item => !['typing_pause', 'recall_message', 'react_to_message'].includes(item.kind))
+      .map(item => item.kind === 'scene_action' ? `（${item.content}）` : item.content)
+      .filter(Boolean)
+      .join('\n\n')
+    if (settings.conversationPresentationMode !== 'scene-merged' && !projectedVisibleText.trim()) {
+      throw new Error(settings.conversationPresentationMode === 'phone-text'
+        ? '纯手机模式下模型没有返回可显示的角色语句。'
+        : '动作 / 台词分开模式下模型没有返回可显示的角色内容。')
+    }
+    const finalVisibleOutput = richReplyHtml || communityUiText || projectedVisibleText || (settings.conversationPresentationMode === 'scene-merged' ? parsedOutput.visibleText : '')
+    const visibleRoleCardUi = settings.conversationPresentationMode === 'scene-merged' ? parsedOutput.roleCardUi : undefined
+
     if (debugTrace) {
       try {
         await patchPromptDebugTrace(debugTrace.id, {
@@ -1717,12 +1766,12 @@ async function requestAssistantReply(options?: {
           model: usedModel,
           tokenUsage: { ...cumulativeTokenUsage },
           rawOutput: response.text,
-          visibleOutput: richReplyHtml || communityUiText || parsedOutput.visibleText,
+          visibleOutput: finalVisibleOutput,
           actionSummary: parsedOutput.actionSummary,
           presenceResolution: parsedOutput.presenceResolution,
-          naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(parsedOutput.visibleText)],
+          naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(finalVisibleOutput)],
           naturalnessScore: scoreNaturalness({
-            text: parsedOutput.visibleText,
+            text: finalVisibleOutput,
             character: activeCharacter,
             latestUserText,
             relationshipNote: conversationState.value?.relationshipNote,
@@ -1784,7 +1833,7 @@ async function requestAssistantReply(options?: {
       const target = messages.value.find(item => item.id === options.alternativeTargetId)
       if (!target) throw new Error('没有找到需要添加候选回复的消息。')
       const baseAlternatives = target.alternatives?.length ? target.alternatives.slice() : [target.content]
-      const candidate = (richReplyHtml || communityUiText || parsedOutput.visibleText).trim()
+      const candidate = finalVisibleOutput.trim()
       const alternatives = baseAlternatives.includes(candidate) ? baseAlternatives : [...baseAlternatives, candidate]
       const activeAlternativeIndex = Math.max(0, alternatives.indexOf(candidate))
       const patch: Partial<Message> = { content: candidate, alternatives, activeAlternativeIndex, provider: providerId, model: usedModel, status: 'delivered' }
@@ -1804,8 +1853,9 @@ async function requestAssistantReply(options?: {
         type: options?.type,
         signal,
         replaceMessageId: streamSession.messageId,
-        roleCardUi: parsedOutput.roleCardUi,
-        proactiveSource: options?.proactiveSource
+        roleCardUi: visibleRoleCardUi,
+        proactiveSource: options?.proactiveSource,
+        rawContent: response.text
       })
       streamSession.messageId = undefined
     } else if (useStreaming) {
@@ -1813,13 +1863,7 @@ async function requestAssistantReply(options?: {
       await finishStreamingMessage(streamSession, parsedOutput, settings.multiBubble, runtimeProfile.allowNativeMessageReshaping)
     } else {
       if (settings.naturalDelay) await wait(240 + Math.min(900, parsedOutput.visibleText.length * 9), signal)
-      const renderState = parsedOutput.status?.presence
-        ? ({ ...(conversationState.value || {}), presence: parsedOutput.status.presence } as ConversationState)
-        : conversationState.value
-      const actions = runtimeProfile.allowNativeMessageReshaping
-        ? shapeCompanionActions(parsedOutput.messages, activeCharacter, settings, Boolean(parsedOutput.rawPacket), renderState)
-        : parsedOutput.messages
-      await saveAssistantActions({ actions, provider: providerId, model: usedModel, type: options?.type, signal, roleCardUi: parsedOutput.roleCardUi, proactiveSource: options?.proactiveSource })
+      await saveAssistantActions({ actions: projectedActions, provider: providerId, model: usedModel, type: options?.type, signal, roleCardUi: visibleRoleCardUi, proactiveSource: options?.proactiveSource, rawContent: response.text })
     }
 
     if (options?.proactiveSource) {
@@ -2012,6 +2056,25 @@ async function send() {
       character: character.value,
       settings: activeChatSettings
     })
+    if (text && conversationState.value) {
+      const transition = deriveUserSceneTransition(text, conversationState.value)
+      if (transition) {
+        const beforeState = conversationState.value
+        const nextState = await patchConversationState(activeConversation.id, {
+          presence: transition.presence,
+          presenceResolutionSource: 'user-transition',
+          presenceResolutionReason: `${transition.reason}：${transition.evidence}`,
+          statusUpdatedAt: now
+        })
+        await recordConversationStateChanges({ conversationId: activeConversation.id, characterId: character.value.id, before: beforeState, after: nextState, sourceMessageId: messageId })
+        conversationState.value = nextState
+        if (chatSettings.value && chatSettings.value.presenceMode !== 'auto') {
+          chatSettings.value = { ...chatSettings.value, presenceMode: 'auto' }
+          await saveChatSettings(chatSettings.value)
+        }
+        noticeMessage.value = transition.presence === 'together' ? '已根据你的动作更新为同一现场。' : '已根据你的动作更新为远程 / 不在同一现场。'
+      }
+    }
     if (text && conversationState.value && sendRuntimeProfile.compatibilityMode === 'phone-enhanced') {
       // 只有用户明确开启“小手机增强”时才运行本地话题/待办抽取。
       // 自动/card-first 模式不基于关键词替角色推断剧情目标，避免固定规则污染原卡。
@@ -2219,16 +2282,36 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
   if (openingPresence) uiPatch.presence = openingPresence
   const greetingActivity = inferCardInitialActivity(macroResolved)
   const greetingRelationship = inferCardInitialRelationship(macroResolved)
-  const regexDisplay = await applyRegexPipeline({
-    text: macroResolved,
-    characterId: character.value.id,
-    target: 'assistant-output',
-    userName,
-    characterName: character.value.name
-  })
-  const isRich = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text)
-  const displayText = isRich ? regexDisplay.text : normalizeCommunityPlainText(regexDisplay.text)
-  const richHtml = isRich ? normalizeRichHtml(displayText) : undefined
+  const greetingPresentationHidesUi = chatSettings.value?.conversationPresentationMode !== 'scene-merged'
+  const greetingAssistantRegex = await listActiveRegexScripts(character.value.id, 'assistant-output')
+  const greetingDisplayRegex = greetingPresentationHidesUi
+    ? greetingAssistantRegex.filter(item => !regexProducesRichUi(item))
+    : greetingAssistantRegex
+  const regexDisplay = applyRegexScripts(macroResolved, greetingDisplayRegex, { user: userName, char: character.value.name })
+  const rawIsRich = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text)
+  let isRich = !greetingPresentationHidesUi && rawIsRich
+  let displayText = isRich ? regexDisplay.text : normalizeCommunityPlainText(regexDisplay.text)
+  let richHtml = isRich ? normalizeRichHtml(displayText) : undefined
+
+  if (greetingPresentationHidesUi && chatSettings.value && greetingRuntimeProfile?.allowNativeMessageReshaping) {
+    const parsedGreeting = parseCompanionOutput(regexDisplay.text, { interpretNativeProtocol: true, userName })
+    const shapedGreeting = shapeCompanionActions(
+      parsedGreeting.messages,
+      character.value,
+      chatSettings.value,
+      Boolean(parsedGreeting.rawPacket),
+      { ...createDefaultConversationState(conversation.value.id), ...(uiPatch || {}), presence: openingPresence || uiPatch.presence } as ConversationState
+    )
+    displayText = shapedGreeting
+      .filter(item => !['typing_pause', 'recall_message', 'react_to_message'].includes(item.kind))
+      .map(item => item.kind === 'scene_action' ? `（${item.content}）` : item.content)
+      .filter(Boolean)
+      .join('\n\n')
+      .trim() || normalizeCommunityPlainText(regexDisplay.text)
+    isRich = false
+    richHtml = undefined
+  }
+
   const preview = isRich
     ? displayText.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280) || '角色卡 UI'
     : displayText
@@ -2245,7 +2328,7 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
     rawContent: rawGreeting,
     richHtml,
     richSource: isRich ? (regexDisplay.applied.length ? 'regex' : 'card-ui') : undefined,
-    roleCardUi: greetingRuntimeProfile?.compatibilityMode === 'phone-enhanced' && isRich ? greetingUi : undefined,
+    roleCardUi: !greetingPresentationHidesUi && greetingRuntimeProfile?.compatibilityMode === 'phone-enhanced' && isRich ? greetingUi : undefined,
     isGreetingSeed: true,
     greetingIndex,
     status: 'delivered',
@@ -2281,7 +2364,7 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
       }
       await db.conversationStates.put(nextState)
       await db.messages.add(message)
-      await db.conversations.update(conversationId, { updatedAt: now })
+      await db.conversations.update(conversationId, { openingMode: 'greeting', greetingIndex, updatedAt: now })
       await db.characters.update(character.value!.id, {
         activity: greetingActivity,
         ...(greetingRelationship ? { relationship: greetingRelationship } : {}),
@@ -2293,7 +2376,7 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
   messages.value = [message]
   memories.value = []
   conversationState.value = nextState
-  conversation.value = { ...conversation.value, updatedAt: now }
+  conversation.value = { ...conversation.value, openingMode: 'greeting', greetingIndex, updatedAt: now }
   character.value = {
     ...character.value,
     activity: greetingActivity,
@@ -2307,6 +2390,27 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
 
   // 从社区开场主页点击 triggerStory(n) 时，不执行原 JS；本地完成同等的安全分支切换。
   if (source === 'community-ui') chatComposerRef.value?.focus()
+}
+
+async function useFreeOpening() {
+  if (!conversation.value || !character.value) return
+  const hasHistory = messages.value.some(item => item.senderId === 'user') || messages.value.some(item => !item.isGreetingSeed)
+  if (hasHistory && !window.confirm('切换到自由开局会清空当前聊天、本会话记忆和剧情状态，但不会删除角色卡、Persona、世界书或 Regex。\n\n确定继续吗？')) return
+  const id = conversation.value.id
+  const now = new Date().toISOString()
+  await db.transaction('rw', db.messages, db.memories, db.conversationStates, db.conversationStateHistory, db.conversations, async () => {
+    await db.messages.where('conversationId').equals(id).delete()
+    await db.memories.where('conversationId').equals(id).delete()
+    await db.conversationStateHistory.where('conversationId').equals(id).delete()
+    await db.conversationStates.delete(id)
+    await db.conversations.update(id, { openingMode: 'free', greetingIndex: undefined, updatedAt: now })
+  })
+  messages.value = []
+  memories.value = []
+  conversationState.value = createDefaultConversationState(id)
+  conversation.value = { ...conversation.value, openingMode: 'free', greetingIndex: undefined, updatedAt: now }
+  activePanel.value = null
+  noticeMessage.value = '已切换为自由开局。角色卡与共享资源仍然正常使用，从你的下一条消息建立当前场景。'
 }
 
 async function selectGreetingByIndex(index: number, source: 'picker' | 'settings' | 'community-ui' = 'picker') {
@@ -2327,6 +2431,20 @@ async function switchCharacterGreeting(greeting: string) {
 async function persistChatSettings() {
   if (!chatSettings.value) return
   await saveChatSettings(chatSettings.value)
+  if (conversation.value && conversationState.value) {
+    if (chatSettings.value.presenceMode === 'together' || chatSettings.value.presenceMode === 'remote') {
+      conversationState.value = await patchConversationState(conversation.value.id, {
+        presence: chatSettings.value.presenceMode,
+        presenceResolutionSource: 'manual',
+        presenceResolutionReason: `用户手动指定当前相处状态为${chatSettings.value.presenceMode === 'together' ? '同一现场' : '远程 / 不在同一现场'}。`
+      })
+    } else if (conversationState.value.presenceResolutionSource === 'manual') {
+      conversationState.value = await patchConversationState(conversation.value.id, {
+        presenceResolutionSource: 'unknown',
+        presenceResolutionReason: '已切换为自动场景判断，保留最近确认的相处状态作为连续性参考。'
+      })
+    }
+  }
   activePersona.value = await getPersonaForChat(chatSettings.value)
 }
 
@@ -2384,7 +2502,10 @@ async function clearConversationMessages() {
       lastProviderNotice: ''
     }
   )
-  activePanel.value = availableGreetings.value.length > 1 ? 'greeting' : null
+  const nextOpeningMode = availableGreetings.value.length ? 'pending' : 'free'
+  await db.conversations.update(conversation.value.id, { openingMode: nextOpeningMode, greetingIndex: undefined, updatedAt: new Date().toISOString() })
+  conversation.value = { ...conversation.value, openingMode: nextOpeningMode, greetingIndex: undefined }
+  activePanel.value = nextOpeningMode === 'pending' ? 'greeting' : null
 }
 
 
@@ -2429,7 +2550,7 @@ async function continueSelectedReply() {
 async function branchFromSelectedMessage() {
   const message = selectedMessage.value
   const activeConversation = conversation.value
-  if (!message || !activeConversation) return
+  if (!message || !activeConversation || !character.value) return
 
   const messageIndex = messages.value.findIndex(item => item.id === message.id)
   if (messageIndex < 0) return
@@ -2453,16 +2574,78 @@ async function branchFromSelectedMessage() {
       : undefined
   }))
 
+  const [sourceMemories, sourceHistory, sourceMusic] = await Promise.all([
+    db.memories.where('conversationId').equals(activeConversation.id).toArray(),
+    db.conversationStateHistory.where('conversationId').equals(activeConversation.id).toArray(),
+    db.musicStates.get(activeConversation.id)
+  ])
+  const copiedMemories = sourceMemories
+    .filter(row => !row.sourceMessageId || idMap.has(row.sourceMessageId))
+    .map(row => ({
+      ...row,
+      id: crypto.randomUUID(),
+      conversationId: newConversationId,
+      sourceMessageId: row.sourceMessageId ? idMap.get(row.sourceMessageId) : undefined,
+      createdAt: row.createdAt,
+      updatedAt: now
+    }))
+  const copiedHistory = sourceHistory
+    .filter(row => !row.sourceMessageId || idMap.has(row.sourceMessageId))
+    .map(row => ({
+      ...row,
+      id: crypto.randomUUID(),
+      conversationId: newConversationId,
+      sourceMessageId: row.sourceMessageId ? idMap.get(row.sourceMessageId) : undefined
+    }))
+
+  const selectedCreatedAt = message.createdAt
+  const relevantHistory = sourceHistory
+    .filter(row => !row.sourceMessageId || idMap.has(row.sourceMessageId))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  const branchState: ConversationState = createDefaultConversationState(newConversationId)
+  for (const row of relevantHistory) {
+    if (row.field === 'location') branchState.location = row.nextValue
+    else if (row.field === 'presence' && (row.nextValue === 'together' || row.nextValue === 'remote')) branchState.presence = row.nextValue
+    else if (row.field === 'timePeriod') branchState.timePeriod = row.nextValue
+    else if (row.field === 'energy') branchState.energy = row.nextValue
+    else if (row.field === 'mood') branchState.innerMood = row.nextValue
+    else if (row.field === 'activity') branchState.innerActivity = row.nextValue
+    else if (row.field === 'relationship') branchState.relationshipNote = row.nextValue
+    else if (row.field === 'topic') branchState.unresolvedTopics = Array.from(new Set([...(branchState.unresolvedTopics || []), row.nextValue])).slice(-6)
+    else if (row.field === 'goal') branchState.shortTermGoals = Array.from(new Set([...(branchState.shortTermGoals || []), row.nextValue])).slice(-6)
+    else if (row.field === 'event' && row.label === '等待中的事件') branchState.pendingEvents = Array.from(new Set([...(branchState.pendingEvents || []), row.nextValue])).slice(-6)
+    else if (row.field === 'event') branchState.lastCompletedEvent = row.nextValue
+  }
+  if (conversationState.value?.activeResourceEntryId && conversationState.value.activeResourceUpdatedAt && conversationState.value.activeResourceUpdatedAt <= selectedCreatedAt) {
+    branchState.activeResourceEntryId = conversationState.value.activeResourceEntryId
+    branchState.activeResourceTitle = conversationState.value.activeResourceTitle
+    branchState.activeResourceUpdatedAt = conversationState.value.activeResourceUpdatedAt
+  }
+  if (conversationState.value?.thoughtUpdatedAt && conversationState.value.thoughtUpdatedAt <= selectedCreatedAt) {
+    branchState.innerThought = conversationState.value.innerThought
+    branchState.thoughtUpdatedAt = conversationState.value.thoughtUpdatedAt
+  }
+  branchState.summary = ''
+  branchState.summaryMessageCount = 0
+  branchState.presenceResolutionSource = 'unknown'
+  branchState.presenceResolutionReason = '由分支节点之前的状态历史重建；后续场景从该节点继续判断。'
+  branchState.updatedAt = now
+
+  const rootConversationId = activeConversation.rootConversationId || activeConversation.id
   const branchConversation: Conversation = {
     ...activeConversation,
     id: newConversationId,
-    title: `${activeConversation.title} · 分支`,
+    title: `${activeConversation.title.replace(/ · 分支(?: \d+)?$/, '')} · 分支`,
     pinned: false,
     unread: 0,
+    parentConversationId: activeConversation.id,
+    rootConversationId,
+    branchFromMessageId: message.id,
+    createdAt: now,
     updatedAt: now
   }
 
-  await db.transaction('rw', db.conversations, db.messages, db.chatSettings, async () => {
+  await db.transaction('rw', [db.conversations, db.messages, db.chatSettings, db.conversationStates, db.memories, db.conversationStateHistory, db.musicStates], async () => {
     await db.conversations.add(branchConversation)
     if (copiedMessages.length) await db.messages.bulkAdd(copiedMessages)
     if (chatSettings.value) {
@@ -2473,9 +2656,14 @@ async function branchFromSelectedMessage() {
         updatedAt: now
       })
     }
+    await db.conversationStates.put(branchState)
+    if (copiedMemories.length) await db.memories.bulkAdd(copiedMemories)
+    if (copiedHistory.length) await db.conversationStateHistory.bulkAdd(copiedHistory)
+    if (sourceMusic && sourceMusic.updatedAt <= selectedCreatedAt) await db.musicStates.put({ ...sourceMusic, id: newConversationId, isPlaying: false, updatedAt: now })
   })
 
   activePanel.value = null
+  noticeMessage.value = '聊天分支已创建，正在进入新的独立剧情。'
   await router.push(`/chat/${newConversationId}`)
 }
 
@@ -2915,6 +3103,7 @@ onUnmounted(() => {
           :required="requiresInitialGreetingChoice"
           :panel-style="panelStyle"
           @select="selectGreetingByIndex($event, 'picker')"
+          @free="useFreeOpening"
           @close="activePanel = null"
         />
 
@@ -2993,6 +3182,7 @@ onUnmounted(() => {
           @open-prompt-debug="conversation && router.push(`/chat/${conversation.id}/debug`)"
           @open-memory-manager="conversation && router.push(`/chat/${conversation.id}/memory`)"
           @use-greeting="switchCharacterGreeting"
+          @use-free-greeting="useFreeOpening"
         />
 
         <ChatActionSheet
@@ -3038,7 +3228,7 @@ onUnmounted(() => {
   flex-direction: column;
   background:
     radial-gradient(circle at 20% 5%, rgba(255,255,255,.75), transparent 35%),
-    #f4edf1;
+    #eef6fd;
 }
 
 :deep(.app-header--custom) {
@@ -3051,7 +3241,7 @@ onUnmounted(() => {
 .chat-header-button {
   border: 0;
   background: transparent;
-  color: #5f4651;
+  color: #40566c;
   cursor: pointer;
 }
 
@@ -3103,13 +3293,13 @@ onUnmounted(() => {
   margin: 10px 16px 0;
   padding: 7px 13px;
   overflow: hidden;
-  border: 1px solid rgba(214, 107, 153, .18);
+  border: 1px solid rgba(111,159,202,.18);
   border-radius: 999px;
   background: rgba(255,255,255,.82);
-  color: #8d5a70;
+  color: #607d99;
   text-overflow: ellipsis;
   white-space: nowrap;
-  box-shadow: 0 5px 16px rgba(100,60,78,.06);
+  box-shadow: 0 5px 16px rgba(63,92,122,.06);
 }
 
 .chat-error {
@@ -3145,17 +3335,17 @@ onUnmounted(() => {
   gap: 8px;
   min-height: 42px;
   padding: 8px 10px 8px 14px;
-  border: 1px solid rgba(196,112,147,.12);
+  border: 1px solid rgba(111,151,190,.14);
   border-radius: 14px;
   background: rgba(255,255,255,.94);
-  color: #8a6e79;
+  color: #71869a;
   text-align: center;
   font-size: 12px;
-  box-shadow: 0 10px 28px rgba(89,56,70,.13);
+  box-shadow: 0 10px 28px rgba(57,86,116,.12);
   backdrop-filter: blur(16px);
 }
 .chat-notice span{min-width:0;flex:1}
-.chat-notice button{width:27px;height:27px;flex:0 0 auto;padding:0;border:0;border-radius:50%;background:#f4e8ed;color:#8c6475;font-size:18px}
+.chat-notice button{width:27px;height:27px;flex:0 0 auto;padding:0;border:0;border-radius:50%;background:#eaf3fb;color:#67839f;font-size:18px}
 .chat-notice-enter-active,.chat-notice-leave-active{transition:opacity .2s ease,transform .2s ease}
 .chat-notice-enter-from,.chat-notice-leave-to{opacity:0;transform:translateY(-8px)}
 
@@ -3207,7 +3397,7 @@ onUnmounted(() => {
   text-align: left;
   word-break: break-word;
   white-space: pre-wrap;
-  box-shadow: 0 2px 10px rgba(89,56,70,.06);
+  box-shadow: 0 2px 10px rgba(58,83,107,.06);
   user-select: text;
   cursor: default;
 }
@@ -3215,22 +3405,22 @@ onUnmounted(() => {
 .bubble--theirs {
   border-top-left-radius: 6px;
   background: #fff;
-  color: #563f49;
+  color: #40566a;
 }
 
 .bubble--mine {
   border-top-right-radius: 6px;
-  background: #e88ab0;
+  background: #8dbfe5;
   color: #fff;
 }
 
 .bubble--music {
-  background: linear-gradient(145deg, #fff, #fff1f7);
+  background: linear-gradient(145deg, #fff, #f0f7fd);
 }
 
 .music-message-mark {
   margin-right: 5px;
-  color: #cf6f98;
+  color: #6fa3cc;
 }
 
 .typing-bubble {
@@ -3302,7 +3492,7 @@ onUnmounted(() => {
 .composer-side-button {
   width: 42px;
   background: rgba(232,138,176,.16);
-  color: #cf6793;
+  color: #6e9fc8;
   font-size: 25px;
 }
 
@@ -3310,12 +3500,12 @@ onUnmounted(() => {
 .stop-button {
   min-width: 61px;
   padding: 0 13px;
-  background: #d96b99;
+  background: #78add8;
   color: #fff;
   font-weight: 700;
 }
 
-.stop-button { background: #826a75; }
+.stop-button { background: #6c7f91; }
 .send-button:disabled { opacity: .45; }
 
 .panel-backdrop {
@@ -3335,7 +3525,7 @@ onUnmounted(() => {
   overflow-y: auto;
   padding: 8px 18px 24px;
   border-radius: 26px 26px 0 0;
-  background: #fffafb;
+  background: #f9fcff;
   box-shadow: 0 -18px 50px rgba(70,42,55,.18);
 }
 
@@ -3344,7 +3534,7 @@ onUnmounted(() => {
   height: 5px;
   margin: 2px auto 15px;
   border-radius: 999px;
-  background: #dccbd2;
+  background: #d9e7f2;
 }
 
 .panel-title-row {
@@ -3355,14 +3545,14 @@ onUnmounted(() => {
 }
 
 .panel-title-row h2 { margin: 2px 0 16px; }
-.panel-title-row small { color: #a17c8d; }
+.panel-title-row small { color: #7f95aa; }
 .panel-title-row > button {
   width: 36px;
   height: 36px;
   border: 0;
   border-radius: 50%;
-  background: #f3e9ed;
-  color: #765864;
+  background: #edf5fb;
+  color: #5c748b;
   font-size: 22px;
 }
 
@@ -3372,16 +3562,16 @@ onUnmounted(() => {
   gap: 14px;
   padding: 13px;
   border-radius: 20px;
-  background: linear-gradient(135deg, #fff, #ffeaf3);
+  background: linear-gradient(135deg, #fff, #eaf5fd);
 }
 
-.thought-person p { margin: 5px 0 0; color: #927483; }
+.thought-person p { margin: 5px 0 0; color: #6f879c; }
 .thought-panel blockquote {
   margin: 18px 0;
   padding: 18px;
   border: 0;
   border-radius: 19px;
-  background: #f5edf1;
+  background: #eef6fc;
   color: #654b57;
   line-height: 1.85;
 }
@@ -3391,14 +3581,14 @@ onUnmounted(() => {
   padding: 12px 14px;
   border: 0;
   border-radius: 15px;
-  background: #d96b99;
+  background: #78add8;
   color: #fff;
   font-weight: 700;
 }
 
 .panel-footnote,
 .panel-empty {
-  color: #9a7d8a;
+  color: #748b9e;
   font-size: 12px;
   line-height: 1.65;
 }
@@ -3411,7 +3601,7 @@ onUnmounted(() => {
   place-items: center;
   margin: 0 auto 18px;
   border-radius: 27px;
-  background: linear-gradient(145deg, #ffdbea, #e99abb);
+  background: linear-gradient(145deg, #ddecf9, #a9cfea);
   color: #fff;
   font-size: 48px;
   box-shadow: 0 16px 28px rgba(203,98,143,.22);
@@ -3437,8 +3627,8 @@ onUnmounted(() => {
   align-items: center;
   padding: 11px;
   border-radius: 13px;
-  background: #f4e9ee;
-  color: #8a6073;
+  background: #eaf3fa;
+  color: #5f7c95;
   text-align: center;
   cursor: pointer;
 }
@@ -3451,7 +3641,7 @@ onUnmounted(() => {
   gap: 7px;
   margin-top: 14px;
   font-size: 11px;
-  color: #8d6e7b;
+  color: #6e8497;
 }
 .music-progress-row input { width: 100%; }
 
@@ -3468,7 +3658,7 @@ onUnmounted(() => {
   height: 54px;
   border: 0;
   border-radius: 50%;
-  background: #d96b99;
+  background: #78add8;
   color: #fff;
   font-size: 21px;
 }
@@ -3477,8 +3667,8 @@ onUnmounted(() => {
   padding: 12px 17px;
   border: 0;
   border-radius: 15px;
-  background: #f2e6eb;
-  color: #76515f;
+  background: #e7f2fa;
+  color: #506a80;
   font-weight: 700;
 }
 
@@ -3488,18 +3678,18 @@ onUnmounted(() => {
   gap: 6px;
   padding: 5px;
   border-radius: 15px;
-  background: #f2e9ed;
+  background: #edf5fb;
 }
 .settings-tabs button {
   padding: 9px;
   border: 0;
   border-radius: 11px;
   background: transparent;
-  color: #8d707c;
+  color: #74899d;
 }
 .settings-tabs button.active {
   background: #fff;
-  color: #5e414d;
+  color: #40566a;
   box-shadow: 0 3px 10px rgba(75,45,58,.07);
 }
 
@@ -3522,7 +3712,7 @@ onUnmounted(() => {
   gap: 3px;
 }
 .setting-control small,
-.setting-switch small { color: #9d7f8c; font-size: 11px; }
+.setting-switch small { color: #7d91a5; font-size: 11px; }
 .setting-control select,
 .setting-control input {
   width: 112px;
@@ -3531,7 +3721,7 @@ onUnmounted(() => {
   border-radius: 10px;
   background: #fff;
 }
-.setting-switch > input { width: 20px; height: 20px; accent-color: #d96b99; }
+.setting-switch > input { width: 20px; height: 20px; accent-color: #78add8; }
 
 .memory-add {
   display: grid;
@@ -3545,16 +3735,16 @@ onUnmounted(() => {
   border: 1px solid rgba(80,50,62,.1);
   border-radius: 12px;
 }
-.memory-add button { background: #d96b99; color: #fff; border: 0; }
+.memory-add button { background: #78add8; color: #fff; border: 0; }
 
 .memory-list article {
   position: relative;
   margin: 9px 0;
   padding: 12px 48px 12px 13px;
   border-radius: 14px;
-  background: #f5edf1;
+  background: #eef6fc;
 }
-.memory-list article small { color: #a57a8e; }
+.memory-list article small { color: #7f98ae; }
 .memory-list article p { margin: 5px 0 0; line-height: 1.55; }
 .memory-list article button {
   position: absolute;
@@ -3562,7 +3752,7 @@ onUnmounted(() => {
   right: 10px;
   border: 0;
   background: transparent;
-  color: #b26178;
+  color: #6b91b4;
 }
 
 .danger-row {
@@ -3571,8 +3761,8 @@ onUnmounted(() => {
   padding: 12px;
   border: 0;
   border-radius: 13px;
-  background: #fff0f2;
-  color: #b34f69;
+  background: #f3f9fe;
+  color: #a45a69;
 }
 
 .advanced-card {
@@ -3581,10 +3771,10 @@ onUnmounted(() => {
   gap: 4px;
   padding: 15px;
   border-radius: 16px;
-  background: #f5edf1;
+  background: #eef6fc;
 }
 .advanced-card small,
-.advanced-card span { color: #927684; }
+.advanced-card span { color: #788ca0; }
 .technical-note,
 .technical-error,
 .technical-ok {
@@ -3595,7 +3785,7 @@ onUnmounted(() => {
   line-height: 1.6;
 }
 .technical-note { background: #fff5e7; color: #8c6a37; }
-.technical-error { background: #fff0f2; color: #9f4d63; }
+.technical-error { background: #f3f9fe; color: #9f4d63; }
 .technical-error p { margin: 5px 0 0; }
 .technical-ok { background: #edf8f1; color: #547663; }
 
@@ -3605,8 +3795,8 @@ onUnmounted(() => {
   overflow: hidden;
   padding: 12px;
   border-radius: 13px;
-  background: #f4ecef;
-  color: #7f6470;
+  background: #eef6fc;
+  color: #617f99;
 }
 .action-panel > button {
   width: 100%;
@@ -3614,7 +3804,7 @@ onUnmounted(() => {
   border: 0;
   border-bottom: 1px solid rgba(80,50,62,.07);
   background: transparent;
-  color: #5f4651;
+  color: #40566c;
   font-weight: 700;
 }
 .action-panel .danger-text { color: #b44f68; }
@@ -3684,7 +3874,7 @@ onUnmounted(() => {
   background: rgba(221, 195, 206, .25);
   line-height: 1.35;
   font-size: 11px;
-  color: #856673;
+  color: #667f96;
 }
 
 .message-reply-quote b,
@@ -3717,17 +3907,17 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 2px;
   padding-left: 9px;
-  border-left: 3px solid #da729f;
+  border-left: 3px solid #79add8;
 }
 
 .reply-preview-bar b {
-  color: #ba5e86;
+  color: #6f9dc4;
   font-size: 12px;
 }
 
 .reply-preview-bar span {
   overflow: hidden;
-  color: #8c717c;
+  color: #73889c;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3739,8 +3929,8 @@ onUnmounted(() => {
   flex: 0 0 auto;
   border: 0;
   border-radius: 50%;
-  background: #f4e9ed;
-  color: #785d69;
+  background: #eaf3fb;
+  color: #617b93;
   font-size: 19px;
 }
 
@@ -3812,7 +4002,7 @@ onUnmounted(() => {
   height: 5px;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: #dccbd2;
+  background: #d9e7f2;
 }
 
 .panel-handle:active {
@@ -3954,8 +4144,8 @@ onUnmounted(() => {
   flex: 0 0 auto;
   border: 0;
   border-radius: 50%;
-  background: #f4e9ed;
-  color: #785d69;
+  background: #eaf3fb;
+  color: #617b93;
   font-size: 19px;
 }
 
@@ -3965,7 +4155,7 @@ onUnmounted(() => {
   padding: 3px 4px;
   border: 0;
   background: transparent;
-  color: #9b7d89;
+  color: #73889c;
   font-size: 10px;
   white-space: nowrap;
 }

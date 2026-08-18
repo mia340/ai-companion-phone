@@ -420,14 +420,14 @@ onMounted(loadProfile)
   align-items: center;
   gap: 16px;
   padding: 20px;
-  border: 1px solid rgba(217, 111, 155, 0.1);
+  border: 1px solid rgba(121, 173, 216, 0.1);
   border-radius: 24px;
   background: linear-gradient(145deg, rgba(255,255,255,.82), rgba(255,244,249,.64));
   box-shadow: 0 12px 30px rgba(116, 66, 87, 0.06);
 }
 
 .profile-hero-copy { min-width: 0; display: grid; gap: 3px; }
-.profile-kicker { width: max-content; padding: 4px 8px; border-radius: 999px; background: rgba(217,111,155,.1); color: #b8567f; font-size: 11px; font-weight: 800; }
+.profile-kicker { width: max-content; padding: 4px 8px; border-radius: 999px; background: rgba(121,173,216,.1); color: #628fb4; font-size: 11px; font-weight: 800; }
 .profile-hero h2 { margin: 3px 0 0; font-size: 25px; }
 .profile-hero p { margin: 0; color: #8d6677; }
 .profile-hero small { margin-top: 4px; color: #a17d8d; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -436,14 +436,14 @@ onMounted(loadProfile)
   display: grid;
   gap: 12px;
   padding: 17px;
-  border: 1px solid rgba(217, 111, 155, 0.08);
+  border: 1px solid rgba(121, 173, 216, 0.08);
   border-radius: 21px;
   background: rgba(255, 255, 255, 0.58);
 }
 
 .profile-card h3 { margin: 0; }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.section-heading p { margin: 4px 0 0; color: #9b7183; font-size: 12px; line-height: 1.5; }
+.section-heading p { margin: 4px 0 0; color: #73889c; font-size: 12px; line-height: 1.5; }
 
 .avatar-edit-row {
   display: grid;
@@ -465,13 +465,13 @@ onMounted(loadProfile)
   justify-content: center;
   padding: 10px 13px;
   border-radius: 13px;
-  background: rgba(217,111,155,.1);
-  color: #b8567f;
+  background: rgba(121,173,216,.1);
+  color: #628fb4;
   font-weight: 800;
   cursor: pointer;
 }
 .hidden-file-input { display: none; }
-.text-button { border: none; background: transparent; color: #9b7183; cursor: pointer; text-align: left; padding: 2px 0; }
+.text-button { border: none; background: transparent; color: #73889c; cursor: pointer; text-align: left; padding: 2px 0; }
 
 .status-message, .success-message, .error-message { padding: 11px 13px; border-radius: 13px; text-align: center; }
 .status-message { background: rgba(255, 255, 255, 0.52); }
@@ -481,21 +481,21 @@ onMounted(loadProfile)
 .persona-overview { gap: 10px; }
 .persona-overview-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .persona-overview-head h3 { margin:0 0 4px; }
-.persona-overview-head p { margin:0; color:#9b7183; font-size:12px; line-height:1.5; }
-.persona-manage-button { border:0; border-radius:12px; padding:9px 11px; background:rgba(217,111,155,.12); color:#b8567f; font-weight:800; white-space:nowrap; }
+.persona-overview-head p { margin:0; color:#73889c; font-size:12px; line-height:1.5; }
+.persona-manage-button { border:0; border-radius:12px; padding:9px 11px; background:rgba(121,173,216,.12); color:#628fb4; font-weight:800; white-space:nowrap; }
 .persona-summary { display:flex; gap:10px; align-items:flex-start; padding:11px; border-radius:14px; background:rgba(255,255,255,.76); overflow:hidden; }
-.persona-summary.default { border:1px solid rgba(217,111,155,.16); }
+.persona-summary.default { border:1px solid rgba(121,173,216,.16); }
 .persona-symbol { flex: 0 0 auto; }
 .persona-summary > div:last-child { display:grid; gap:3px; min-width:0; overflow:hidden; }
 .persona-summary b, .persona-summary small, .persona-summary p { overflow-wrap:anywhere; }
-.persona-summary small { color:#9b7183; }
+.persona-summary small { color:#73889c; }
 .persona-summary p { margin:2px 0 0; color:#745b66; font-size:12px; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .character-persona-group { display:grid; gap:8px; }
 .group-title { display:flex; justify-content:space-between; align-items:center; color:#745b66; }
 .group-title small { color:#a78091; }
 .persona-counts { display:flex; gap:8px; flex-wrap:wrap; }
-.persona-counts span { padding:5px 9px; border-radius:999px; background:rgba(217,111,155,.08); color:#a35c78; font-size:11px; }
-.persona-note { margin:0; color:#9b7183; font-size:12px; line-height:1.5; }
+.persona-counts span { padding:5px 9px; border-radius:999px; background:rgba(121,173,216,.08); color:#a35c78; font-size:11px; }
+.persona-note { margin:0; color:#73889c; font-size:12px; line-height:1.5; }
 
 @media (max-width: 420px) {
   .profile-hero { align-items: flex-start; }

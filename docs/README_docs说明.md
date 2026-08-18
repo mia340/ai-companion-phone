@@ -44,14 +44,14 @@
 
 ## 当前文档基线
 
-截至 V0.0.8，文档已同步记录：
+截至 V0.4.4.7，持续维护文档已同步记录：
 
-- 角色详情与完整资料展示
-- 角色资料编辑
-- 角色安全删除与关联数据清理
-- 通讯录进入角色详情页
+- 角色卡 / WorldBook / Preset / Regex / Community UI 通用兼容运行时
+- 同一角色多 Conversation、自由开局与 Branch 状态快照
+- 六层记忆、Presence 场景状态机与 Prompt Debug
+- Shared Resource + ResourceBinding
 - 数据备份、恢复与跨浏览器迁移
-- 相关 TypeScript、路由和模块错误的定位过程
+- TypeScript、Vue、IndexedDB、PWA 与部署问题的持续定位记录
 
 后续每完成一个稳定模块，先运行 `npm run build`，确认无错误后再更新文档与提交 Git。
 ## Markdown 归档规则（V0.4.3.7.4 起）

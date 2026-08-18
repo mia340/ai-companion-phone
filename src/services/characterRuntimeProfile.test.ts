@@ -46,7 +46,7 @@ describe('character runtime compatibility policy', () => {
     expect(profile.allowNativeMessageReshaping).toBe(true)
   })
 
-  it('does not let a presentation choice override an explicitly selected card-first strategy', () => {
+  it('keeps card-first generation choice but still allows an explicit phone presentation projection', () => {
     const settings = createDefaultChatSettings('conv')
     settings.compatibilityMode = 'card-first'
     settings.conversationPresentationMode = 'phone-split'
@@ -55,8 +55,8 @@ describe('character runtime compatibility policy', () => {
       settings
     })
     expect(profile.compatibilityMode).toBe('card-first')
-    expect(profile.useNativeInteractionProtocol).toBe(false)
-    expect(profile.allowNativeMessageReshaping).toBe(false)
+    expect(profile.useNativeInteractionProtocol).toBe(true)
+    expect(profile.allowNativeMessageReshaping).toBe(true)
   })
 
   it('keeps phone enhancement as an explicit opt-in for community cards', () => {
@@ -71,21 +71,23 @@ describe('character runtime compatibility policy', () => {
   })
 
 
-  it('keeps an active resource UI session authoritative even in phone-enhanced mode', () => {
+  it('phone presentation does not let an active resource UI insert its shell into the chat flow', () => {
     const settings = createDefaultChatSettings('conv')
     settings.compatibilityMode = 'phone-enhanced'
+    settings.conversationPresentationMode = 'phone-text'
     const profile = resolveCharacterRuntimeProfile({
       character: character({ importFormat: 'community-json' }),
       settings,
       resourceUiActive: true
     })
-    expect(profile.preserveCardOutput).toBe(true)
-    expect(profile.useNativeInteractionProtocol).toBe(false)
-    expect(profile.allowNativeMessageReshaping).toBe(false)
+    expect(profile.preserveCardOutput).toBe(false)
+    expect(profile.useNativeInteractionProtocol).toBe(true)
+    expect(profile.allowNativeMessageReshaping).toBe(true)
   })
-  it('never lets phone enhancement override an original fixed UI contract', () => {
+  it('phone presentation hides a fixed UI shell while keeping card semantics available to generation', () => {
     const settings = createDefaultChatSettings('conv')
     settings.compatibilityMode = 'phone-enhanced'
+    settings.conversationPresentationMode = 'phone-text'
     const profile = resolveCharacterRuntimeProfile({
       character: character({ importFormat: 'community-json' }),
       settings,
@@ -94,8 +96,8 @@ describe('character runtime compatibility policy', () => {
         requiredUiLabels: [], requiredRegexNames: [], requiredLiteralTokens: []
       }
     })
-    expect(profile.preserveCardOutput).toBe(true)
-    expect(profile.useNativeInteractionProtocol).toBe(false)
-    expect(profile.allowNativeMessageReshaping).toBe(false)
+    expect(profile.preserveCardOutput).toBe(false)
+    expect(profile.useNativeInteractionProtocol).toBe(true)
+    expect(profile.allowNativeMessageReshaping).toBe(true)
   })
 })

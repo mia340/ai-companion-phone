@@ -365,7 +365,7 @@ async function importData() {
   display: grid;
   align-content: start;
   gap: 16px;
-  background: #fff7fb;
+  background: #f8fcff;
 }
 
 .backup-card,
@@ -472,7 +472,7 @@ p {
   padding: 12px 8px;
   border-radius: 14px;
   text-align: center;
-  background: #fff0f6;
+  background: #eef7fd;
   color: #75505f;
 }
 
@@ -535,7 +535,7 @@ p {
 }
 
 .image-export-option small {
-  color: #92717f;
+  color: #73889c;
   line-height: 1.5;
 }
 

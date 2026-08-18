@@ -99,6 +99,28 @@ function stripHtmlText(value: string) {
     .trim()
 }
 
+function normalizeOwnershipText(value: string) {
+  return stripHtmlText(value)
+    .replace(/\b\d{1,2}:\d{2}\b/g, ' ')
+    .replace(/(?:已读|未读|发送中|撤回|对方正在输入)/g, ' ')
+    .replace(/\s+/g, '')
+}
+
+/**
+ * 社区聊天 UI 可以展示真实历史里的用户消息，但 AI 不能为了填模板凭空替用户续写。
+ * 这里只处理作者 HTML 中带有明确“用户/自己消息”注释的区块；不猜测普通 div 的身份，避免误伤未知模板。
+ */
+export function enforceUserMessageOwnershipInRichHtml(html: string, realUserMessages: string[]) {
+  if (!html.trim()) return html
+  const real = realUserMessages.map(normalizeOwnershipText).filter(Boolean)
+  const userMessageBlock = /<!--\s*(?=[^>\n]{0,100}(?:自己|用户|我方|user|self))(?=[^>\n]{0,100}(?:消息|发言|message))[^>\n]{0,100}-->[\s\S]*?(?=<!--|$)/gi
+  return html.replace(userMessageBlock, block => {
+    const candidate = normalizeOwnershipText(block)
+    if (!candidate) return ''
+    return real.some(message => candidate.includes(message)) ? block : ''
+  })
+}
+
 function collectUiLabels(source: string) {
   const candidates: string[] = []
   const patterns = [
@@ -297,10 +319,15 @@ function splitStatusPrelude(raw: string) {
   const status: string[] = []
   let index = 0
   let started = false
+  const statusField = /^(?:[^\p{L}\p{N}\n]{0,3})?(?:日期|时间|地点|当前地点|天气|季节|人物|在场人物|在场角色|相对位置|衣着|穿着|关系|亲密状态|恋爱纪念日|恋爱天数|内心|心声|环境|状态)\s*[：:∶﹕︰|]/u
   for (; index < lines.length; index += 1) {
     const line = lines[index].trim()
+    if (/^【?状态信息】?\s*[：:]?$/u.test(line)) {
+      started = true
+      continue
+    }
     if (!line && started) continue
-    if (/^(?:📆|🗓|🗺|😶|💛|🧡|💙|💚|💜|▪|•|♥|❤)/u.test(line)) {
+    if (/^(?:📆|🗓|🗺|😶|💛|🧡|💙|💚|💜|▪|•|♥|❤)/u.test(line) || statusField.test(line)) {
       started = true
       status.push(line)
       continue
@@ -314,24 +341,44 @@ function splitStatusPrelude(raw: string) {
   }
 }
 
+function supportsLocalHtmlCompiler(contract: CommunityUiContract) {
+  return contract.mode === 'html-contract'
+    && Boolean(contract.exactHtmlTemplate?.includes('状态信息'))
+    && Boolean(contract.exactHtmlTemplate?.includes('正文'))
+}
+
+function splitNamedSection(source: string, label: string) {
+  const escaped = escapeRegex(label)
+  const pattern = new RegExp(`(?:^|\\n)\\s*(?:【${escaped}】|${escaped}\\s*[：:])\\s*\\n?([\\s\\S]*?)(?=\\n\\s*(?:【(?:正文|角色互动|场外观众席)】|(?:正文|角色互动|场外观众席)\\s*[：:])|$)`, 'i')
+  return source.match(pattern)?.[1]?.trim() || ''
+}
+
 /**
  * 只修“已有内容、缺 HTML 外壳”的确定性格式问题。
  * 不生成剧情、不补角色互动内容，也不改作者模板样式。
  */
 export function tryRepairCommunityUiLocally(contract: CommunityUiContract, rawText: string) {
-  if (contract.mode !== 'html-contract' || !contract.exactHtmlTemplate || hasRichHtml(rawText)) {
-    return { repaired: false, text: rawText, reason: '' }
-  }
-  if (!contract.exactHtmlTemplate.includes('状态信息') || !contract.exactHtmlTemplate.includes('正文')) {
+  if (!supportsLocalHtmlCompiler(contract) || !contract.exactHtmlTemplate || hasRichHtml(rawText)) {
     return { repaired: false, text: rawText, reason: '' }
   }
 
-  const parts = splitStatusPrelude(rawText)
-  if (parts.status.length < 3 || !parts.body) return { repaired: false, text: rawText, reason: '' }
+  const source = rawText
+    .replace(/^```(?:html|text)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+  if (!source) return { repaired: false, text: rawText, reason: '' }
+
+  const parts = splitStatusPrelude(source)
+  const namedBody = splitNamedSection(source, '正文')
+  const body = namedBody || parts.body || source
+  if (!body.trim() || !parts.status.length) return { repaired: false, text: rawText, reason: '' }
 
   let html = contract.exactHtmlTemplate
   const statusHtml = parts.status.map(escapeHtmlText).join('<br>')
-  const bodyHtml = escapeHtmlText(parts.body).replace(/\n/g, '<br>')
+  const bodyHtml = escapeHtmlText(body)
+    .replace(/(?:^|\n)\s*(?:【(?:正文|角色互动|场外观众席)】|(?:正文|角色互动|场外观众席)\s*[：:])\s*/g, '\n')
+    .trim()
+    .replace(/\n/g, '<br>')
 
   const statusSlot = /(<summary\b[^>]*>\s*状态信息\s*<\/summary>\s*<div\b[^>]*>\s*<div\b[^>]*>)([\s\S]*?)(<\/div>)/i
   const bodySlot = /(<div\b[^>]*>\s*正文\s*<\/div>\s*<div\b[^>]*>)([\s\S]*?)(<\/div>)/i
@@ -340,17 +387,17 @@ export function tryRepairCommunityUiLocally(contract: CommunityUiContract, rawTe
   html = html.replace(statusSlot, (_whole, prefix, _previous, suffix) => `${prefix}${statusHtml}${suffix}`)
   html = html.replace(bodySlot, (_whole, prefix, _previous, suffix) => `${prefix}${bodyHtml}${suffix}`)
 
-  // 原回复没有这些栏目内容时只保留作者栏目外壳并置空，不伪造 NPC / 观众发言。
   for (const label of ['角色互动', '场外观众席']) {
+    const value = splitNamedSection(source, label)
     const escaped = escapeRegex(label)
     const slot = new RegExp(`(<summary\\b[^>]*>\\s*${escaped}\\s*<\\/summary>\\s*<div\\b[^>]*>\\s*<div\\b[^>]*>)([\\s\\S]*?)(<\\/div>)`, 'i')
-    html = html.replace(slot, (_whole, prefix, _previous, suffix) => `${prefix}${suffix}`)
+    html = html.replace(slot, (_whole, prefix, _previous, suffix) => `${prefix}${value ? escapeHtmlText(value).replace(/\\n/g, '<br>') : ''}${suffix}`)
   }
 
   return {
     repaired: true,
     text: html,
-    reason: '检测到原卡状态字段与正文均已生成，仅缺少作者 HTML 外壳；已在本地套回原模板，未追加第二次 AI 调用。'
+    reason: 'Community UI Compiler V2：AI 已生成状态/正文数据，本地填回作者 HTML 模板，未追加第二次 AI 调用。'
   }
 }
 
@@ -361,14 +408,22 @@ export function buildCommunityUiPriorityPrompt(contract?: CommunityUiContract) {
     '当前角色的社区资源定义了自己的输出结构。只负责按原资源生成内容，不要把它改写成小手机私有格式。',
     '保留原资源规定的 HTML、XML、花括号字段、状态块、字段顺序、正文位置和代码围栏。',
     '不要主动添加 <scene_action>、<companion_packet> 或其它小手机私有协议；只有原资源明确要求时才使用。',
+    '用户消息所有权不可被 UI 模板覆盖：user/{{user}}/自己/我方/右侧用户消息槽只能引用聊天历史中用户已经真实发送过的内容；不得为了填满微信、短信、群聊、邮件或论坛模板而替用户编造新发言。',
     contract.requiredTagNames.length ? `必须保留的标签：${contract.requiredTagNames.map(item => `<${item}>`).join('、')}` : '',
     contract.requiredLiteralTokens.length ? `必须保留的字段：${contract.requiredLiteralTokens.join('、')}` : '',
     contract.mode === 'regex-html' && contract.regexInputSkeleton
       ? `【Regex 输入骨架】\n${contract.regexInputSkeleton}\n只填入本轮真实内容，不要直接输出 Regex 替换后的 HTML。`
       : '',
-    contract.mode === 'html-contract' && contract.exactHtmlTemplate
-      ? `【原卡 HTML 模板】\n${contract.exactHtmlTemplate}\n保留结构和样式，仅替换本轮内容。`
-      : '',
+    supportsLocalHtmlCompiler(contract)
+      ? [
+        '【Community UI Compiler V2 · 紧凑输出】',
+        '作者 HTML 外壳由本地安全编译器保存，你不要重复输出整段 HTML/CSS。',
+        '先按原卡要求输出本轮状态字段；然后用【正文】标记正文。若作者有“角色互动 / 场外观众席”等栏目，可分别用【角色互动】、【场外观众席】标记内容。',
+        '所有动态内容仍必须由你依据角色卡和当前剧情生成；应用只负责把已有内容填回作者模板。'
+      ].join('\n')
+      : contract.mode === 'html-contract' && contract.exactHtmlTemplate
+        ? `【原卡 HTML 模板】\n${contract.exactHtmlTemplate}\n保留结构和样式，仅替换本轮内容。`
+        : '',
     contract.mode === 'structured-contract' && contract.structuredTemplate
       ? `【原卡结构化模板】\n${contract.structuredTemplate}\n按原顺序填写，不得漏项。`
       : '',
@@ -382,17 +437,22 @@ export function buildCommunityUiRepairPrompt(contract: CommunityUiContract, prev
   const modeRule = contract.mode === 'regex-html'
     ? '上一版没有完整输出原卡明确要求的结构化标签。请重新生成完整回复；Regex 只负责后处理，不需要直接输出替换后的 HTML。'
     : contract.mode === 'html-contract'
-      ? '上一版没有保留原卡 HTML 模板。请重新生成完整回复并按原模板填充。'
+      ? supportsLocalHtmlCompiler(contract)
+        ? '上一版缺少作者固定 UI 所需的动态状态字段。请补齐状态字段和正文内容；HTML 外壳由本地安全编译器恢复。'
+        : '上一版没有保留原卡 HTML 模板。请重新生成完整回复并按原模板填充。'
       : '上一版没有完整遵守原卡结构化字段。请重新生成完整回复并保留全部必需字段。'
   return [
     '【原卡格式纠偏 · 必须重写】',
     modeRule,
     '只重写最终角色回复，不解释规则。不得改用小手机私有 scene_action / companion_packet。',
+    '不得替用户新增任何未真实发送过的台词、消息、选择或动作；模板里的用户侧槽位只能复用已有历史。',
     previousOutput.trim() ? `【上一版剧情事实】\n${previousOutput.trim().slice(0, 3000)}` : '',
     contract.requiredTagNames.length ? `标签：${contract.requiredTagNames.map(item => `<${item}>`).join('、')}` : '',
     contract.requiredLiteralTokens.length ? `字段：${contract.requiredLiteralTokens.join('、')}` : '',
     contract.mode === 'regex-html' && contract.regexInputSkeleton ? `【Regex 输入骨架】\n${contract.regexInputSkeleton}` : '',
-    contract.mode === 'html-contract' && contract.exactHtmlTemplate ? `【原卡 HTML 模板】\n${contract.exactHtmlTemplate}` : '',
+    supportsLocalHtmlCompiler(contract)
+      ? '【Community UI Compiler V2 纠偏】不要重复 HTML/CSS。补齐作者要求的本轮状态字段，并用【正文】标出完整正文；若作者明确需要其它栏目，再用原栏目名标记。动态内容必须由你生成，不能留给应用编造。'
+      : contract.mode === 'html-contract' && contract.exactHtmlTemplate ? `【原卡 HTML 模板】\n${contract.exactHtmlTemplate}` : '',
     contract.mode === 'structured-contract' && contract.structuredTemplate ? `【原卡结构化模板】\n${contract.structuredTemplate}` : ''
   ].filter(Boolean).join('\n')
 }

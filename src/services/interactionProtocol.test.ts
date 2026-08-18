@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildPresentationOverridePrompt,
   extractInlineSceneActions,
   naturalnessWarnings,
   parseCompanionOutput,
   scoreNaturalness,
+  segmentNaturalPhoneMessages,
   shapeCompanionActions,
   visibleStreamingText
 } from './interactionProtocol'
@@ -168,4 +170,101 @@ it('流式截断和带额外空格的 scene_action 标签都不会泄漏', () =>
   expect(visibleStreamingText(weird)).toBe('（把你圈进怀里，轻轻拍了下你的后背）这么好笑？')
   expect(visibleStreamingText('<scene_action perspective=" remote " >把你圈进怀里</scene_act')).toBe('（把你圈进怀里）')
   expect(visibleStreamingText('<scene_act')).toBe('')
+})
+
+it('V0.4.4.6 不把结构化状态栏中的括号备注误判为动作', () => {
+  const raw = `📅日期：2024年7月15日-周
+⏰时间：17:27
+🏢地点：公司楼下
+🚶人物：我，测试角色，大门保安
+👉相对位置：我站在写字楼大门口(刚出来)，测试角色站在我面前
+👔衣着：测试角色-深蓝色西装，黑色领带(铂金领带夹)
+
+（点头）“回去吧。”`
+  const parsed = parseCompanionOutput(raw)
+  const actions = parsed.messages.filter(item => item.kind === 'scene_action').map(item => item.content)
+  expect(actions).toEqual(['点头'])
+  expect(parsed.messages.map(item => item.content).join('\n')).toContain('(刚出来)')
+  expect(parsed.messages.map(item => item.content).join('\n')).toContain('(铂金领带夹)')
+})
+
+it('V0.4.4.6 纯手机模式只保留角色语句并从叙事中抽取引号对白', () => {
+  const settings = { ...createDefaultChatSettings('phone-only'), conversationPresentationMode: 'phone-text' as const }
+  const state = { ...createDefaultConversationState('phone-only'), presence: 'together' as const }
+  const source = parseCompanionOutput('测试角色抬眼看向你，伸手把伞往你那边倾了倾。\n\n“我送你回去。”\n\n他顿了一下。\n\n“外面还在下雨。”')
+  const shaped = shapeCompanionActions(source.messages, character, settings, Boolean(source.rawPacket), state)
+  expect(shaped.every(item => item.kind === 'text')).toBe(true)
+  expect(shaped.map(item => item.content).join('\n')).toContain('我送你回去。')
+  expect(shaped.map(item => item.content).join('\n')).toContain('外面还在下雨。')
+  expect(shaped.map(item => item.content).join('\n')).not.toContain('抬眼')
+  expect(shaped.map(item => item.content).join('\n')).not.toContain('他顿了一下')
+})
+
+it('V0.4.4.6 纯手机模式隐藏状态栏与明显用户侧 HTML 消息', () => {
+  const settings = { ...createDefaultChatSettings('phone-html'), conversationPresentationMode: 'phone-text' as const }
+  const source = parseCompanionOutput(`📅日期：2024年7月15日
+🏢地点：公司楼下
+<!-- 自己文字消息 (靠右-有气泡) --><div>用户没说过的话</div>
+<!-- 对方文字消息 (靠左-有气泡) --><div>到家了吗</div>
+<!-- 对方文字消息 (靠左-有气泡) --><div>我刚停好车。</div>`)
+  const shaped = shapeCompanionActions(source.messages, character, settings, false, createDefaultConversationState('phone-html'))
+  const visible = shaped.map(item => item.content).join('\n')
+  expect(visible).toContain('到家了吗')
+  expect(visible).toContain('我刚停好车。')
+  expect(visible).not.toContain('用户没说过的话')
+  expect(visible).not.toContain('日期')
+  expect(visible).not.toContain('地点')
+})
+
+it('V0.4.4.6 自然消息分段只拆明显短消息，小作文保持一条', () => {
+  expect(segmentNaturalPhoneMessages('我到了。\n\n你先别下来。\n\n外面雨大。')).toEqual(['我到了。', '你先别下来。', '外面雨大。'])
+  const essay = '我想了很久，还是觉得应该把这件事跟你说清楚。昨天不是故意不回你，只是当时真的不知道怎么解释。\n\n后来我重新想了一遍，如果一直沉默只会让你更难受，所以这次我想认真告诉你我的想法。'
+  expect(segmentNaturalPhoneMessages(essay)).toEqual([essay])
+})
+
+
+it('V0.4.4.6 纯手机最高优先级提示明确禁止 UI 与代写用户消息', () => {
+  const settings = { ...createDefaultChatSettings('phone-prompt'), conversationPresentationMode: 'phone-text' as const }
+  const prompt = buildPresentationOverridePrompt(settings)
+  expect(prompt).toContain('只能包含角色本人真正发送/说出的语句')
+  expect(prompt).toContain('不要输出动作、旁白、心理、状态栏')
+  expect(prompt).toContain('绝对不要替用户生成')
+  expect(prompt).toContain('小作文')
+})
+
+it('V0.4.4.7 动作/台词分开识别说话状态括号，但保护状态栏括号备注', () => {
+  const settings = { ...createDefaultChatSettings('v447-split'), conversationPresentationMode: 'phone-split' as const }
+  const raw = `👉相对位置：我站在写字楼门口(刚出来)，测试角色站在我面前
+👔衣着：黑色领带(铂金领带夹)
+这附近有家咖啡馆。
+（顿了顿，他声音低了几分）还是说，你现在更喜欢咖啡了。`
+  const parsed = parseCompanionOutput(raw)
+  const shaped = shapeCompanionActions(parsed.messages, character, settings, false, createDefaultConversationState('v447-split'))
+  expect(shaped.filter(item => item.kind === 'scene_action').map(item => item.content)).toEqual(['顿了顿，他声音低了几分'])
+  expect(shaped.map(item => item.content).join('\n')).not.toContain('铂金领带夹')
+  expect(shaped.map(item => item.content).join('\n')).not.toContain('刚出来')
+})
+
+it('V0.4.4.7 纯手机排除备忘录文字，保留真正重新发出的消息', () => {
+  const settings = { ...createDefaultChatSettings('v447-memo'), conversationPresentationMode: 'phone-text' as const }
+  const raw = '车停稳后，他在备忘录里添了一行字：“11.15 下午，淋雨。提醒：姜茶。”\n最终没有直接发消息，等到停车场才把刚才那句话重新发了一遍：到了，水烧好告诉你。'
+  const parsed = parseCompanionOutput(raw)
+  const shaped = shapeCompanionActions(parsed.messages, character, settings, false, createDefaultConversationState('v447-memo'))
+  expect(shaped.map(item => item.content)).toEqual(['到了，水烧好告诉你。'])
+})
+
+it('V0.4.4.7 纯手机可抽取夹在旁白中的多段真实对白', () => {
+  const settings = { ...createDefaultChatSettings('v447-quotes'), conversationPresentationMode: 'phone-text' as const }
+  const raw = '他把围巾搭在你肩上。“外套湿了。”他皱眉，“先喝这个，暖暖胃。空调调高了。”他看向窗外：“这场雨怕是要下到傍晚。”'
+  const parsed = parseCompanionOutput(raw)
+  const shaped = shapeCompanionActions(parsed.messages, character, settings, false, createDefaultConversationState('v447-quotes'))
+  expect(shaped.map(item => item.content)).toEqual(['外套湿了。', '先喝这个，暖暖胃。空调调高了。', '这场雨怕是要下到傍晚。'])
+})
+
+it('V0.4.4.7 纯手机在本轮只有旁白动作时宁可不显示，也不把叙事伪装成消息', () => {
+  const settings = { ...createDefaultChatSettings('v447-narration-only'), conversationPresentationMode: 'phone-text' as const }
+  const raw = '他指尖在方向盘上轻叩两下，车在红灯前停下。绿灯亮了，他踩下油门。'
+  const parsed = parseCompanionOutput(raw)
+  const shaped = shapeCompanionActions(parsed.messages, character, settings, false, createDefaultConversationState('v447-narration-only'))
+  expect(shaped).toEqual([])
 })

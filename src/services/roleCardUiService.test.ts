@@ -52,3 +52,28 @@ it('识别 Tavo emoji 状态栏与 XML 日期地点提示', () => {
   expect(xml?.time).toBe('05:45')
   expect(xml?.location).toBe('军区大院主卧')
 })
+
+it('V0.4.4.6 识别人物与相对位置结构化字段中的同场 Persona', () => {
+  const source = `📅日期：2024年7月15日-周
+⏰时间：17:27
+🏢地点：我就职的公司楼下
+🚶人物：我，测试角色，大门保安
+👉相对位置：我站在写字楼大门口(刚出来)，测试角色站在我面前，撑着伞遮过我头顶`
+  const hints = extractRoleCardUiHints(source)
+  expect(hints?.participants).toContain('我')
+  expect(hints?.relativePosition).toContain('站在我面前')
+  const resolved = resolvePresenceFromRoleCardScene(source, hints, undefined, ['我'])
+  expect(resolved.resolvedPresence).toBe('together')
+  expect(resolved.source).toBe('ui-surroundings')
+})
+
+it('V0.4.4.7 作者文本状态头兼容 Unicode 冒号并去掉右侧方括号', () => {
+  const hints = extractRoleCardUiHints(`【地点∶北京｜酒吧】
+【时间∶2025年4月16日，星期三，23∶00】
+【季节∶春天】
+【天气∶细雨】
+【内心∶陌生人都能这么熟练搭讪】`)
+  expect(hints?.location).toBe('北京｜酒吧')
+  expect(hints?.time).toBe('2025年4月16日，星期三，23∶00')
+  expect(hints?.inner).toBe('陌生人都能这么熟练搭讪')
+})

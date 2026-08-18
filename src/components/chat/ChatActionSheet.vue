@@ -96,7 +96,7 @@ const emit = defineEmits<{
   overflow-y: auto;
   padding: 8px 18px max(24px, env(safe-area-inset-bottom));
   border-radius: 26px 26px 0 0;
-  background: #fffafb;
+  background: #f8fcff;
   box-shadow: 0 -18px 50px rgba(70,42,55,.18);
   transition: transform .24s cubic-bezier(.22, .8, .24, 1);
   will-change: transform;
@@ -123,7 +123,7 @@ const emit = defineEmits<{
   height: 5px;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: #dccbd2;
+  background: #c8dbe9;
 }
 
 .panel-handle:active { cursor: grabbing; }
@@ -136,8 +136,8 @@ const emit = defineEmits<{
   overflow: hidden;
   padding: 12px;
   border-radius: 13px;
-  background: #f4ecef;
-  color: #7f6470;
+  background: #eef6fc;
+  color: #617f99;
 }
 
 .selected-preview img {
@@ -161,7 +161,7 @@ const emit = defineEmits<{
   border: 0;
   border-bottom: 1px solid rgba(80,50,62,.07);
   background: transparent;
-  color: #5f4651;
+  color: #40566a;
   font-weight: 700;
 }
 

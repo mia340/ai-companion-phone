@@ -345,6 +345,15 @@ export interface Conversation {
   pinned: boolean
   muted: boolean
   unread: number
+
+  // V0.4.4.7：同一角色允许拥有多份独立聊天。分支关系只属于会话元数据，
+  // 不改变角色卡/资源归属，也不需要升级 IndexedDB 索引。
+  parentConversationId?: UUID
+  rootConversationId?: UUID
+  branchFromMessageId?: UUID
+  openingMode?: 'pending' | 'free' | 'greeting'
+  greetingIndex?: number
+  createdAt?: string
   updatedAt: string
 }
 
@@ -380,6 +389,9 @@ export interface RoleCardUiState {
   location?: string
   inner?: string
   surroundings?: string
+  participants?: string
+  relativePosition?: string
+  attire?: string
   todos?: string[]
 }
 
@@ -531,7 +543,7 @@ export interface ConversationState {
   presence?: 'together' | 'remote'
   reportedPresence?: 'together' | 'remote'
   presenceResolutionReason?: string
-  presenceResolutionSource?: 'manual' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
+  presenceResolutionSource?: 'manual' | 'user-transition' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
 
   // V0.4.4.5：大型按需资源进入后保持会话，直到明确退出或切换其它资源。
   activeResourceEntryId?: UUID
@@ -622,7 +634,7 @@ export interface PromptDebugTrace {
   presenceResolution?: {
     reportedPresence?: 'together' | 'remote'
     resolvedPresence?: 'together' | 'remote'
-    source: 'manual' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
+    source: 'manual' | 'user-transition' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
     reason: string
     conflict?: boolean
     uiSurroundings?: string

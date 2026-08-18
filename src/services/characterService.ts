@@ -1,6 +1,4 @@
 import { db } from '../db/database'
-import { normalizeCommunityPlainText } from './regexRuntime'
-import { hasMultipleCharacterGreetings } from './characterGreetingService'
 
 import type {
   Character,
@@ -22,79 +20,81 @@ export interface DeleteCharacterResult {
 }
 
 /**
- * 查找角色对应的单聊会话。
+ * 列出角色的全部单聊。V0.4.4.7 起同一角色可以拥有多份独立剧情档案。
+ */
+export async function listSingleConversations(
+  characterId: string,
+  worldId: string
+): Promise<Conversation[]> {
+  const conversations = await db.conversations
+    .where('worldId')
+    .equals(worldId)
+    .toArray()
+
+  return conversations
+    .filter(conversation =>
+      conversation.type === 'single' &&
+      conversation.memberIds.length === 1 &&
+      conversation.memberIds[0] === characterId
+    )
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
+/**
+ * 兼容旧调用：返回最近的一份单聊。
  */
 export async function findSingleConversation(
   characterId: string,
   worldId: string
 ): Promise<Conversation | undefined> {
-  const conversations =
-    await db.conversations
-      .where('worldId')
-      .equals(worldId)
-      .toArray()
-
-  return conversations.find(
-    conversation =>
-      conversation.type === 'single' &&
-      conversation.memberIds.length === 1 &&
-      conversation.memberIds[0] ===
-        characterId
-  )
+  return (await listSingleConversations(characterId, worldId))[0]
 }
 
 /**
- * 获取角色单聊。
- * 如果不存在，则自动创建。
+ * 新建一份完全独立的角色单聊。开场默认 pending，由聊天页让用户选择：
+ * 自由开局 / 默认开场 / 任一备用开场。
  */
-export async function getOrCreateSingleConversation(
-  character: Character
-): Promise<Conversation> {
-  const existing =
-    await findSingleConversation(
-      character.id,
-      character.worldId
-    )
-
-  if (existing) {
-    return existing
+export async function createSingleConversation(
+  character: Character,
+  options?: {
+    title?: string
+    openingMode?: 'pending' | 'free'
+    parentConversationId?: string
+    rootConversationId?: string
+    branchFromMessageId?: string
   }
-
+): Promise<Conversation> {
   const now = new Date().toISOString()
-
+  const previous = await listSingleConversations(character.id, character.worldId)
+  const ordinal = previous.length + 1
   const conversation: Conversation = {
     id: crypto.randomUUID(),
     worldId: character.worldId,
     type: 'single',
-    title: character.name,
+    title: options?.title?.trim() || (ordinal > 1 ? `${character.name} · 聊天 ${ordinal}` : character.name),
     memberIds: [character.id],
     pinned: false,
     muted: false,
     unread: 0,
+    openingMode: options?.openingMode ?? 'pending',
+    parentConversationId: options?.parentConversationId,
+    rootConversationId: options?.rootConversationId,
+    branchFromMessageId: options?.branchFromMessageId,
+    createdAt: now,
     updatedAt: now
   }
-
-  await db.transaction('rw', db.conversations, db.messages, async () => {
-    await db.conversations.add(conversation)
-    const hasGreetingChoices = hasMultipleCharacterGreetings(character.firstMessage, character.alternateGreetings)
-    if (character.firstMessage?.trim() && !hasGreetingChoices) {
-      await db.messages.add({
-        id: crypto.randomUUID(),
-        worldId: character.worldId,
-        conversationId: conversation.id,
-        senderId: character.id,
-        type: 'text',
-        content: normalizeCommunityPlainText(character.firstMessage.trim()),
-        rawContent: character.firstMessage.trim(),
-        isGreetingSeed: true,
-        greetingIndex: 0,
-        status: 'delivered',
-        createdAt: now
-      })
-    }
-  })
-
+  await db.conversations.add(conversation)
   return conversation
+}
+
+/**
+ * 获取最近单聊；不存在时创建一份等待用户选择开场的新聊天。
+ */
+export async function getOrCreateSingleConversation(
+  character: Character
+): Promise<Conversation> {
+  return await findSingleConversation(character.id, character.worldId)
+    ?? await createSingleConversation(character)
 }
 
 /**
@@ -151,10 +151,15 @@ export async function updateCharacterAndConversation(
         const conversation
         of singleConversations
       ) {
+        const nextTitle = conversation.title === current.name
+          ? nextName
+          : conversation.title.startsWith(`${current.name} · `)
+            ? `${nextName}${conversation.title.slice(current.name.length)}`
+            : conversation.title
         await db.conversations.update(
           conversation.id,
           {
-            title: nextName,
+            title: nextTitle,
             updatedAt: now
           }
         )

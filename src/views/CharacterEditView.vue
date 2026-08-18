@@ -714,7 +714,7 @@ onMounted(loadCharacter)
   display: grid;
   align-content: start;
   gap: 16px;
-  background: #fff7fb;
+  background: #f8fcff;
 }
 
 .form-card {
@@ -865,7 +865,7 @@ onMounted(loadCharacter)
 }
 
 .error-message {
-  background: #ffe5e8;
+  background: #edf6fd;
   color: #aa4052;
 }
 
@@ -874,8 +874,8 @@ onMounted(loadCharacter)
     grid-template-columns: 1fr;
   }
 }
-.field-note{margin:0 0 10px;color:#9b7887;font-size:12px;line-height:1.65}.optional-fields{display:grid;gap:10px;margin-top:4px;padding:12px;border-radius:14px;background:#fff7fa;border:1px solid #f0e1e7}.optional-fields summary{cursor:pointer;color:#8c6071;font-weight:800}.optional-fields[open] summary{margin-bottom:10px}
+.field-note{margin:0 0 10px;color:#73889c;font-size:12px;line-height:1.65}.optional-fields{display:grid;gap:10px;margin-top:4px;padding:12px;border-radius:14px;background:#fff7fa;border:1px solid #e2eef7}.optional-fields summary{cursor:pointer;color:#8c6071;font-weight:800}.optional-fields[open] summary{margin-bottom:10px}
 
-.community-edit-note{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 15px;border-radius:18px;background:#fff3f8;border:1px solid #efd9e3;color:#694b58}.community-edit-note p{margin:5px 0 0;color:#927381;font-size:12px;line-height:1.6}.community-edit-note button{flex:0 0 auto;border:0;border-radius:12px;background:#d96f9b;color:#fff;padding:9px 11px;font-weight:800}.local-supplement{display:grid;gap:12px;border-radius:14px;background:#fff9fb;border:1px solid #f0e0e7;padding:10px 12px}.local-supplement summary{cursor:pointer;font-weight:800;color:#a15c79}.local-supplement[open]>summary{margin-bottom:10px}
+.community-edit-note{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 15px;border-radius:18px;background:#f3f9fe;border:1px solid #efd9e3;color:#694b58}.community-edit-note p{margin:5px 0 0;color:#6f879c;font-size:12px;line-height:1.6}.community-edit-note button{flex:0 0 auto;border:0;border-radius:12px;background:#79add8;color:#fff;padding:9px 11px;font-weight:800}.local-supplement{display:grid;gap:12px;border-radius:14px;background:#f8fcff;border:1px solid #f0e0e7;padding:10px 12px}.local-supplement summary{cursor:pointer;font-weight:800;color:#a15c79}.local-supplement[open]>summary{margin-bottom:10px}
 
 </style>
