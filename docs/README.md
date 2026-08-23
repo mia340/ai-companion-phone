@@ -1,14 +1,14 @@
 # AI Companion Phone Docs
 
-当前文档版本：**V0.4.4.7.2**
+当前文档版本：**V0.4.5.0**
 
 ```text
-应用：V0.4.4.7.2
+应用：V0.4.5.0
 IndexedDB：V14
 Backup：V9
 ```
 
-V0.4.4.7.2 只整理 `docs`，没有运行逻辑或数据库变化。
+V0.4.5.0 进入 WorldBook Engine V2 第一阶段：加入生成前预算、递归扫描、Timed Effects、分组选择、深度/位置注入与调试链；数据库版本保持不变。
 
 ## 文档怎么读
 

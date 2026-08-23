@@ -15,7 +15,14 @@ export interface RoleplayPromptInput {
   persona: UserPersona
   settings: ChatSettings
   memoryPrompt?: string
+  /** Legacy combined lorebook prompt; retained for older callers. */
   lorebookPrompt?: string
+  lorebookBeforeCharacterPrompt?: string
+  lorebookAfterCharacterPrompt?: string
+  lorebookAuthorNoteTopPrompt?: string
+  lorebookAuthorNoteBottomPrompt?: string
+  lorebookBeforeExamplesPrompt?: string
+  lorebookAfterExamplesPrompt?: string
   currentSummary?: string
   statePrompt?: string
   conversationState?: ConversationState
@@ -107,7 +114,9 @@ export function composeRoleplaySystemPrompt(input: RoleplayPromptInput): string 
   return [
     '你正在进行长期、连续的角色扮演。优先忠实执行角色卡与已绑定社区资源，不自行补造原卡没有的设备、UI、关系或输出协议。',
     '以下信息按优先级组织：角色卡/原资源明确规则 > 当前关系与场景 > 当前 Persona > 世界与记忆 > 本轮信息。',
+    input.lorebookBeforeCharacterPrompt || '',
     buildCharacterCardPrompt(input.character, input.settings, { phoneEnhanced: runtimeProfile.compatibilityMode === 'phone-enhanced' }),
+    input.lorebookAfterCharacterPrompt || '',
     buildPersonaPrompt(input.persona),
     buildOpeningModePrompt(input),
     runtimeProfile.compatibilityMode === 'phone-enhanced' && input.deviceTimeContext ? `【当前设备时间】\n${input.deviceTimeContext}` : '',
@@ -116,13 +125,20 @@ export function composeRoleplaySystemPrompt(input: RoleplayPromptInput): string 
     input.memoryPrompt ? `【长期记忆】\n${input.memoryPrompt}` : '',
     input.memoryWriteNotice ? `【本轮记忆写入结果】\n${input.memoryWriteNotice}` : '',
     input.currentSummary ? `【此前剧情摘要】\n${input.currentSummary}` : '',
-    input.lorebookPrompt || '',
+    // 旧调用方仍可提供 combined prompt；V2 调用方使用精确位置字段时不再重复注入。
+    input.lorebookBeforeCharacterPrompt || input.lorebookAfterCharacterPrompt || input.lorebookBeforeExamplesPrompt || input.lorebookAfterExamplesPrompt || input.lorebookAuthorNoteTopPrompt || input.lorebookAuthorNoteBottomPrompt
+      ? ''
+      : input.lorebookPrompt || '',
     input.character.depthPrompt?.prompt?.trim()
       ? `【角色卡 Depth Prompt · depth ${input.character.depthPrompt.depth ?? 4} · ${input.character.depthPrompt.role || 'system'}】\n${input.character.depthPrompt.prompt.trim()}`
       : '',
+    input.lorebookBeforeExamplesPrompt || '',
     buildExampleDialoguePrompt(input.character.exampleDialogues),
+    input.lorebookAfterExamplesPrompt || '',
+    input.lorebookAuthorNoteTopPrompt || '',
     buildOpeningFormatContinuity(input.character, structuredOutput, input.settings, input.openingMode),
     naturalnessRules(input.settings, { structuredOutput, phoneEnhanced: runtimeProfile.compatibilityMode === 'phone-enhanced' }),
+    input.lorebookAuthorNoteBottomPrompt || '',
     visualRules(input),
     runtimeProfile.useNativeInteractionProtocol
       ? buildInteractionProtocolPrompt(input.settings, input.character, input.conversationState)

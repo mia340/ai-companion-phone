@@ -83,6 +83,7 @@ import type {
   ChatSettings,
   Conversation,
   ConversationState,
+  LorebookRuntimeState,
   Message,
   MessageReplyReference,
   PromptDebugTrace,
@@ -1303,16 +1304,38 @@ async function requestAssistantReply(options?: {
         latestText: [latestUserText, options?.musicPrompt || ''].filter(Boolean).join('\n'),
         character: activeCharacter,
         persona,
-        activeResourceEntryId: conversationState.value?.activeResourceEntryId
+        activeResourceEntryId: conversationState.value?.activeResourceEntryId,
+        runtimeState: conversationState.value?.lorebookRuntime
       })
-      : { prompt: '', beforePrompt: '', afterPrompt: '', activated: [], focused: [], deferred: [], routingDecisions: [], estimatedSavedCharacters: 0, resourceSession: { continued: false, exitRequested: false } }
+      : {
+        prompt: '', beforePrompt: '', afterPrompt: '', beforeCharacterPrompt: '', afterCharacterPrompt: '',
+        authorNoteTopPrompt: '', authorNoteBottomPrompt: '', beforeExamplesPrompt: '', afterExamplesPrompt: '',
+        depthInjections: [], outlets: {}, activated: [], focused: [], deferred: [], routingDecisions: [], estimatedSavedCharacters: 0,
+        nextRuntimeState: conversationState.value?.lorebookRuntime || {},
+        engineDebug: { evaluatedEntries: 0, initialActivated: 0, recursiveActivated: 0, recursionSteps: 0, estimatedUsedTokens: 0, droppedByBudget: 0, stickyActive: [], cooldownBlocked: [], delayBlocked: [], groupDropped: [], depthInjections: [] },
+        resourceSession: { continued: false, exitRequested: false }
+      }
 
-    const runtimeLorebookPrompt = activeWorldRegex.length
-      ? applyRegexScripts(lorebook.prompt, activeWorldRegex, regexMacros).text
-      : lorebook.prompt
+    const applyWorldRegex = (value: string) => activeWorldRegex.length && value
+      ? applyRegexScripts(value, activeWorldRegex, regexMacros).text
+      : value
+    const runtimeLorebookPrompt = applyWorldRegex(lorebook.prompt)
+    const runtimeLorebookBeforeCharacter = applyWorldRegex(lorebook.beforePrompt)
+    const runtimeLorebookAfterCharacter = applyWorldRegex(lorebook.afterCharacterPrompt)
+    const runtimeLorebookAuthorNoteTop = applyWorldRegex(lorebook.authorNoteTopPrompt)
+    const runtimeLorebookAuthorNoteBottom = applyWorldRegex(lorebook.authorNoteBottomPrompt)
+    const runtimeLorebookBeforeExamples = applyWorldRegex(lorebook.beforeExamplesPrompt)
+    const runtimeLorebookAfterExamples = applyWorldRegex(lorebook.afterExamplesPrompt)
+    const runtimeLorebookDepth = lorebook.depthInjections.map(item => ({ ...item, content: applyWorldRegex(item.content) }))
+    const runtimeLorebookOutlets = Object.fromEntries(Object.entries(lorebook.outlets).map(([key, value]) => [key, applyWorldRegex(value)]))
+    const runtimeLorebookContractSource = [
+      runtimeLorebookPrompt,
+      ...runtimeLorebookDepth.map(item => item.content),
+      ...Object.values(runtimeLorebookOutlets)
+    ].filter(Boolean).join('\n\n')
     const detectedCommunityUiContract = detectCommunityUiContract({
       character: activeCharacter,
-      lorebookPrompt: runtimeLorebookPrompt,
+      lorebookPrompt: runtimeLorebookContractSource,
       preset: activePreset,
       assistantRegex: activeAssistantRegex,
       promptRegex: activePromptRegex
@@ -1362,6 +1385,24 @@ async function requestAssistantReply(options?: {
       noticeMessage.value = '当前模型已标记为不支持图片理解，将根据图片说明继续回应。'
     }
 
+    const applyDepthInjections = (turns: ChatTurn[]): ChatTurn[] => {
+      if (!runtimeLorebookDepth.length) return turns
+      const grouped = new Map<number, typeof runtimeLorebookDepth>()
+      for (const injection of runtimeLorebookDepth) {
+        const index = Math.max(0, Math.min(turns.length, turns.length - Math.max(0, injection.depth)))
+        const list = grouped.get(index) || []
+        list.push(injection)
+        grouped.set(index, list)
+      }
+      const output: ChatTurn[] = []
+      for (let index = 0; index <= turns.length; index += 1) {
+        const rows = (grouped.get(index) || []).sort((a, b) => a.order - b.order || ({ user: 0, assistant: 1, system: 2 }[a.role] - { user: 0, assistant: 1, system: 2 }[b.role]))
+        rows.forEach(row => output.push({ role: row.role, content: row.content }))
+        if (index < turns.length) output.push(turns[index])
+      }
+      return output
+    }
+
     const buildRecentTurns = (includeVision: boolean): ChatTurn[] => {
       const alternativeIndex = options?.alternativeTargetId
         ? messages.value.findIndex(item => item.id === options.alternativeTargetId)
@@ -1390,7 +1431,7 @@ async function requestAssistantReply(options?: {
         })
       }
 
-      return turns
+      return applyDepthInjections(turns)
     }
 
     const buildRuntimeSystemPrompt = (includeVision: boolean) => {
@@ -1400,6 +1441,12 @@ async function requestAssistantReply(options?: {
         settings,
         memoryPrompt,
         lorebookPrompt: runtimeLorebookPrompt,
+        lorebookBeforeCharacterPrompt: runtimeLorebookBeforeCharacter,
+        lorebookAfterCharacterPrompt: runtimeLorebookAfterCharacter,
+        lorebookAuthorNoteTopPrompt: runtimeLorebookAuthorNoteTop,
+        lorebookAuthorNoteBottomPrompt: runtimeLorebookAuthorNoteBottom,
+        lorebookBeforeExamplesPrompt: runtimeLorebookBeforeExamples,
+        lorebookAfterExamplesPrompt: runtimeLorebookAfterExamples,
         currentSummary: conversationState.value?.summary || '',
         statePrompt: buildConversationStatePrompt(conversationState.value ? { ...conversationState.value, presence: resolvePresenceMode(settings, conversationState.value) } : undefined),
         sceneTransitionPrompt: buildUserSceneTransitionPrompt(deriveUserSceneTransition(latestUserText, conversationState.value)),
@@ -1418,7 +1465,8 @@ async function requestAssistantReply(options?: {
         personality: activeCharacter.cardPersonality || activeCharacter.persona || '',
         persona: persona.description || persona.identity || '',
         description: activeCharacter.cardDescription || activeCharacter.background || activeCharacter.identity || '',
-        lastChatMessage: latestUserText
+        lastChatMessage: latestUserText,
+        outlets: runtimeLorebookOutlets
       })
       const transformed = activePromptRegex.length ? applyRegexScripts(base, activePromptRegex, regexMacros).text : base
       const proactivePrompt = options?.proactivePrompt?.trim()
@@ -1495,6 +1543,7 @@ async function requestAssistantReply(options?: {
             activatedLorebook: lorebook.activated.map(item => ({ id: item.id, title: item.title, reason: item.activationReason })),
             resourceRouting: lorebook.routingDecisions,
             estimatedSavedCharacters: lorebook.estimatedSavedCharacters,
+            lorebookEngine: lorebook.engineDebug,
             memoryHits: memoryHitDetails.map(item => ({ id: item.memory.id, content: item.memory.content, importance: item.memory.importance, layer: item.memory.layer, score: item.score, reason: item.reasons.join('；') })),
             imageCount: includeVisionCount(request),
             estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages),
@@ -1793,12 +1842,16 @@ async function requestAssistantReply(options?: {
           activeResourceUpdatedAt: new Date().toISOString()
         }
         : {}
+    const lorebookRuntimePatch: Partial<ConversationState> = settings.lorebookEnabled
+      ? { lorebookRuntime: lorebook.nextRuntimeState }
+      : {}
 
-    if (!options?.alternativeTargetId && conversationState.value && (parsedOutput.status || Object.keys(resourceSessionPatch).length)) {
+    if (!options?.alternativeTargetId && conversationState.value && (parsedOutput.status || Object.keys(resourceSessionPatch).length || Object.keys(lorebookRuntimePatch).length)) {
       const beforeState = conversationState.value
       const statePatch = {
         ...(parsedOutput.status ? mergeStatusIntoConversationState(beforeState, parsedOutput.status, parsedOutput.presenceResolution) : {}),
         ...resourceSessionPatch,
+        ...lorebookRuntimePatch,
         lastActionSummary: parsedOutput.actionSummary
       }
       const nextState = await patchConversationState(activeConversation.id, statePatch)
@@ -2624,6 +2677,17 @@ async function branchFromSelectedMessage() {
   if (conversationState.value?.thoughtUpdatedAt && conversationState.value.thoughtUpdatedAt <= selectedCreatedAt) {
     branchState.innerThought = conversationState.value.innerThought
     branchState.thoughtUpdatedAt = conversationState.value.thoughtUpdatedAt
+  }
+  if (conversationState.value?.lorebookRuntime) {
+    const branchMessageCount = copiedMessages.filter(row => !row.recalledAt).length
+    const inheritedRuntime: LorebookRuntimeState = Object.fromEntries(Object.entries(conversationState.value.lorebookRuntime).flatMap(([entryId, state]) => {
+      const mappedMessageId = state.activatedAtMessageId ? idMap.get(state.activatedAtMessageId) : undefined
+      const activatedBeforeBranch = state.activatedAtMessageId ? Boolean(mappedMessageId) : state.activatedAt <= selectedCreatedAt
+      const effectUntil = Math.max(state.stickyUntilMessageCount ?? -1, state.cooldownUntilMessageCount ?? -1)
+      if (!activatedBeforeBranch || effectUntil < branchMessageCount) return []
+      return [[entryId, { ...state, activatedAtMessageId: mappedMessageId }]]
+    }))
+    branchState.lorebookRuntime = inheritedRuntime
   }
   branchState.summary = ''
   branchState.summaryMessageCount = 0

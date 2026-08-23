@@ -56,12 +56,12 @@ npm run dev -- --host 0.0.0.0
 ## 当前版本
 
 ```text
-V0.4.4.7.2
+V0.4.5.0
 IndexedDB V14
 Backup V9
 ```
 
-本版本仅整理文档。继续开发前建议阅读：
+本版本进入 WorldBook Engine V2。继续开发前建议阅读：
 
 1. `PROJECT_STATUS.md`
 2. `ARCHITECTURE.md`

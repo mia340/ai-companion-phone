@@ -85,20 +85,110 @@ AI Raw Reply
 - `phone-text`：纯手机，只投影角色真正发送/说出的语句；
 - `phone-split`：动作与台词分离。
 
-## 4. WorldBook 当前执行能力
+## 4. WorldBook Engine V2
 
-当前已支持/读取的常见字段：
+V0.4.5.0 开始把此前已归档的 ST/Tavo 高级字段真正接入执行层。
 
-`constant / keys / secondary keys / selective / selectiveLogic / useRegex / matchWholeWords / priority / order / insertionOrder / position / depth / role / scanDepth / probability / useProbability / sticky / cooldown / delay / group / groupWeight / groupOverride / useGroupScoring / excludeRecursion / preventRecursion / delayUntilRecursion / persona/character/scenario/creator-note matching`
+### 4.1 初始匹配
 
-部分高级字段已经能导入、编辑和保存，但完整 SillyTavern 语义仍需 WorldBook Engine V2 收口，尤其是：
+支持：
 
-- recursive scanning；
-- cooldown / sticky 完整生命周期；
-- group scoring；
-- 生成前 token budget；
-- depth / position 精确插入；
-- 命中链调试。
+`constant / keys / secondary keys / useRegex / matchWholeWords / caseSensitive / selective / selectiveLogic / scanDepth / probability / useProbability / persona/character/scenario/creator-note matching`
+
+`selectiveLogic` 按 SillyTavern 当前语义执行：
+
+```text
+0 = AND ANY
+1 = NOT ALL
+2 = NOT ANY
+3 = AND ALL
+```
+
+这修正了旧运行时把 1/2 对调的兼容错误。
+
+### 4.2 Timed Effects
+
+`sticky / cooldown / delay` 以**消息数**为时间单位，并保存在当前 Conversation 的 `lorebookRuntime`：
+
+- Sticky：首次激活后继续保持 N 条消息，期间不重复刷新概率；
+- Cooldown：Sticky 结束后（或无 Sticky 时从首次激活后）N 条消息内禁止重新激活；
+- Delay：聊天消息数未达到 N 时不允许激活；
+- 条目被编辑后 `updatedAt` 改变，旧 timed effect 自动失效；
+- Branch 只继承分支节点以前仍有效的 effect。
+
+### 4.3 Recursive Scanning
+
+已支持：
+
+- 激活条目内容继续触发其它条目；
+- `excludeRecursion`：目标不能被递归触发；
+- `preventRecursion`：该条目激活后不再触发下游；
+- `delayUntilRecursion`：初始扫描不触发，只允许递归波次激活；
+- 世界书 `recursiveScanning=false` 时禁止该资源参与递归链；
+- 内部最多 8 层安全防环，后续再开放用户级 Max Recursion Steps。
+
+### 4.4 Inclusion Group / Scoring
+
+支持一个条目属于多个逗号分隔 group。
+
+- 同组同时激活时只保留赢家；
+- 默认按 `groupWeight` 加权随机；
+- `groupOverride` 存在时按较高 `order/insertionOrder` 确定性优先；
+- `useGroupScoring` 时先按命中 key 数评分，只让最高分子集继续竞争；
+- AND ANY / AND ALL 的 secondary key 会参与分数，NOT ANY / NOT ALL 不加分。
+
+### 4.5 生成前 Token Budget
+
+世界书资源本身已有 `tokenBudget` 字段。V0.4.5.0 正式执行：
+
+- 只有资源明确配置预算时才硬裁剪；
+- 没有预算时只估算，不使用应用私有默认预算删作者内容；
+- Focus / Active Resource Session / 作者每轮强制合同优先保护；
+- 普通常驻、直接关键词、Sticky、递归条目按来源与 order 决定预算优先级；
+- Prompt Debug 显示估算 Token、预算淘汰与原因；API 返回 usage 时仍以真实 usage 为最终依据。
+
+当前估算不是 provider tokenizer 的精确结果，后续可按模型接 tokenizer。
+
+### 4.6 Position / Depth / Outlet
+
+当前映射：
+
+```text
+0 Before Char      → 角色卡前
+1 After Char       → 角色卡后
+2 Author Note Top  → 当前单-system 架构中的近历史高影响区顶部
+3 Author Note Bottom → 近历史高影响区底部
+4 @D               → 真正插入 chat messages，支持 system/user/assistant role + depth
+5 Example Top      → 示例对话前
+6 Example Bottom   → 示例对话后
+7 Outlet           → 保存为 outlet，Prompt Preset 可用 {{outlet::Name}} 读取（名称大小写敏感）
+```
+
+其中 2/3 仍是兼容映射：本项目当前没有 SillyTavern 那种独立 Author's Note frequency 执行器，因此不能宣称 100% 同构。
+
+### 4.7 Debug
+
+Prompt Debug 新增：
+
+- evaluated entries；
+- initial / recursive activation；
+- recursion steps；
+- estimated budget / used tokens；
+- budget drop；
+- Sticky / Cooldown / Delay；
+- Group 淘汰；
+- @D title/depth/role。
+
+### 4.8 下一阶段
+
+仍待：
+
+- Min Activations / Max Depth；
+- 用户可配置 Max Recursion Steps；
+- vectorized / embedding trigger；
+- Author Note 真正独立频率；
+- decorators / automation / outlet 更完整语义；
+- provider tokenizer 精确预算。
 
 ## 5. 历史兼容审计归档
 

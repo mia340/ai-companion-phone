@@ -6,6 +6,7 @@ import { db } from '../db/database'
 import {
   deleteLorebookEntry,
   listLorebookEntries,
+  saveLorebook,
   saveLorebookEntry
 } from '../services/lorebookService'
 import { DEFAULT_WORLD_ID } from '../db/seed'
@@ -19,6 +20,11 @@ const entries = ref<LorebookEntry[]>([])
 const editingId = ref('')
 const viewingEntry = ref<LorebookEntry>()
 const message = ref('')
+const bookSettings = reactive({
+  scanDepth: 16,
+  tokenBudgetText: '',
+  recursiveScanning: true
+})
 
 const form = reactive({
   title: '',
@@ -134,6 +140,23 @@ function edit(entry: LorebookEntry) {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
+async function saveBookSettings() {
+  if (!book.value) return
+  const rawBudget = bookSettings.tokenBudgetText.trim()
+  const budget = rawBudget ? Number(rawBudget) : undefined
+  if (budget !== undefined && (!Number.isFinite(budget) || budget < 0)) {
+    message.value = 'Token 预算请输入 0 或正数；留空表示不设置硬预算。'
+    return
+  }
+  book.value = await saveLorebook({
+    ...book.value,
+    scanDepth: Math.max(0, Math.round(bookSettings.scanDepth || 0)),
+    tokenBudget: budget && budget > 0 ? Math.round(budget) : undefined,
+    recursiveScanning: bookSettings.recursiveScanning
+  })
+  message.value = 'WorldBook Engine V2 设置已保存。'
+}
+
 async function refresh() {
   entries.value = await listLorebookEntries({
     worldId: book.value?.worldId || DEFAULT_WORLD_ID,
@@ -234,6 +257,11 @@ async function copyFullContent(entry: LorebookEntry) {
 
 onMounted(async () => {
   if (bookId.value) book.value = await db.lorebooks.get(bookId.value)
+  if (book.value) {
+    bookSettings.scanDepth = book.value.scanDepth ?? 16
+    bookSettings.tokenBudgetText = book.value.tokenBudget ? String(book.value.tokenBudget) : ''
+    bookSettings.recursiveScanning = book.value.recursiveScanning !== false
+  }
   await refresh()
 })
 </script>
@@ -246,6 +274,16 @@ onMounted(async () => {
         <p v-if="book">来源只用于说明这本资源从哪里来；是否给某个角色使用，由“世界 → 世界书”里的绑定决定。同一本世界书可给多个角色使用，条目启停和原作者 order / position / depth 等字段在这里编辑。</p>
         <p v-else>世界书、Regex 和 Preset 都是共享资源。请先到“世界”选择一本世界书，再进入全文编辑。</p>
         <button v-if="!book" type="button" class="manage-button" @click="router.push({ path: '/world', query: { tab: 'lorebooks' } })">打开共享资源库</button>
+      </section>
+
+      <section v-if="book" class="editor-card engine-settings">
+        <div class="section-title"><h2>WorldBook Engine V2</h2><button type="button" @click="saveBookSettings">保存引擎设置</button></div>
+        <p class="engine-note">这些是世界书资源级设置。条目自己的 scanDepth 会覆盖这里；Token 预算只在作者/用户明确设置后才做硬裁剪，未设置时不擅自删世界设定。</p>
+        <div class="two-fields">
+          <label>默认 scanDepth<input v-model.number="bookSettings.scanDepth" type="number" min="0" max="200" /></label>
+          <label>Token 预算<input v-model="bookSettings.tokenBudgetText" inputmode="numeric" placeholder="留空=不设硬预算" /></label>
+        </div>
+        <label class="switch"><input v-model="bookSettings.recursiveScanning" type="checkbox" />允许递归扫描（条目仍可用 exclude/prevent/delayUntilRecursion 单独控制）</label>
       </section>
 
       <form v-if="canCreateEntry" class="editor-card" @submit.prevent="submit">
@@ -270,7 +308,7 @@ onMounted(async () => {
               <label>role<input v-model="form.roleText" placeholder="system / user / 数字" /></label>
             </div>
             <div class="two-fields">
-              <label>scanDepth<input v-model.number="form.scanDepth" type="number" min="1" max="200" /></label>
+              <label>scanDepth<input v-model.number="form.scanDepth" type="number" min="0" max="200" /></label>
               <label>selectiveLogic<input v-model="form.selectiveLogicText" placeholder="0 / 1 / 2 / 3" /></label>
             </div>
             <label class="switch"><input v-model="form.selective" type="checkbox" />selective：启用辅助关键词逻辑</label>
@@ -343,4 +381,5 @@ onMounted(async () => {
 
 <style scoped>
 .lore-page{min-height:100%;padding:14px;background:#f2f8fc;color:#40566a}.intro-card,.editor-card,.entry-card{border:1px solid rgba(109,70,87,.08);border-radius:20px;background:#fff;box-shadow:0 8px 28px rgba(79,46,61,.06)}.intro-card{padding:16px;margin-bottom:12px}.intro-card p{margin:6px 0 0;color:#748b9e;line-height:1.6;font-size:13px}.manage-button{margin-top:12px;border:0;border-radius:12px;background:#eaf3fa;color:#6f9dc4;padding:9px 12px;font-weight:800}.editor-card{display:grid;gap:12px;padding:16px}.section-title,.entry-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.section-title h2{margin:0;font-size:18px}.section-title button,.entry-actions button{border:0;border-radius:10px;background:#eaf3fa;color:#6f9dc4;padding:7px 10px}.editor-card label{display:grid;gap:6px;font-size:13px;font-weight:700}.editor-card input,.editor-card textarea,.quick-controls input{box-sizing:border-box;width:100%;border:1px solid #d7e5f0;border-radius:12px;background:#fbfdff;padding:10px 12px;color:#40566a;font:inherit;resize:vertical}.two-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.switch,.inline-toggle{display:flex!important;align-items:center;gap:8px}.switch input,.inline-toggle input{width:auto}.inline-toggle{flex:0 0 auto;font-size:12px;color:#9e5875}.advanced-fields{border:1px solid #efdee5;border-radius:14px;background:#fff8fb;padding:10px}.advanced-fields summary{cursor:pointer;font-weight:800;color:#668eae}.advanced-grid{display:grid;gap:10px;margin-top:12px}.match-fields{display:grid;gap:7px;border:1px dashed #ead6df;border-radius:12px;padding:10px}.match-fields legend{padding:0 6px;color:#6f94b2;font-size:12px;font-weight:800}.primary{border:0;border-radius:14px;background:#79add8;color:#fff;padding:12px;font-weight:800}.message{padding:10px 12px;border-radius:12px;background:#f5faff;color:#b65178}.entry-list{display:grid;gap:10px;margin-top:14px;padding-bottom:30px}.entry-card{min-width:0;padding:14px;overflow:hidden}.entry-card.disabled{opacity:.58}.entry-head{min-width:0}.entry-head>div{min-width:0}.entry-head b{display:block;overflow-wrap:anywhere}.entry-head small{display:block;margin-top:3px;color:#7d91a3}.quick-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.quick-controls label{display:grid;gap:4px;color:#73889c;font-size:10px;font-weight:700}.quick-controls input{min-height:36px;padding:7px 9px;border-radius:9px}.keywords{display:inline-block;max-width:100%;box-sizing:border-box;margin-top:10px;border-radius:999px;background:#eaf3fa;padding:4px 9px;color:#6597bf;font-size:11px;overflow-wrap:anywhere}.entry-preview{position:relative;max-height:280px;overflow:hidden;margin:12px 0 0;padding:0;border:0;background:transparent;color:#506a80;font:inherit;font-size:13px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}.entry-preview::after{content:"";position:absolute;left:0;right:0;bottom:0;height:56px;background:linear-gradient(transparent,#fff)}.entry-actions{display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap;margin-top:12px}.entry-actions .read-full{margin-right:auto;background:#e8f3fb;color:#5f8fb8;font-weight:800}.entry-actions .danger{color:#b64c63}.empty{text-align:center;color:#8396a7}.reader-backdrop{position:fixed;z-index:1200;inset:0;display:flex;align-items:flex-end;justify-content:center;background:rgba(57,39,47,.38);backdrop-filter:blur(6px)}.reader-sheet{box-sizing:border-box;width:min(100%,680px);height:min(88dvh,860px);display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;gap:10px;padding:18px;border-radius:28px 28px 0 0;background:#fffafb;box-shadow:0 -18px 48px rgba(74,43,57,.2);overflow:hidden}.reader-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.reader-head small{color:#7d91a3}.reader-head h2{margin:4px 0 0;font-size:21px;overflow-wrap:anywhere}.reader-head>button{flex:0 0 auto;width:38px;height:38px;border:0;border-radius:50%;background:#eaf3fa;color:#7d5d69;font-size:25px}.reader-meta{display:flex;gap:7px;flex-wrap:wrap}.reader-meta span{padding:5px 8px;border-radius:999px;background:#eaf3fa;color:#6f94b2;font-size:11px}.reader-content{min-width:0;min-height:0;margin:0;padding:14px;border-radius:16px;background:#fff;box-shadow:inset 0 0 0 1px #f0e3e8;color:#40566a;font:inherit;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;word-break:break-word;tab-size:2}.reader-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.reader-actions button{border:0;border-radius:13px;background:#eaf3fa;color:#6f9dc4;padding:11px;font-weight:800}.reader-actions .primary-reader{background:#79add8;color:#fff}@media(max-width:390px){.two-fields,.quick-controls{grid-template-columns:1fr}.reader-sheet{height:92dvh;padding:14px}.reader-actions{grid-template-columns:1fr}}
+.engine-note{margin:0 0 10px;color:#6f8798;font-size:12px;line-height:1.6}
 </style>

@@ -3,12 +3,12 @@
 ## 当前版本
 
 ```text
-应用：V0.4.4.7.2
+应用：V0.4.5.0
 IndexedDB：V14
 Backup：V9
 ```
 
-V0.4.4.7.2 是 **docs-only 整理版**：不修改运行逻辑、数据库结构或备份格式。运行功能沿用 V0.4.4.7；V0.4.4.7.1 修复 Windows Build 暴露的两个 TypeScript 错误。
+V0.4.5.0 是 **WorldBook Engine V2 第一阶段**：在不升级 IndexedDB / Backup 的前提下，把此前“能导入字段”推进为“真正执行字段”，并将新一批公开小手机项目的架构学习结果纳入长期路线。
 
 ## 当前阶段
 
@@ -88,13 +88,24 @@ V0.4.4.7.2 是 **docs-only 整理版**：不修改运行逻辑、数据库结构
 
 ### WorldBook
 
-仍需 WorldBook Engine V2 收口：
+V0.4.5.0 已完成 Engine V2 第一阶段：
 
-- recursive scanning；
-- sticky/cooldown/delay 完整生命周期；
-- group scoring；
-- 生成前 token budget；
-- depth/position 完整精确语义。
+- corrected selectiveLogic：0=AND ANY、1=NOT ALL、2=NOT ANY、3=AND ALL；
+- recursive scanning，支持 excludeRecursion / preventRecursion / delayUntilRecursion；
+- sticky / cooldown / delay 按“消息数”进入会话级生命周期；
+- inclusion group、多 group、groupWeight、groupOverride 与 useGroupScoring；
+- 仅在世界书明确设置 tokenBudget 时启用生成前硬预算，不用应用默认预算擅自裁掉作者设定；
+- position 0/1/4/5/6 路由，@D 按 role/depth 注入聊天历史；
+- position 7 Outlet 可被 Prompt Preset 的 `{{outlet::Name}}` 宏按名称大小写精确读取；
+- Prompt Debug 显示递归、Timed Effects、Group、预算与 @D 注入。
+
+仍需继续补齐：
+
+- Author Note Top/Bottom 与 SillyTavern 原生“按频率注入”并非完全同构，目前映射到当前单-system Prompt 的近历史高影响区；
+- Min Activations / Max Depth / Max Recursion Steps 用户配置；
+- vectorized / embedding 触发；
+- 更完整的 outlet / decorators / automation 语义；
+- provider tokenizer 级精确预算（当前是生成前 Token 估算 + API usage 事后真实统计）。
 
 ### Community UI
 
@@ -115,12 +126,27 @@ V0.4.4.7.2 是 **docs-only 整理版**：不修改运行逻辑、数据库结构
 
 ## 下一里程碑
 
-1. 先稳定 V0.4.4.7.x 的多会话 / 场景 / 呈现 / Community UI；
-2. WorldBook Engine V2；
+1. 用真实社区 WorldBook 回归 V0.4.5.0 的 recursion / timed effects / group / budget / @D；
+2. WorldBook Engine V2 第二阶段：Author Note / Min Activations / vectorized / 更完整 position/outlet；
 3. Community UI Compiler V2 扩展；
-4. ChatRoom runtime 拆分；
-5. 社区卡兼容回归矩阵；
-6. 再进入群聊、朋友圈、日记、钱包、论坛/购物等上层 Phone OS 功能。
+4. 把 Character Runtime / Conversation Runtime / App Surface 从 `ChatRoom.vue` 继续拆开；
+5. 建立“角色—NPC—群聊—地点—事件”的 Entity Graph 基础；
+6. 再进入群聊、朋友圈、日记、钱包、论坛/购物等上层 Phone OS 功能，并逐步引入 App read/write capability 权限。
+
+## 参考项目学习后的长期决策
+
+新一批公开参考项目（StoryPhone、Miya、InternalBeyond Mobile、Melt、Plume、汪汪机、FLOAT 等）只作为设计/工程参考，不代表本项目已经拥有它们的全部功能。当前吸收的长期原则：
+
+- **Character Runtime 是核心，App 是 Surface**：微信、论坛、日记、购物等未来不应继续堆进单个 ChatRoom。
+- **世界事实 / 通讯渠道 / 呈现方式三分离**：Presence 不等于微信，纯手机也不等于远程。
+- **同一角色多会话是基础能力**：角色身份、资源与多个剧情存档分开。
+- **上下文只装当前需要的内容**：WorldBook / Memory 都应“存很多、召回少量”，并可解释为什么命中/为什么没注入。
+- **主动消息也走完整 Runtime**：时间、关系、记忆、世界书、未完成事件共同决定，而不是定时器直接写台词。
+- **未来 App 引入能力权限**：读日历、写日历、发动态、查手机等 read/write capability 必须显式授权。
+- **Community UI 走安全能力编译**：尽量把常见 DOM/Tab/数据绑定转成受控能力，未知第三方 JS 不直接执行。
+- **本地优先继续保持**：IndexedDB + Backup + PWA 不推翻，未来同步是可选层，不成为角色运行时前提。
+
+详细来源与学习记录见 `DEVELOPMENT_LOG.md`。
 
 ## 测试原则
 

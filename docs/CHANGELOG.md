@@ -2,6 +2,20 @@
 
 > 精简版本变化。完整逐版本说明见 `RELEASE_HISTORY.md`。
 
+## V0.4.5.0 · WorldBook Engine V2 第一阶段
+
+- 修正 selectiveLogic 数值语义；
+- 实现 recursive scanning 与 exclude/prevent/delayUntilRecursion；
+- 实现会话级 sticky / cooldown / delay timed effects；
+- 实现多 inclusion group、groupWeight、groupOverride、useGroupScoring；
+- 世界书显式 tokenBudget 开始在生成前执行，未设置预算时不擅自裁剪；
+- 支持 Before/After Char、@D role/depth、Example Top/Bottom 与 Preset Outlet；
+- Prompt Debug 新增 WorldBook Engine V2 命中链与预算诊断；
+- 世界书编辑页可修改资源级 scanDepth / tokenBudget / recursiveScanning；
+- PWA manifest 主题同步为白 + 极淡蓝；
+- 将新一批公开小手机项目的架构学习结论写入长期文档；
+- IndexedDB V14 / Backup V9 不变。
+
 ## V0.4.4.7.2 · docs 整理
 
 - 49 份逐版本发布说明合并为 `RELEASE_HISTORY.md`；

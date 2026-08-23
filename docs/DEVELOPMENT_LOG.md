@@ -1,5 +1,102 @@
 # 开发记录
 
+## 2026-08-23 · V0.4.5.0｜参考项目学习与 WorldBook Engine V2
+
+### 为什么这一轮先做 WorldBook
+
+最近新增了一批公开“小手机 / AI 伴侣 OS”参考样本。它们的功能差异很大，但共同暴露了一个底层规律：当角色需要跨聊天、跨 App、跨时间保持连续性时，真正决定质量的不是“再加一个论坛/商城按钮”，而是上下文资源能不能按当前场景准确、节制、可解释地进入 Prompt。
+
+因此本轮先把 WorldBook 从“导入字段”推进到“执行字段”。
+
+### 参考样本（设计参考，不代表已实现同等功能）
+
+GitHub / 源码：
+
+- 汪汪机：`https://github.com/Liunian06/FlutterCppWangWangPhone`
+- Love Boat：`https://github.com/qingzhouu/love-boat`
+- 弯弯机：`https://github.com/wanonewan/wanwan`
+- 叙事诗 StoryPhone：`https://github.com/Island-glitch/Poemnarapk`
+- FLOAT：`https://github.com/xiaolongbao0709/ai-virtual-phone`
+- PiggyPhone：`https://github.com/lw0129-jj/PiggyPhone.JJ-STAR`
+- HiPhone：`https://github.com/ssochi/hiphone`
+- Miya：`https://github.com/lixooo00-lab/mingruis-miya`
+- InternalBeyond Mobile：`https://github.com/Sui-IB/InternalBeyond-Mobile`
+- Melt：`https://github.com/EvenNetR/Melt`
+
+在线页面 / 部署样本：
+
+- 小心机：`https://xiaoxinchat.jia.ruiyaxin.xyz/`
+- 小心机备用：`https://ruiruiyaxin.pages.dev/`
+- 凛冬机：`https://todleffleiermyronwym-web.github.io/zimaos/`
+- 蓝椰机：`https://todleffleiermyronwym-web.github.io/zmlanye/`
+- 文件预览：`https://todleffleiermyronwym-web.github.io/lanye/`
+- Love Boat Web：`https://loveboat.pages.dev/`
+- Lavender Phone：`https://lavender-phone.pages.dev/`
+- Plume：`https://rainmow52000.github.io/plume/`
+- 手写卡辅助：`https://lucent-naiad-692171.netlify.app/`
+- 代码辅助：`https://sparkly-halva-11dc2f.netlify.app/`
+- 蓝椰备用：`https://heroic-wisp-712733.netlify.app/`
+- Melt Web：`https://melt-eta.vercel.app`
+- mf 机：`https://ubiqpiroshki-0b62ca.netlify.app/index.html`
+
+`three-days-no-sleep` 目前只有关键词，没有唯一可靠仓库地址，因此只记为待核对样本，不编造链接。
+
+### 学到的架构原则
+
+#### 1. 角色运行时应高于 App
+
+StoryPhone、Miya 等项目都把聊天、朋友圈、论坛、音乐等拆成多个功能模块。我们的长期结构也应是 Character Runtime 驱动多个 App Surface，而不是让 `ChatRoom.vue` 变成所有功能的宿主。
+
+#### 2. 世界事实 / 通讯渠道 / 呈现方式必须分开
+
+Miya / Plume 一类产品已经出现线上/线下作用范围或模式。我们的 Presence、微信/论坛 Resource Session、scene-merged/phone-text/phone-split 必须保持三个独立维度。
+
+#### 3. 同一角色需要多 Conversation
+
+Plume 等项目把“角色”和“聊天存档”分开管理。这与 V0.4.4.7 的 Character / Conversation 分离一致，后续继续保留 Branch、自由开局和多存档。
+
+#### 4. 记忆不是越塞越多
+
+StoryPhone 公开说明包含总结、关键词索引与 RAG；InternalBeyond Mobile 公开说明包含按预算自动注入、自然衰减和每个 AI 独立认知档案。我们的六层 Memory 应继续向“存很多、只召回当前相关少量”发展，而不是每轮把全部记忆发给模型。
+
+#### 5. 主动消息必须走完整 Runtime
+
+参考项目里的后台发信/主动提醒说明，主动消息需要携带角色记忆、世界书、时间与事件状态。应用可以调度，但不能用本地模板替角色写内容。
+
+#### 6. App 能力需要权限边界
+
+InternalBeyond Mobile 的日历/社交等能力区分读取与写入授权。这提示我们以后做“查手机 / 写日历 / 发朋友圈 / 购物”等功能时，需要 capability 层，而不是让模型默认看见/修改所有数据。
+
+#### 7. Community UI 不应只在“执行 JS / 全部禁用 JS”之间二选一
+
+StoryPhone 一类项目允许更强 HTML 互动，而我们的安全边界是不执行未知第三方 JS。长期方向是 Safe Capability Compiler：识别 Tab、折叠、数据绑定、按钮等常见意图，并用本地受控实现替代任意脚本执行。
+
+#### 8. 本地优先可以继续
+
+多个参考项目使用 IndexedDB / PWA / 本地导入导出。这证明当前 Dexie + Backup + PWA 不需要推翻；未来跨设备同步应是可选层。
+
+### V0.4.5.0 实际落地
+
+- selectiveLogic 数值语义纠正；
+- recursive scanning；
+- sticky / cooldown / delay timed effects；
+- inclusion group / group scoring；
+- 显式 token budget；
+- Before/After Char、@D、Example Top/Bottom、Outlet；
+- Prompt Debug Engine V2；
+- 世界书资源级 Engine 设置；
+- PWA manifest 白蓝主题同步。
+
+### 仍然不做的事情
+
+- 不按参考项目名称写产品分支；
+- 不复制它们的角色设定、提示词或私有内容；
+- 不因为别人执行第三方 JS 就放开我们的未知脚本安全边界；
+- 不因为参考项目有某个 App，就假装本项目已经实现。
+
+---
+
+
 > 按时间记录实现、踩坑和可复用经验。发布级别的完整逐版本说明统一放在 `RELEASE_HISTORY.md`。
 
 ## 2026-08-18 · V0.4.4.7.2 docs 整理

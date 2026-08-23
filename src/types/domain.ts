@@ -527,6 +527,18 @@ export interface CharacterMemory {
   updatedAt: string
 }
 
+export interface LorebookTimedEffectState {
+  entryUpdatedAt: string
+  activatedAt: string
+  activatedAtMessageId?: UUID
+  activatedAtMessageCount: number
+  stickyUntilMessageCount?: number
+  cooldownUntilMessageCount?: number
+  activationCount: number
+}
+
+export type LorebookRuntimeState = Record<UUID, LorebookTimedEffectState>
+
 export interface ConversationState {
   id: UUID
   summary: string
@@ -549,6 +561,9 @@ export interface ConversationState {
   activeResourceEntryId?: UUID
   activeResourceTitle?: string
   activeResourceUpdatedAt?: string
+
+  // WorldBook Engine V2：按会话保存 timed effects。无需升级 IndexedDB schema；分支可继承当前节点前的效果。
+  lorebookRuntime?: LorebookRuntimeState
 
   relationshipNote?: string
   timePeriod?: string
@@ -609,6 +624,20 @@ export interface PromptDebugTrace {
   activatedLorebook: Array<{ id: UUID; title: string; reason?: string }>
   resourceRouting?: Array<{ id: UUID; title: string; status: 'focused' | 'activated' | 'deferred'; reason: string; characters: number }>
   estimatedSavedCharacters?: number
+  lorebookEngine?: {
+    evaluatedEntries: number
+    initialActivated: number
+    recursiveActivated: number
+    recursionSteps: number
+    estimatedBudgetTokens?: number
+    estimatedUsedTokens: number
+    droppedByBudget: number
+    stickyActive: string[]
+    cooldownBlocked: string[]
+    delayBlocked: string[]
+    groupDropped: string[]
+    depthInjections: Array<{ title: string; depth: number; role: 'system' | 'user' | 'assistant' }>
+  }
   tokenUsage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number; successfulCalls?: number }
   memoryHits: Array<{ id: UUID; content: string; importance: number; layer?: MemoryLayer; score?: number; reason?: string }>
   imageCount: number

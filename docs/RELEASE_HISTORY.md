@@ -4,6 +4,23 @@
 > 当前使用说明请看 `README.md`，当前状态请看 `PROJECT_STATUS.md`，当前架构请看 `ARCHITECTURE.md`。  
 > 这里的旧版本描述保持历史语境，不代表当前运行状态；数据库版本、限制和实现边界以当前文档为准。
 
+## V0.4.5.0 · WorldBook Engine V2 第一阶段
+
+- 运行时修正 ST/Tavo selectiveLogic：0 AND ANY、1 NOT ALL、2 NOT ANY、3 AND ALL。
+- Timed Effects 改为会话级消息计数：Sticky、Cooldown、Delay；条目编辑会使旧效果失效，Branch 仅继承节点前仍有效效果。
+- WorldBook recursive scanning 支持 excludeRecursion / preventRecursion / delayUntilRecursion，并使用内部 8 层防环。
+- Inclusion Group 支持多 group、groupWeight、groupOverride 与 key match group scoring。
+- 资源显式 `tokenBudget` 正式参与生成前筛选；无显式预算时不使用应用默认值裁剪作者世界书。
+- position 支持 Before/After Char、@D role/depth、Example Top/Bottom；Outlet 可通过 Prompt Preset `{{outlet::Name}}` 读取。
+- Author Note Top/Bottom 暂映射到当前 Prompt 的近历史高影响区，未宣称与 SillyTavern frequency 完全同构。
+- Prompt Debug 新增 Engine V2：递归、预算、Timed Effects、Group、@D。
+- 世界书编辑页新增资源级 scanDepth / tokenBudget / recursiveScanning。
+- PWA manifest theme/background 同步白 + 极淡蓝。
+- 开发文档新增一批公开 AI 小手机项目的设计学习记录，明确“参考 ≠ 已实现”。
+- IndexedDB V14 / Backup V9 不变。
+
+---
+
 # V0.4.4.7.2 · docs 整理
 
 - docs 根目录由 60+ 份 Markdown 收敛为 10 份长期维护文档。

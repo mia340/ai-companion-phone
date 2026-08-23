@@ -1,7 +1,7 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.4.4.7.2**。  
-> V0.4.4.7.2 仅整理文档；运行架构沿用 V0.4.4.7 / V0.4.4.7.1。  
+> 当前文档版本：**V0.4.5.0**。  
+> V0.4.5.0 进入 WorldBook Engine V2 第一阶段：世界书从“命中即拼接”升级为带预算、递归、Timed Effects、分组选择、位置/深度注入和可观测调试的执行器。  
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
 ## 1. 总体边界
@@ -27,6 +27,30 @@ IndexedDB Persistence
 - Character 与 Conversation 分离；
 - Community Resource 使用共享资源本体 + ResourceBinding；
 - 不针对具体角色、作者、文件名写生产逻辑。
+
+## 1.1 参考项目学习后的架构约束
+
+公开小手机项目反复出现一个共同趋势：长期稳定的项目不是“聊天页加功能”，而是“角色运行时 + 多个应用表面”。因此本项目后续按下列边界演进：
+
+```text
+Character Runtime
+├─ Identity / Persona relationship
+├─ Conversation / Branch
+├─ World State / Presence
+├─ Memory / Summary / Recall
+├─ Community Resource Runtime
+└─ Capability Permissions
+        ↓
+App Surfaces
+├─ Chat
+├─ Messaging
+├─ Forum / Moments
+├─ Diary / Calendar
+├─ Music
+└─ Future apps
+```
+
+App Surface 不拥有角色人格；它只改变交互入口、可见数据和可调用能力。这样才能保证角色跨聊天、跨 App、跨时间仍然是同一个角色。
 
 ## 2. Phone Shell
 
@@ -100,9 +124,18 @@ ResourceBinding
 ```text
 角色 / Persona / Memory / State
         ↓
-Bound WorldBook Scan
+Bound WorldBook Sources
         ↓
-Resource Intent Routing
+WorldBook Engine V2
+  ├─ initial keyword / constant / Focus
+  ├─ selective logic
+  ├─ timed effects
+  ├─ recursive scanning
+  ├─ group competition / scoring
+  ├─ explicit token budget
+  └─ position / depth / outlet routing
+        ↓
+Resource Intent / Active Session
         ↓
 Preset + Prompt Regex
         ↓
@@ -183,6 +216,36 @@ AI 生成动态字段 / 正文
 
 本地不创建角色事实；未知第三方 JavaScript 不直接执行。
 
+## 10.1 WorldBook Engine V2
+
+V0.4.5.0 将 WorldBook 从“字段导入 + 单轮关键词扫描”升级为会话级执行器。
+
+```text
+Initial Scan
+  ↓
+Timed Effect Gate (delay / sticky / cooldown)
+  ↓
+Selective Logic + Probability
+  ↓
+Group Competition / Scoring
+  ↓
+Recursive Waves (max internal guard)
+  ↓
+Explicit Resource Token Budget
+  ↓
+Position Router
+  ├─ Before Char
+  ├─ After Char
+  ├─ Author Note mapped area
+  ├─ @D role/depth
+  ├─ Example Messages top/bottom
+  └─ Outlet → Preset macro
+```
+
+Timed Effects 保存在 `ConversationState.lorebookRuntime`，因此属于聊天状态而不是角色卡本体；Branch 只继承分支节点以前仍有效的效果。这个字段不需要新 IndexedDB store，因此数据库仍为 V14。
+
+Token Budget 原则：只有资源自己导入/用户手动设置了 `tokenBudget` 才硬裁剪；没有显式预算时只做估算与 Debug，不用应用默认值擅自删作者设定。
+
 ## 11. Memory
 
 当前有六类：
@@ -218,7 +281,7 @@ Backup：V9
 ## 15. 当前技术债
 
 - `ChatRoom.vue` 仍过大；
-- WorldBook Engine V2 未完整实现 recursion/cooldown/sticky/group scoring/token budget；
+- WorldBook Engine V2 第一阶段已实现 recursion / sticky / cooldown / delay / group scoring / token budget / depth-position；仍需继续对齐更多 SillyTavern 边界语义、跨分支 timed-effect 细节与更精确的 provider tokenizer；
 - Community UI Compiler 尚未覆盖全部结构；
 - 图片 Data URL 占用较多 IndexedDB；
 - 长消息列表未完整虚拟化/分页；

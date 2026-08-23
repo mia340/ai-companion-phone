@@ -137,13 +137,13 @@ function parseLorebookEntry(raw: Record<string, unknown>, index: number) {
     excludeRecursion: asBoolean(raw.excludeRecursion ?? raw.exclude_recursion ?? extensions.excludeRecursion ?? extensions.exclude_recursion, false),
     preventRecursion: asBoolean(raw.preventRecursion ?? raw.prevent_recursion ?? extensions.preventRecursion ?? extensions.prevent_recursion, false),
     delayUntilRecursion: asBoolean(raw.delayUntilRecursion ?? raw.delay_until_recursion ?? extensions.delayUntilRecursion ?? extensions.delay_until_recursion, false),
-    useGroupScoring: typeof raw.useGroupScoring === 'boolean' ? raw.useGroupScoring : undefined,
-    matchPersonaDescription: typeof raw.matchPersonaDescription === 'boolean' ? raw.matchPersonaDescription : undefined,
-    matchCharacterDescription: typeof raw.matchCharacterDescription === 'boolean' ? raw.matchCharacterDescription : undefined,
-    matchCharacterPersonality: typeof raw.matchCharacterPersonality === 'boolean' ? raw.matchCharacterPersonality : undefined,
-    matchCharacterDepthPrompt: typeof raw.matchCharacterDepthPrompt === 'boolean' ? raw.matchCharacterDepthPrompt : undefined,
-    matchScenario: typeof raw.matchScenario === 'boolean' ? raw.matchScenario : undefined,
-    matchCreatorNotes: typeof raw.matchCreatorNotes === 'boolean' ? raw.matchCreatorNotes : undefined,
+    useGroupScoring: asBoolean(raw.useGroupScoring ?? raw.use_group_scoring ?? extensions.useGroupScoring ?? extensions.use_group_scoring, false),
+    matchPersonaDescription: asBoolean(raw.matchPersonaDescription ?? raw.match_persona_description ?? extensions.matchPersonaDescription ?? extensions.match_persona_description, false),
+    matchCharacterDescription: asBoolean(raw.matchCharacterDescription ?? raw.match_character_description ?? extensions.matchCharacterDescription ?? extensions.match_character_description, false),
+    matchCharacterPersonality: asBoolean(raw.matchCharacterPersonality ?? raw.match_character_personality ?? extensions.matchCharacterPersonality ?? extensions.match_character_personality, false),
+    matchCharacterDepthPrompt: asBoolean(raw.matchCharacterDepthPrompt ?? raw.match_character_depth_prompt ?? extensions.matchCharacterDepthPrompt ?? extensions.match_character_depth_prompt, false),
+    matchScenario: asBoolean(raw.matchScenario ?? raw.match_scenario ?? extensions.matchScenario ?? extensions.match_scenario, false),
+    matchCreatorNotes: asBoolean(raw.matchCreatorNotes ?? raw.match_creator_notes ?? extensions.matchCreatorNotes ?? extensions.match_creator_notes, false),
     sourceEntryId: raw.uid as number | string | undefined ?? raw.id as number | string | undefined,
     rawExtensions
   }
@@ -160,6 +160,7 @@ export function parseLorebookJson(text: string, fileName = '世界书.json'): Pa
   const entries = rows.map(parseLorebookEntry).filter(item => item.content)
   const format = sourceFormat(fileName, record)
   const name = asText(bookRecord.name) || asText(bookRecord.description) || fileStem(fileName)
+  const bookExtensions = asRecord(bookRecord.extensions) || {}
   return {
     lorebook: {
       name,
@@ -167,9 +168,9 @@ export function parseLorebookJson(text: string, fileName = '世界书.json'): Pa
       characterId: undefined,
       sourceFileName: fileName,
       sourceFormat: format,
-      scanDepth: asNumber(bookRecord.scanDepth ?? bookRecord.scan_depth, 0) || undefined,
-      tokenBudget: asNumber(bookRecord.tokenBudget ?? bookRecord.token_budget, 0) || undefined,
-      recursiveScanning: asBoolean(bookRecord.recursiveScanning ?? bookRecord.recursive_scanning, true),
+      scanDepth: asNumber(bookRecord.scanDepth ?? bookRecord.scan_depth ?? bookExtensions.scanDepth ?? bookExtensions.scan_depth, 0) || undefined,
+      tokenBudget: asNumber(bookRecord.tokenBudget ?? bookRecord.token_budget ?? bookExtensions.tokenBudget ?? bookExtensions.token_budget, 0) || undefined,
+      recursiveScanning: asBoolean(bookRecord.recursiveScanning ?? bookRecord.recursive_scanning ?? bookExtensions.recursiveScanning ?? bookExtensions.recursive_scanning, true),
       rawExtensions: cloneRecord(bookRecord.extensions)
     },
     entries,
@@ -180,7 +181,7 @@ export function parseLorebookJson(text: string, fileName = '世界书.json'): Pa
       summary: [`${entries.length} 条世界书`, `${entries.filter(item => item.enabled).length} 条启用`],
       supported: ['关键词/常驻', 'camelCase / snake_case 字段', '正则关键词', '可选过滤', 'order / 插入顺序', '概率', '深度', '整词匹配', '分组字段', 'Persona/角色字段扫描开关', '递归字段保留'],
       warnings: entries.some(item => item.cooldown || item.delay || item.sticky)
-        ? ['sticky / cooldown / delay 已保留，并使用兼容近似行为；与原客户端的逐消息状态可能存在细微差异。']
+        ? ['sticky / cooldown / delay 已接入会话级消息生命周期；与来源客户端的分支计数、全局激活设置仍可能存在边界差异。']
         : []
     }
   }

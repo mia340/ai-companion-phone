@@ -1,7 +1,57 @@
 import { db } from '../db/database'
 import { getCharacterResourceIds } from './resourceBindingService'
-import { buildResourceFocusInstruction, buildResourceSessionContinuationContent, looksLikeLargeFeatureModule, looksLikeMandatoryPerReplyContract, looksLikeOnDemandFeatureModule, routeLorebookIntent, shouldExitResourceSession, type ResourceRoutingDecision } from './resourceIntentRouter'
-import type { Character, LorebookEntry, LorebookResource, Message, UserPersona } from '../types/domain'
+import {
+  buildResourceFocusInstruction,
+  buildResourceSessionContinuationContent,
+  looksLikeLargeFeatureModule,
+  looksLikeMandatoryPerReplyContract,
+  looksLikeOnDemandFeatureModule,
+  routeLorebookIntent,
+  shouldExitResourceSession,
+  type ResourceRoutingDecision
+} from './resourceIntentRouter'
+import type {
+  Character,
+  LorebookEntry,
+  LorebookResource,
+  LorebookRuntimeState,
+  Message,
+  UserPersona
+} from '../types/domain'
+
+export type LorebookActivationKind = 'focus' | 'constant' | 'keyword' | 'sticky' | 'recursive' | 'session'
+
+export interface ActivatedLorebookEntry extends LorebookEntry {
+  activationReason: string
+  activationKind: LorebookActivationKind
+  matchScore: number
+  recursionDepth: number
+  estimatedTokens: number
+}
+
+export interface LorebookDepthInjection {
+  entryId: string
+  title: string
+  content: string
+  role: 'system' | 'user' | 'assistant'
+  depth: number
+  order: number
+}
+
+export interface LorebookEngineDebug {
+  evaluatedEntries: number
+  initialActivated: number
+  recursiveActivated: number
+  recursionSteps: number
+  estimatedBudgetTokens?: number
+  estimatedUsedTokens: number
+  droppedByBudget: number
+  stickyActive: string[]
+  cooldownBlocked: string[]
+  delayBlocked: string[]
+  groupDropped: string[]
+  depthInjections: Array<{ title: string; depth: number; role: 'system' | 'user' | 'assistant' }>
+}
 
 function normalizeText(value: string, caseSensitive: boolean) {
   return caseSensitive ? value : value.toLocaleLowerCase()
@@ -38,64 +88,79 @@ function keywordMatches(entry: LorebookEntry, keyword: string, source: string) {
   return normalizeText(source, entry.caseSensitive).includes(normalizeText(value, entry.caseSensitive))
 }
 
-function optionalFilterMatches(entry: LorebookEntry, source: string) {
-  const secondary = entry.secondaryKeys || []
-  if (!entry.selective || !secondary.length) return true
-  const hits = secondary.map(key => keywordMatches(entry, key, source))
-  const logic = entry.selectiveLogic
-  // Tavo/ST 常见：0=AND ANY，1=NOT ANY，2=NOT ALL，3=AND ALL。未知值按 AND ANY 降级。
-  if (logic === 1 || logic === 'not_any') return hits.every(hit => !hit)
-  if (logic === 2 || logic === 'not_all') return !hits.every(Boolean)
-  if (logic === 3 || logic === 'and_all') return hits.every(Boolean)
-  return hits.some(Boolean)
+function normalizedSelectiveLogic(value: LorebookEntry['selectiveLogic']) {
+  if (value === 1 || value === 'not_all') return 'not_all' as const
+  if (value === 2 || value === 'not_any') return 'not_any' as const
+  if (value === 3 || value === 'and_all') return 'and_all' as const
+  return 'and_any' as const
 }
 
-function entryMatchDetails(
-  entry: LorebookEntry,
-  messages: Message[],
-  latestText = '',
-  character?: Character,
-  persona?: UserPersona
-) {
-  const scanDepth = Math.max(1, entry.scanDepth || 16)
-  const sticky = Math.max(0, entry.sticky || 0)
-  const delay = Math.max(0, entry.delay || 0)
-  const relevant = messages.filter(message => !message.recalledAt).slice(-(scanDepth + sticky + delay + 2))
-  const chunks = [...relevant.map(message => message.content), latestText].filter(Boolean)
-  const activeChunks = delay > 0 ? chunks.slice(0, Math.max(0, chunks.length - delay)) : chunks
-  const contextualSources = [
+function matchKeys(entry: LorebookEntry, source: string) {
+  const primaryKeys = (entry.keywords || []).filter(key => keywordMatches(entry, key, source))
+  if (!primaryKeys.length) return { matched: false, primaryKeys: [], secondaryKeys: [], score: 0 }
+
+  const secondary = entry.secondaryKeys || []
+  if (!entry.selective || !secondary.length) {
+    return { matched: true, primaryKeys, secondaryKeys: [], score: primaryKeys.length }
+  }
+
+  const secondaryKeys = secondary.filter(key => keywordMatches(entry, key, source))
+  const logic = normalizedSelectiveLogic(entry.selectiveLogic)
+  const allSecondary = secondaryKeys.length === secondary.length
+  const anySecondary = secondaryKeys.length > 0
+  const matched = logic === 'and_all'
+    ? allSecondary
+    : logic === 'not_any'
+      ? !anySecondary
+      : logic === 'not_all'
+        ? !allSecondary
+        : anySecondary
+  const secondaryScore = logic === 'and_any'
+    ? secondaryKeys.length
+    : logic === 'and_all' && allSecondary
+      ? secondary.length
+      : 0
+  return { matched, primaryKeys, secondaryKeys, score: matched ? primaryKeys.length + secondaryScore : 0 }
+}
+
+function contextualSources(entry: LorebookEntry, character?: Character, persona?: UserPersona) {
+  return [
     entry.matchPersonaDescription
       ? [persona?.description, persona?.identity, persona?.occupation, persona?.personality, persona?.background].filter(Boolean).join('\n')
       : '',
     entry.matchCharacterDescription
-      ? [character?.identity, character?.appearance, character?.background, character?.persona].filter(Boolean).join('\n')
+      ? [character?.identity, character?.appearance, character?.background, character?.cardDescription].filter(Boolean).join('\n')
       : '',
-    entry.matchCharacterPersonality ? character?.persona || '' : '',
+    entry.matchCharacterPersonality ? [character?.cardPersonality, character?.persona].filter(Boolean).join('\n') : '',
     entry.matchCharacterDepthPrompt
       ? [character?.depthPrompt?.prompt, character?.postHistoryInstructions].filter(Boolean).join('\n')
       : '',
     entry.matchScenario ? character?.scenario || '' : '',
     entry.matchCreatorNotes ? character?.creatorNotes || '' : ''
   ].filter(Boolean)
-  const source = [...activeChunks.slice(-scanDepth), ...contextualSources].join('\n')
-  const stickySource = [...activeChunks.slice(-(scanDepth + sticky)), ...contextualSources].join('\n')
+}
 
-  if (entry.constant && !entry.useRegex) return { matched: true, reason: '常驻条目', source }
-  if (!entry.keywords.length) return { matched: false, reason: '', source }
+function buildScanSource(options: {
+  entry: LorebookEntry
+  messages: Message[]
+  latestText: string
+  bookScanDepth?: number
+  character?: Character
+  persona?: UserPersona
+}) {
+  const configuredDepth = options.entry.scanDepth ?? options.bookScanDepth ?? 16
+  const scanDepth = Math.max(0, configuredDepth)
+  const messages = options.messages.filter(message => !message.recalledAt)
+  const history = scanDepth > 0 ? messages.slice(-scanDepth).map(message => message.content) : []
+  const latest = scanDepth > 0 && options.latestText ? [options.latestText] : []
+  return [...history, ...latest, ...contextualSources(options.entry, options.character, options.persona)].filter(Boolean).join('\n')
+}
 
-  const directKeys = entry.keywords.filter(key => keywordMatches(entry, key, source))
-  if (directKeys.length && optionalFilterMatches(entry, source)) {
-    return { matched: true, reason: `${entry.useRegex ? '命中正则' : '命中关键词'}：${directKeys.slice(0, 3).join('、')}`, source }
-  }
-
-  if (sticky > 0) {
-    const stickyKeys = entry.keywords.filter(key => keywordMatches(entry, key, stickySource))
-    if (stickyKeys.length && optionalFilterMatches(entry, stickySource)) {
-      return { matched: true, reason: `Sticky 延续：${stickyKeys.slice(0, 2).join('、')}`, source: stickySource }
-    }
-  }
-
-  return { matched: false, reason: '', source }
+function estimateLorebookTokens(value: string) {
+  const compact = value || ''
+  const cjk = (compact.match(/[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g) || []).length
+  const other = Math.max(0, compact.length - cjk)
+  return Math.max(1, Math.ceil(cjk * 0.8 + other / 4))
 }
 
 function probabilityPasses(entry: LorebookEntry) {
@@ -104,27 +169,204 @@ function probabilityPasses(entry: LorebookEntry) {
   return Math.random() * 100 < probability
 }
 
-function applyGroups<T extends LorebookEntry & { activationReason: string }>(rows: T[]) {
-  const ungrouped = rows.filter(item => !item.group)
-  const grouped = new Map<string, T[]>()
-  rows.filter(item => item.group).forEach(item => {
-    const key = item.group || ''
-    const list = grouped.get(key) || []
-    list.push(item)
-    grouped.set(key, list)
-  })
-  const winners = [...grouped.values()].flatMap(items => {
-    const overrides = items.filter(item => item.groupOverride)
-    if (overrides.length) return overrides.sort((a, b) => (b.groupWeight || 100) - (a.groupWeight || 100)).slice(0, 1)
-    const total = items.reduce((sum, item) => sum + Math.max(1, item.groupWeight || 100), 0)
-    let point = Math.random() * total
-    for (const item of items) {
-      point -= Math.max(1, item.groupWeight || 100)
-      if (point <= 0) return [item]
+function entryOrder(entry: LorebookEntry) {
+  return entry.insertionOrder ?? (100 - entry.priority)
+}
+
+function splitGroups(entry: LorebookEntry) {
+  return (entry.group || '').split(/[,，、;]/).map(item => item.trim()).filter(Boolean)
+}
+
+function applyGroups(rows: ActivatedLorebookEntry[]) {
+  const selected = new Map(rows.map(item => [item.id, item]))
+  const groups = new Map<string, ActivatedLorebookEntry[]>()
+  for (const item of rows) {
+    for (const group of splitGroups(item)) {
+      const list = groups.get(group) || []
+      list.push(item)
+      groups.set(group, list)
     }
-    return items.slice(0, 1)
-  })
-  return [...ungrouped, ...winners]
+  }
+
+  const dropped = new Map<string, string>()
+  for (const [group, originalItems] of groups) {
+    let items = originalItems.filter(item => selected.has(item.id))
+    if (items.length <= 1) continue
+
+    if (items.some(item => item.useGroupScoring)) {
+      const highScore = Math.max(...items.map(item => item.matchScore))
+      const scoreLosers = items.filter(item => item.matchScore < highScore)
+      scoreLosers.forEach(item => {
+        selected.delete(item.id)
+        dropped.set(item.id, `组“${group}”评分淘汰：${item.matchScore} < ${highScore}`)
+      })
+      items = items.filter(item => item.matchScore === highScore)
+    }
+    if (items.length <= 1) continue
+
+    const prioritized = items.filter(item => item.groupOverride)
+    let winner: ActivatedLorebookEntry
+    if (prioritized.length) {
+      winner = prioritized.sort((a, b) => entryOrder(b) - entryOrder(a))[0]
+    } else {
+      const total = items.reduce((sum, item) => sum + Math.max(1, item.groupWeight || 100), 0)
+      let point = Math.random() * total
+      winner = items[0]
+      for (const item of items) {
+        point -= Math.max(1, item.groupWeight || 100)
+        if (point <= 0) {
+          winner = item
+          break
+        }
+      }
+    }
+    for (const item of items) {
+      if (item.id === winner.id) continue
+      selected.delete(item.id)
+      dropped.set(item.id, `包含组“${group}”由“${winner.title}”胜出`)
+    }
+  }
+  return { rows: rows.filter(item => selected.has(item.id)), dropped }
+}
+
+function timedPhase(entry: LorebookEntry, runtime: LorebookRuntimeState | undefined, messageCount: number) {
+  const state = runtime?.[entry.id]
+  if (!state || state.entryUpdatedAt !== entry.updatedAt) return { phase: 'none' as const }
+  if ((state.stickyUntilMessageCount ?? -1) >= messageCount && messageCount > state.activatedAtMessageCount) {
+    return { phase: 'sticky' as const, state }
+  }
+  if ((state.cooldownUntilMessageCount ?? -1) >= messageCount && messageCount > (state.stickyUntilMessageCount ?? state.activatedAtMessageCount)) {
+    return { phase: 'cooldown' as const, state }
+  }
+  return { phase: 'none' as const, state }
+}
+
+function makeCandidate(entry: LorebookEntry, options: {
+  reason: string
+  kind: LorebookActivationKind
+  score?: number
+  recursionDepth?: number
+  content?: string
+}): ActivatedLorebookEntry {
+  return {
+    ...entry,
+    activationReason: options.reason,
+    activationKind: options.kind,
+    matchScore: options.score ?? 0,
+    recursionDepth: options.recursionDepth ?? 0,
+    estimatedTokens: estimateLorebookTokens(options.content ?? entry.content)
+  }
+}
+
+function positionCode(value: LorebookEntry['position']) {
+  if (typeof value === 'number') return value
+  const normalized = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+  if (!normalized || ['beforechar', 'beforechardefs', 'before', '0'].includes(normalized)) return 0
+  if (['afterchar', 'afterchardefs', 'after', '1'].includes(normalized)) return 1
+  if (['antop', 'authornotetop', '2'].includes(normalized)) return 2
+  if (['anbottom', 'authornotebottom', '3'].includes(normalized)) return 3
+  if (['atdepth', 'depth', 'inchat', '4'].includes(normalized)) return 4
+  if (['emtop', 'beforeexamples', '5'].includes(normalized)) return 5
+  if (['embottom', 'afterexamples', '6'].includes(normalized)) return 6
+  if (['outlet', '7'].includes(normalized)) return 7
+  return 0
+}
+
+function depthRole(value: LorebookEntry['role']): 'system' | 'user' | 'assistant' {
+  if (value === 1 || String(value).toLowerCase() === 'user') return 'user'
+  if (value === 2 || ['assistant', 'ai'].includes(String(value).toLowerCase())) return 'assistant'
+  return 'system'
+}
+
+function outletName(entry: LorebookEntry) {
+  const raw = entry.rawExtensions || {}
+  const value = raw.outletName ?? raw.outlet_name ?? raw.outlet
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function activationBudgetRank(item: ActivatedLorebookEntry) {
+  if (item.activationKind === 'focus' || item.activationKind === 'session') return 600
+  if (looksLikeMandatoryPerReplyContract(item)) return 550
+  if (item.constant) return 500
+  if (item.activationKind === 'keyword') return 400
+  if (item.activationKind === 'sticky') return 350
+  if (item.activationKind === 'recursive') return 300
+  return 200
+}
+
+function selectWithinBudgets(options: {
+  rows: ActivatedLorebookEntry[]
+  books: Map<string, LorebookResource>
+  maxEntries: number
+}) {
+  const usedByBook = new Map<string, number>()
+  const selected: ActivatedLorebookEntry[] = []
+  const dropped = new Map<string, string>()
+  const sorted = [...options.rows].sort((a, b) =>
+    activationBudgetRank(b) - activationBudgetRank(a)
+    || entryOrder(b) - entryOrder(a)
+    || b.matchScore - a.matchScore
+  )
+
+  for (const item of sorted) {
+    const book = item.lorebookId ? options.books.get(item.lorebookId) : undefined
+    const budget = book?.tokenBudget && book.tokenBudget > 0 ? book.tokenBudget : undefined
+    const used = item.lorebookId ? (usedByBook.get(item.lorebookId) || 0) : 0
+    const protectedEntry = item.activationKind === 'focus' || item.activationKind === 'session' || looksLikeMandatoryPerReplyContract(item)
+    if (budget && used + item.estimatedTokens > budget && !protectedEntry) {
+      dropped.set(item.id, `生成前 Token 预算不足：约 ${used + item.estimatedTokens}/${budget} Token`)
+      continue
+    }
+    if (selected.length >= options.maxEntries && !protectedEntry) {
+      dropped.set(item.id, `超过本轮最大激活条目数 ${options.maxEntries}`)
+      continue
+    }
+    selected.push(item)
+    if (item.lorebookId) usedByBook.set(item.lorebookId, used + item.estimatedTokens)
+  }
+
+  return {
+    rows: selected.sort((a, b) => entryOrder(a) - entryOrder(b)),
+    dropped,
+    usedByBook
+  }
+}
+
+function nextTimedRuntime(options: {
+  current?: LorebookRuntimeState
+  entries: LorebookEntry[]
+  activated: ActivatedLorebookEntry[]
+  messageCount: number
+  latestMessageId?: string
+}) {
+  const byId = new Map(options.entries.map(entry => [entry.id, entry]))
+  const next: LorebookRuntimeState = {}
+  for (const [id, state] of Object.entries(options.current || {})) {
+    const entry = byId.get(id)
+    if (!entry || entry.updatedAt !== state.entryUpdatedAt) continue
+    const effectUntil = Math.max(state.stickyUntilMessageCount ?? -1, state.cooldownUntilMessageCount ?? -1)
+    if (effectUntil >= options.messageCount) next[id] = { ...state }
+  }
+
+  for (const item of options.activated) {
+    if (!(item.sticky || item.cooldown)) continue
+    const phase = timedPhase(item, options.current, options.messageCount).phase
+    if (phase === 'sticky') continue
+    const sticky = Math.max(0, item.sticky || 0)
+    const cooldown = Math.max(0, item.cooldown || 0)
+    const stickyUntil = sticky > 0 ? options.messageCount + sticky : undefined
+    const cooldownBase = stickyUntil ?? options.messageCount
+    next[item.id] = {
+      entryUpdatedAt: item.updatedAt,
+      activatedAt: new Date().toISOString(),
+      activatedAtMessageId: options.latestMessageId,
+      activatedAtMessageCount: options.messageCount,
+      stickyUntilMessageCount: stickyUntil,
+      cooldownUntilMessageCount: cooldown > 0 ? cooldownBase + cooldown : undefined,
+      activationCount: (options.current?.[item.id]?.activationCount || 0) + 1
+    }
+  }
+  return next
 }
 
 export async function listLorebooks(options?: { worldId?: string; characterId?: string }): Promise<LorebookResource[]> {
@@ -184,7 +426,7 @@ export async function listLorebookEntries(options?: {
       // 只有旧版“散装条目”仍按旧 characterId 兼容；有 lorebookId 的条目由资源绑定决定。
       return Boolean(item.lorebookId) || !item.characterId || item.characterId === options.characterId
     })
-    .sort((a, b) => (a.insertionOrder ?? 100 - a.priority) - (b.insertionOrder ?? 100 - b.priority) || b.updatedAt.localeCompare(a.updatedAt))
+    .sort((a, b) => entryOrder(a) - entryOrder(b) || b.updatedAt.localeCompare(a.updatedAt))
 }
 
 export async function saveLorebookEntry(
@@ -260,34 +502,48 @@ export async function buildLorebookPrompt(options: {
   persona?: UserPersona
   maxEntries?: number
   activeResourceEntryId?: string
+  runtimeState?: LorebookRuntimeState
 }): Promise<{
   prompt: string
   beforePrompt: string
   afterPrompt: string
-  activated: Array<LorebookEntry & { activationReason: string }>
-  focused: Array<LorebookEntry & { activationReason: string }>
-  deferred: Array<LorebookEntry & { activationReason: string }>
+  beforeCharacterPrompt: string
+  afterCharacterPrompt: string
+  authorNoteTopPrompt: string
+  authorNoteBottomPrompt: string
+  beforeExamplesPrompt: string
+  afterExamplesPrompt: string
+  depthInjections: LorebookDepthInjection[]
+  outlets: Record<string, string>
+  activated: ActivatedLorebookEntry[]
+  focused: ActivatedLorebookEntry[]
+  deferred: ActivatedLorebookEntry[]
   routingDecisions: ResourceRoutingDecision[]
   estimatedSavedCharacters: number
+  nextRuntimeState: LorebookRuntimeState
+  engineDebug: LorebookEngineDebug
   resourceSession: { entryId?: string; title?: string; continued: boolean; exitRequested: boolean }
 }> {
   const activeIds = await activeLorebookIds(options.characterId)
   const allowedBookIds = new Set(activeIds)
+  const bookRows = activeIds.length ? await db.lorebooks.bulkGet(activeIds) : []
+  const books = new Map(bookRows.filter((item): item is LorebookResource => Boolean(item)).map(item => [item.id, item]))
   const all = await db.lorebookEntries.toArray() as LorebookEntry[]
   const entries = all.filter(item => item.worldId === options.worldId)
     .filter(item => {
-      // 旧版本散装条目继续按历史 characterId 兼容。
       if (!item.lorebookId) return !item.characterId || item.characterId === options.characterId
-      // 有 lorebookId 的条目完全由 ResourceBinding 决定；来源角色不限制复用。
       return allowedBookIds.has(item.lorebookId)
     })
 
-  const explicitIntent = routeLorebookIntent(entries, options.latestText || '')
+  const latestText = options.latestText || ''
+  const messageCount = options.messages.filter(message => !message.recalledAt).length
+  const latestMessageId = [...options.messages].reverse().find(message => !message.recalledAt)?.id
+  const explicitIntent = routeLorebookIntent(entries, latestText)
   const activeSessionEntry = options.activeResourceEntryId
     ? entries.find(item => item.id === options.activeResourceEntryId && item.enabled)
     : undefined
   const staleActiveSession = Boolean(options.activeResourceEntryId && !activeSessionEntry)
-  const exitRequested = staleActiveSession || shouldExitResourceSession(options.latestText || '', activeSessionEntry)
+  const exitRequested = staleActiveSession || shouldExitResourceSession(latestText, activeSessionEntry)
   const focusedIds = new Set(explicitIntent.focusedIds)
   const focusedAliases = new Map(explicitIntent.focusedAliases)
   if (exitRequested && activeSessionEntry) {
@@ -305,87 +561,250 @@ export async function buildLorebookPrompt(options: {
     focusedAliases.set(activeSessionEntry.id, activeSessionEntry.title)
   }
 
-  const deferred: Array<LorebookEntry & { activationReason: string }> = []
-  const candidates: Array<LorebookEntry & { activationReason: string }> = []
+  const deferredMap = new Map<string, ActivatedLorebookEntry>()
+  const candidateMap = new Map<string, ActivatedLorebookEntry>()
+  const stickyActive: string[] = []
+  const cooldownBlocked: string[] = []
+  const delayBlocked: string[] = []
+
+  const defer = (entry: LorebookEntry, reason: string, kind: LorebookActivationKind = 'keyword') => {
+    if (!deferredMap.has(entry.id)) deferredMap.set(entry.id, makeCandidate(entry, { reason, kind }))
+  }
+  const addCandidate = (candidate: ActivatedLorebookEntry) => {
+    const existing = candidateMap.get(candidate.id)
+    if (!existing || activationBudgetRank(candidate) > activationBudgetRank(existing) || candidate.matchScore > existing.matchScore) {
+      candidateMap.set(candidate.id, candidate)
+    }
+    deferredMap.delete(candidate.id)
+  }
 
   for (const item of entries.filter(entry => entry.enabled)) {
+    const book = item.lorebookId ? books.get(item.lorebookId) : undefined
+    const phase = timedPhase(item, options.runtimeState, messageCount)
+    if (phase.phase === 'sticky') {
+      stickyActive.push(item.title)
+      addCandidate(makeCandidate(item, { reason: `Sticky 延续至第 ${phase.state?.stickyUntilMessageCount} 条消息`, kind: 'sticky' }))
+      continue
+    }
+    if (phase.phase === 'cooldown') {
+      cooldownBlocked.push(item.title)
+      defer(item, `Cooldown：第 ${phase.state?.cooldownUntilMessageCount} 条消息后可再次触发`)
+      continue
+    }
+    const delay = Math.max(0, item.delay || 0)
+    if (delay > 0 && messageCount < delay) {
+      delayBlocked.push(item.title)
+      defer(item, `Delay：当前 ${messageCount} 条消息，至少 ${delay} 条后可触发`)
+      continue
+    }
+
     const focusedAlias = focusedAliases.get(item.id)
     if (focusedIds.has(item.id)) {
-      candidates.push({
-        ...item,
-        activationReason: continueSession && activeSessionEntry?.id === item.id
-          ? `资源会话延续：${item.title}`
-          : `用户意图 Focus：${focusedAlias || item.title}`
-      })
+      const session = continueSession && activeSessionEntry?.id === item.id
+      addCandidate(makeCandidate(item, {
+        reason: session ? `资源会话延续：${item.title}` : `用户意图 Focus：${focusedAlias || item.title}`,
+        kind: session ? 'session' : 'focus',
+        score: 1000,
+        content: session ? buildResourceSessionContinuationContent(item) : item.content
+      }))
       continue
     }
 
-    const details = entryMatchDetails(item, options.messages, options.latestText, options.character, options.persona)
-    if (!details.matched) continue
-
-    // 大型“功能说明书/UI 模块”不再因为 constant 就每轮全文注入。
-    // 但作者明确规定“每轮必须输出”的状态栏/固定合同仍保持常驻，避免破坏原卡。
-    if (item.constant && looksLikeLargeFeatureModule(item) && looksLikeOnDemandFeatureModule(item) && !looksLikeMandatoryPerReplyContract(item)) {
-      deferred.push({ ...item, activationReason: '大型功能模块：本轮未明确调用，已按需休眠' })
+    if (item.delayUntilRecursion) {
+      defer(item, '等待递归扫描触发', 'recursive')
       continue
     }
 
-    if (probabilityPasses(item)) candidates.push({ ...item, activationReason: details.reason })
+    if (item.constant && !item.useRegex) {
+      if (item.constant && looksLikeLargeFeatureModule(item) && looksLikeOnDemandFeatureModule(item) && !looksLikeMandatoryPerReplyContract(item)) {
+        defer(item, '大型功能模块：本轮未明确调用，已按需休眠', 'constant')
+        continue
+      }
+      if (probabilityPasses(item)) addCandidate(makeCandidate(item, { reason: '常驻条目', kind: 'constant', score: 0 }))
+      continue
+    }
+
+    if (!item.keywords.length) continue
+    const source = buildScanSource({ entry: item, messages: options.messages, latestText, bookScanDepth: book?.scanDepth, character: options.character, persona: options.persona })
+    const details = matchKeys(item, source)
+    if (details.matched && probabilityPasses(item)) {
+      addCandidate(makeCandidate(item, {
+        reason: `${item.useRegex ? '命中正则' : '命中关键词'}：${details.primaryKeys.slice(0, 3).join('、')}${details.secondaryKeys.length ? `；辅助：${details.secondaryKeys.slice(0, 3).join('、')}` : ''}`,
+        kind: 'keyword',
+        score: details.score
+      }))
+    }
   }
 
-  const focusedCandidates = candidates.filter(item => focusedIds.has(item.id))
-  const normalCandidates = candidates.filter(item => !focusedIds.has(item.id))
-  const groupedNormal = applyGroups(normalCandidates)
-  let activated = [...focusedCandidates, ...groupedNormal]
-    .sort((a, b) => (a.insertionOrder ?? (100 - a.priority)) - (b.insertionOrder ?? (100 - b.priority)))
-    .slice(0, options.maxEntries ?? 24)
+  const groupedInitial = applyGroups([...candidateMap.values()])
+  const groupDropped = [...groupedInitial.dropped.values()]
+  for (const [id, reason] of groupedInitial.dropped) {
+    const entry = entries.find(item => item.id === id)
+    if (entry) defer(entry, reason)
+  }
+  candidateMap.clear()
+  groupedInitial.rows.forEach(item => candidateMap.set(item.id, item))
 
-  // Focus 不应被 maxEntries 挤掉；如果超限，优先保留用户明确调用的资源。
-  const keptFocusedIds = new Set(focusedCandidates.map(item => item.id))
-  if (focusedCandidates.length) {
-    const kept = new Map(activated.map(item => [item.id, item]))
-    for (const item of focusedCandidates) kept.set(item.id, item)
-    activated = [...kept.values()]
-      .sort((a, b) => keptFocusedIds.has(a.id) === keptFocusedIds.has(b.id)
-        ? (a.insertionOrder ?? (100 - a.priority)) - (b.insertionOrder ?? (100 - b.priority))
-        : keptFocusedIds.has(a.id) ? -1 : 1)
-      .slice(0, options.maxEntries ?? 24)
+  const initialActivated = candidateMap.size
+  let recursionSteps = 0
+  let recursiveActivated = 0
+  const maxRecursionSteps = 8
+  const recursionSourceEnabled = (item: ActivatedLorebookEntry) => {
+    const book = item.lorebookId ? books.get(item.lorebookId) : undefined
+    return book?.recursiveScanning !== false
+  }
+  let recursionFrontier = groupedInitial.rows.filter(item => !item.preventRecursion && recursionSourceEnabled(item))
+
+  while (recursionFrontier.length && recursionSteps < maxRecursionSteps) {
+    recursionSteps += 1
+    const recursionSource = recursionFrontier.map(item => item.content).join('\n')
+    const wave: ActivatedLorebookEntry[] = []
+    for (const item of entries.filter(entry => entry.enabled && !candidateMap.has(entry.id))) {
+      const book = item.lorebookId ? books.get(item.lorebookId) : undefined
+      if (book?.recursiveScanning === false || item.excludeRecursion) continue
+      const phase = timedPhase(item, options.runtimeState, messageCount)
+      if (phase.phase === 'cooldown') continue
+      const delay = Math.max(0, item.delay || 0)
+      if (delay > 0 && messageCount < delay) continue
+      if (!item.keywords.length && !item.constant) continue
+
+      const details = item.constant && item.delayUntilRecursion
+        ? { matched: true, primaryKeys: [], secondaryKeys: [], score: 0 }
+        : matchKeys(item, recursionSource)
+      if (!details.matched) continue
+      if (!probabilityPasses(item)) continue
+      wave.push(makeCandidate(item, {
+        reason: `递归第 ${recursionSteps} 层${details.primaryKeys.length ? `：${details.primaryKeys.slice(0, 3).join('、')}` : ''}`,
+        kind: 'recursive',
+        score: details.score,
+        recursionDepth: recursionSteps
+      }))
+    }
+    if (!wave.length) break
+    const groupedWave = applyGroups(wave)
+    groupDropped.push(...groupedWave.dropped.values())
+    for (const [id, reason] of groupedWave.dropped) {
+      const entry = entries.find(item => item.id === id)
+      if (entry) defer(entry, reason, 'recursive')
+    }
+    const fresh = groupedWave.rows.filter(item => !candidateMap.has(item.id))
+    if (!fresh.length) break
+    fresh.forEach(item => addCandidate(item))
+    recursiveActivated += fresh.length
+    recursionFrontier = fresh.filter(item => !item.preventRecursion && recursionSourceEnabled(item))
   }
 
-  const focused = activated.filter(item => keptFocusedIds.has(item.id))
-  const normal = activated.filter(item => !keptFocusedIds.has(item.id))
-  const promptContent = (entry: (typeof activated)[number]) =>
-    entry.activationReason.startsWith('资源会话延续：')
-      ? buildResourceSessionContinuationContent(entry)
-      : entry.content
-  const section = (rows: typeof activated) => rows.map((entry, index) => `${index + 1}. ${entry.title}\n${promptContent(entry)}`).join('\n\n')
-  const before = normal.filter(entry => entry.position === 'before_char' || entry.position === 0 || entry.position == null)
-  const after = normal.filter(entry => !before.includes(entry))
+  const budgetSelection = selectWithinBudgets({
+    rows: [...candidateMap.values()],
+    books,
+    maxEntries: options.maxEntries ?? 24
+  })
+  for (const [id, reason] of budgetSelection.dropped) {
+    const entry = candidateMap.get(id)
+    if (entry) defer(entry, reason, entry.activationKind)
+  }
+
+  const activated = budgetSelection.rows
+  const focused = activated.filter(item => item.activationKind === 'focus' || item.activationKind === 'session')
+  const normal = activated.filter(item => !focused.includes(item))
+  const promptContent = (entry: ActivatedLorebookEntry) =>
+    entry.activationKind === 'session' ? buildResourceSessionContinuationContent(entry) : entry.content
+  const section = (rows: ActivatedLorebookEntry[]) => rows.map((entry, index) => `${index + 1}. ${entry.title}\n${promptContent(entry)}`).join('\n\n')
+  const byPosition = (position: number) => normal.filter(entry => positionCode(entry.position) === position)
+  const labelSection = (label: string, rows: ActivatedLorebookEntry[]) => rows.length ? `【${label}】\n\n${section(rows)}` : ''
+
+  const beforeCharacterPrompt = labelSection('本轮触发的世界书 · Before Char', byPosition(0))
+  const afterCharacterPrompt = labelSection('本轮触发的世界书 · After Char', byPosition(1))
+  const authorNoteTopPrompt = labelSection('本轮触发的世界书 · Author Note Top', byPosition(2))
+  const authorNoteBottomPrompt = labelSection('本轮触发的世界书 · Author Note Bottom', byPosition(3))
+  const beforeExamplesPrompt = labelSection('本轮触发的世界书 · Example Messages Top', byPosition(5))
+  const afterExamplesPrompt = labelSection('本轮触发的世界书 · Example Messages Bottom', byPosition(6))
+  const depthInjections: LorebookDepthInjection[] = byPosition(4).map(entry => ({
+    entryId: entry.id,
+    title: entry.title,
+    content: promptContent(entry),
+    role: depthRole(entry.role),
+    depth: Math.max(0, entry.depth ?? 4),
+    order: entryOrder(entry)
+  }))
+  const outlets: Record<string, string> = {}
+  for (const entry of byPosition(7)) {
+    const name = outletName(entry)
+    if (!name) continue
+    outlets[name] = [outlets[name], promptContent(entry)].filter(Boolean).join('\n\n')
+  }
+
   const focusPrompt = focused.length
     ? `${buildResourceFocusInstruction(focused)}\n\n${section(focused)}`
     : ''
-  const beforePrompt = before.length ? `【本轮触发的世界书 · Before】\n\n${section(before)}` : ''
-  const afterPrompt = after.length ? `【本轮触发的世界书 · After】\n\n${section(after)}` : ''
+  const beforePrompt = [focusPrompt, beforeCharacterPrompt].filter(Boolean).join('\n\n')
+  const afterPrompt = [afterCharacterPrompt, authorNoteTopPrompt, authorNoteBottomPrompt, beforeExamplesPrompt, afterExamplesPrompt].filter(Boolean).join('\n\n')
   const prompt = [
     focusPrompt,
-    beforePrompt,
-    afterPrompt,
+    beforeCharacterPrompt,
+    afterCharacterPrompt,
+    authorNoteTopPrompt,
+    authorNoteBottomPrompt,
+    beforeExamplesPrompt,
+    afterExamplesPrompt,
     activated.length ? '以上设定是当前启用资源产生的世界事实或玩法规则。自然遵守，不要向用户解释“世界书”或触发过程。' : ''
   ].filter(Boolean).join('\n\n')
 
+  const deferred = [...deferredMap.values()]
   const routingDecisions: ResourceRoutingDecision[] = [
     ...focused.map(item => ({ id: item.id, title: item.title, status: 'focused' as const, reason: item.activationReason, characters: promptContent(item).length })),
-    ...normal.map(item => ({ id: item.id, title: item.title, status: 'activated' as const, reason: item.activationReason, characters: item.content.length })),
+    ...normal.map(item => ({ id: item.id, title: item.title, status: 'activated' as const, reason: item.activationReason, characters: promptContent(item).length })),
     ...deferred.map(item => ({ id: item.id, title: item.title, status: 'deferred' as const, reason: item.activationReason, characters: item.content.length }))
   ]
   const sessionSavedCharacters = focused.reduce((sum, item) => {
-    if (!item.activationReason.startsWith('资源会话延续：')) return sum
+    if (item.activationKind !== 'session') return sum
     return sum + Math.max(0, item.content.length - promptContent(item).length)
   }, 0)
   const estimatedSavedCharacters = deferred.reduce((sum, item) => sum + item.content.length, 0) + sessionSavedCharacters
   const sessionCandidate = focused.find(item => looksLikeOnDemandFeatureModule(item))
+  const nextRuntimeState = nextTimedRuntime({
+    current: options.runtimeState,
+    entries,
+    activated,
+    messageCount,
+    latestMessageId
+  })
+  const explicitBudgets = [...books.values()].map(book => book.tokenBudget || 0).filter(value => value > 0)
+  const estimatedUsedTokens = activated.reduce((sum, item) => sum + item.estimatedTokens, 0)
+  const engineDebug: LorebookEngineDebug = {
+    evaluatedEntries: entries.filter(item => item.enabled).length,
+    initialActivated,
+    recursiveActivated,
+    recursionSteps,
+    estimatedBudgetTokens: explicitBudgets.length ? explicitBudgets.reduce((sum, value) => sum + value, 0) : undefined,
+    estimatedUsedTokens,
+    droppedByBudget: budgetSelection.dropped.size,
+    stickyActive,
+    cooldownBlocked,
+    delayBlocked,
+    groupDropped,
+    depthInjections: depthInjections.map(item => ({ title: item.title, depth: item.depth, role: item.role }))
+  }
+
   return {
-    prompt, beforePrompt, afterPrompt, activated, focused, deferred, routingDecisions, estimatedSavedCharacters,
+    prompt,
+    beforePrompt,
+    afterPrompt,
+    beforeCharacterPrompt,
+    afterCharacterPrompt,
+    authorNoteTopPrompt,
+    authorNoteBottomPrompt,
+    beforeExamplesPrompt,
+    afterExamplesPrompt,
+    depthInjections,
+    outlets,
+    activated,
+    focused,
+    deferred,
+    routingDecisions,
+    estimatedSavedCharacters,
+    nextRuntimeState,
+    engineDebug,
     resourceSession: {
       entryId: exitRequested ? undefined : sessionCandidate?.id || (continueSession ? activeSessionEntry?.id : undefined),
       title: exitRequested ? undefined : sessionCandidate?.title || (continueSession ? activeSessionEntry?.title : undefined),

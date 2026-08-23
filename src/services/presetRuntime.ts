@@ -10,6 +10,7 @@ export interface PresetMacroContext {
   persona?: string
   description?: string
   lastChatMessage?: string
+  outlets?: Record<string, string>
 }
 
 export async function getActivePromptPreset(characterId: string): Promise<PromptPreset | undefined> {
@@ -68,6 +69,10 @@ function substitutePresetMacros(
 
     if (command === 'getvar' && parts[1]) return variables[parts[1].trim()] ?? ''
     if (command === 'random' && parts.length > 1) return randomChoice(parts.slice(1).join('::'))
+    if (command === 'outlet' && parts[1]) {
+      const requested = parts.slice(1).join('::').trim()
+      return context.outlets?.[requested] ?? ''
+    }
 
     if (Object.prototype.hasOwnProperty.call(variables, expr)) return variables[expr]
     if (Object.prototype.hasOwnProperty.call(values, expr)) return values[expr]

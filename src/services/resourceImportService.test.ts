@@ -127,3 +127,39 @@ it('多个 prompt_order 时选择覆盖 prompts 最完整的一组并保留全�
   expect(parsed.preset.promptOrderGroups).toHaveLength(2)
   expect(Array.isArray(parsed.preset.rawConfig?.prompt_order)).toBe(true)
 })
+
+it('读取 WorldBook Engine V2 的 snake_case 扩展字段与资源级设置', () => {
+  const parsed = parseLorebookJson(JSON.stringify({
+    name: 'Engine V2 世界书',
+    extensions: {
+      scan_depth: 6,
+      token_budget: 900,
+      recursive_scanning: false
+    },
+    entries: [{
+      uid: 12,
+      key: ['雨夜'],
+      content: '雨夜设定',
+      extensions: {
+        use_group_scoring: true,
+        match_persona_description: true,
+        match_character_description: true,
+        match_character_personality: true,
+        match_character_depth_prompt: true,
+        match_scenario: true,
+        match_creator_notes: true
+      }
+    }]
+  }))
+  expect(parsed.lorebook.scanDepth).toBe(6)
+  expect(parsed.lorebook.tokenBudget).toBe(900)
+  expect(parsed.lorebook.recursiveScanning).toBe(false)
+  const row = parsed.entries[0]
+  expect(row.useGroupScoring).toBe(true)
+  expect(row.matchPersonaDescription).toBe(true)
+  expect(row.matchCharacterDescription).toBe(true)
+  expect(row.matchCharacterPersonality).toBe(true)
+  expect(row.matchCharacterDepthPrompt).toBe(true)
+  expect(row.matchScenario).toBe(true)
+  expect(row.matchCreatorNotes).toBe(true)
+})
