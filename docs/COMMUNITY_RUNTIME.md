@@ -28,11 +28,46 @@ AI 原始回复
 Regex / Structured Parser / Safe Community UI
 ```
 
+
+## 1.1 Character Card 字段语义校准（V0.4.6.0）
+
+| 字段 | 默认 Runtime 用途 | 默认进 Prompt |
+| --- | --- | --- |
+| name / V3 nickname | 身份与 `{{char}}` | 是 |
+| description | 角色定义 | 是 |
+| personality | 人格 | 是 |
+| scenario | 作者建议/初始场景，可被当前 Conversation 事实覆盖 | 是 |
+| first_mes | 选中时成为第一条真实 assistant 历史 | 否（不是 system） |
+| alternate_greetings | 新聊天开场池 | 否（选中后进历史） |
+| mes_example | 示例对话 | 是，按上下文预算 |
+| creator_notes | 作者给使用者看的说明 | **V2/V3 否** |
+| system_prompt | V2/V3 system override，支持 `{{original}}` | 是 |
+| post_history_instructions | 历史后的作者最终指令 | 是 |
+| character_book | WorldBook Runtime | 按触发 |
+| regex_scripts | Regex Pipeline | 按阶段 |
+| unknown extensions/assets/source | Raw escrow / 安全兼容 | 默认否 |
+
+### V3 宏
+
+V0.4.6.0 的 Prompt/开场兼容层支持 `{{user}}`、V3 nickname 驱动的 `{{char}}`，以及常见 `{{random:A,B}} / {{pick:A,B}} / {{roll:N}} / {{// comment}}`。`{{pick}}` 对同一 Prompt 使用稳定选择；`{{random}} / {{roll}}` 在每次 Prompt 编译时按规范随机。UI 展示层不会重新执行这些随机宏。
+
+### 标准优先 + 社区兼容兜底
+
+V3 `use_regex` 有自己的 key matcher 语义。若条目存在 regex keys，则按标准关键词路径执行；对于真实旧社区导出中 `constant=true + use_regex=true + keys=[]` 的矛盾数据，兼容层保留 constant 常驻，避免旧卡整本世界书失活。该兜底只处理可识别的冲突数据，不作为新的全局协议。
+
 ## 2. 核心原则
 
 ### 2.1 原卡是内容权威
 
 角色台词、动作、心理、关系、NPC、剧情和状态字段只能来自 AI 与作者资源。本地运行时只做编排、解析、状态持久化和安全渲染，不本地续写角色内容。
+
+### 2.1.1 Community UI 状态继承边界
+
+Regex/XML 驱动的每轮状态 UI 若本轮正文已成功、但模型漏掉部分状态标签，运行时先从最近历史 `rawContent` 复用**上一轮真实 AI 已经生成过**的同名字段，再交给作者原 Regex 渲染。当前轮已有值永远优先。
+
+若历史状态仍不足以补齐，允许一次**紧凑状态字段补全**：第二次请求只携带与 UI 直接相关的作者规则、角色核心摘要、当前 ConversationState、用户本轮真实消息和第一版 AI 正文，并要求模型只返回作者声明的状态标签。第一版正文不重写，不再次发送完整聊天历史和整份世界书。补全结果只能填充合同已声明的标签，额外标签丢弃；字段仍不完整时直接降级保留正文，应用不得本地编造好感、心声、计划或剧情。
+
+合并后的作者结构写入消息 `rawContent`，用于下一轮 Regex/UI 状态连续性；用户可见正文仍以第一版真实 AI 回复为准。
 
 ### 2.2 Regex 是后处理器
 
@@ -88,6 +123,8 @@ AI Raw Reply
 ## 4. WorldBook Engine V2
 
 V0.4.5.0 开始把此前已归档的 ST/Tavo 高级字段真正接入执行层。
+
+V0.4.6.0 进一步按 Character Card V3 规范校准：`use_regex=true` 且存在 keys 时，条目按 Regex key 匹配，`constant` 不主导激活；对于真实旧社区导出中 `constant=true + use_regex=true + keys=[]` 的矛盾数据，保留 constant 常驻作为窄兼容兜底。这样既不把旧卡整本判死，也不把兼容例外升级成新的全局协议。
 
 ### 4.1 初始匹配
 

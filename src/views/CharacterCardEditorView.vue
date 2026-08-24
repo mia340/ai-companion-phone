@@ -10,7 +10,7 @@ import {
 } from '../services/characterCardService'
 import {
   parseEmbeddedUserPersonaTemplate,
-  exportCharacterAsSillyTavernV2,
+  exportCharacterCardJson,
   extractEmbeddedUserTemplate,
   parseCharacterCardFile
 } from '../services/characterCardImportService'
@@ -18,6 +18,7 @@ import { savePersona } from '../services/personaService'
 import { replaceCharacterCardResources } from '../services/characterCardResourceService'
 import { getChatSettings, saveChatSettings } from '../services/chatSettings'
 import { listResourceBindings } from '../services/resourceBindingService'
+import { detectCharacterCardFamily } from '../services/characterCardCompatibility'
 import type {
   Character,
   EmojiFrequency,
@@ -349,12 +350,13 @@ async function exportCard() {
   const regexScripts = (await db.regexScripts.toArray())
     .filter(item => item.sourceFormat === 'character-card' && (item.sourceCharacterId === row.id || item.characterId === row.id))
   const blob = new Blob([
-    exportCharacterAsSillyTavernV2(row, { lorebook, lorebookEntries, regexScripts })
+    exportCharacterCardJson(row, { lorebook, lorebookEntries, regexScripts })
   ], { type: 'application/json;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${row.name || 'character'}_SillyTavern_V2.json`
+  const family = detectCharacterCardFamily(row)
+  link.download = `${row.name || 'character'}_${family === 'v3' ? 'CharacterCard_V3' : 'SillyTavern_V2'}.json`
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -462,9 +464,9 @@ async function exportCard() {
 
           <details class="form-section advanced">
             <summary>高级角色卡规则</summary>
-            <label>角色专属补充规则<textarea v-model="form.systemPrompt" rows="5" placeholder="只写这个角色特有的规则，不要重复基础人设" /></label>
+            <label>角色 system_prompt<textarea v-model="form.systemPrompt" rows="5" placeholder="社区 V2/V3：按原卡规范覆盖默认 system prompt；可用 {{original}} 引用默认规则。原生角色仍按补充规则使用。" /></label>
             <label>回复前最终提醒<textarea v-model="form.postHistoryInstructions" rows="4" placeholder="例如：这一轮更克制，不要直接承认吃醋" /></label>
-            <label>创作者备注<textarea v-model="form.creatorNotes" rows="4" placeholder="给自己看的制作说明，也会以低优先级辅助角色理解" /></label>
+            <label>创作者备注<textarea v-model="form.creatorNotes" rows="4" placeholder="给使用者看的作者说明；社区 V2/V3 不会把 creator_notes 发送给模型。" /></label>
           </details>
 
           <div class="linked-actions">

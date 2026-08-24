@@ -70,9 +70,10 @@ import { buildLorebookPrompt } from '../services/lorebookService'
 import { composeRoleplaySystemPrompt } from '../services/promptComposer'
 import { applyRegexScripts, listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml } from '../services/regexRuntime'
 import { composeWithPromptPreset, getActivePromptPreset } from '../services/presetRuntime'
-import { buildCommunityUiPriorityPrompt, buildCommunityUiRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, enforceUserMessageOwnershipInRichHtml, regexProducesRichUi, sanitizeCommunityUiText, tryRepairCommunityUiLocally } from '../services/communityUiRuntime'
+import { buildCommunityUiPriorityPrompt, buildCommunityUiRepairPrompt, buildCommunityUiStateRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, enforceUserMessageOwnershipInRichHtml, mergeCommunityUiStateRepair, regexProducesRichUi, sanitizeCommunityUiText, tryCarryForwardCommunityUiState, tryRepairCommunityUiLocally } from '../services/communityUiRuntime'
 import { resolveCharacterRuntimeProfile } from '../services/characterRuntimeProfile'
-import { renderRoleplayText } from '../services/textMacroService'
+import { buildCharacterRuntimeManifest, characterMacroName, detectCharacterCardFamily } from '../services/characterCardCompatibility'
+import { renderCharacterCardPromptText, renderRoleplayText } from '../services/textMacroService'
 import { buildPresentationOverridePrompt, estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
 import { extractRoleCardUiHints, parseRoleCardUi, resolvePresenceFromRoleCardScene, roleCardUiToConversationPatch } from '../services/roleCardUiService'
 import { analyzePromptSections, buildRuleInfluences, buildTruncationNotes, estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
@@ -1279,7 +1280,8 @@ async function requestAssistantReply(options?: {
     const persona = activePersona.value ?? await getPersonaForChat(settings)
     activePersona.value = persona
     const activePreset = await getActivePromptPreset(activeCharacter.id)
-    const regexMacros = { user: persona.name, char: activeCharacter.name }
+    const macroCharacterName = characterMacroName(activeCharacter)
+    const regexMacros = { user: persona.name, char: macroCharacterName }
     const [activeAssistantRegex, activeUserRegex, activeWorldRegex, activePromptRegex] = await Promise.all([
       listActiveRegexScripts(activeCharacter.id, 'assistant-output'),
       listActiveRegexScripts(activeCharacter.id, 'user-input'),
@@ -1459,7 +1461,7 @@ async function requestAssistantReply(options?: {
         communityUiContract,
         openingMode: activeConversation.openingMode
       }), activePreset, {
-        char: activeCharacter.name,
+        char: characterMacroName(activeCharacter),
         user: persona.name,
         scenario: activeCharacter.scenario || '',
         personality: activeCharacter.cardPersonality || activeCharacter.persona || '',
@@ -1530,6 +1532,7 @@ async function requestAssistantReply(options?: {
         const systemPrompt = chatTurnContentText(request.messages[0]?.content || '')
         const recentMessages = request.messages.slice(1).map(turn => ({ role: turn.role, content: chatTurnContentText(turn.content) }))
         const promptSections = analyzePromptSections(systemPrompt, recentMessages)
+        const cardRuntime = buildCharacterRuntimeManifest(activeCharacter)
         try {
           debugTrace = await savePromptDebugTrace({
             conversationId: activeConversation.id,
@@ -1543,6 +1546,16 @@ async function requestAssistantReply(options?: {
             activatedLorebook: lorebook.activated.map(item => ({ id: item.id, title: item.title, reason: item.activationReason })),
             resourceRouting: lorebook.routingDecisions,
             estimatedSavedCharacters: lorebook.estimatedSavedCharacters,
+            characterCardRuntime: {
+              family: cardRuntime.family,
+              sourceLabel: cardRuntime.sourceLabel,
+              macroCharacterName: cardRuntime.macroCharacterName,
+              systemPromptMode: cardRuntime.systemPromptMode,
+              postHistoryMode: cardRuntime.postHistoryMode,
+              creatorNotesInPrompt: false,
+              greetingCount: cardRuntime.greetings.length,
+              notes: cardRuntime.notes
+            },
             lorebookEngine: lorebook.engineDebug,
             memoryHits: memoryHitDetails.map(item => ({ id: item.memory.id, content: item.memory.content, importance: item.memory.importance, layer: item.memory.layer, score: item.score, reason: item.reasons.join('；') })),
             imageCount: includeVisionCount(request),
@@ -1644,7 +1657,7 @@ async function requestAssistantReply(options?: {
     const initialAiResponse = response
     let parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
     const applyVisibleMacrosToParsedOutput = () => {
-      const replace = (value?: string) => renderRoleplayText(value, persona.name, activeCharacter.name)
+      const replace = (value?: string) => renderRoleplayText(value, persona.name, macroCharacterName)
       parsedOutput = {
         ...parsedOutput,
         visibleText: replace(parsedOutput.visibleText) || '',
@@ -1680,76 +1693,174 @@ async function requestAssistantReply(options?: {
     applyVisibleMacrosToParsedOutput()
     let regexDisplay = applyRegexScripts(response.text, displayAssistantRegex, regexMacros)
     let richReplyHtml = !presentationHidesCommunityUi && (regexDisplay.rich || looksLikeRichHtml(regexDisplay.text))
-      ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '')
+      ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, macroCharacterName) || '')
       : ''
     let communityUiText = !presentationHidesCommunityUi && communityUiContract.active && !richReplyHtml
-      ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, activeCharacter.name) || '')
+      ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, macroCharacterName) || '')
       : ''
 
+    let communityUiValidationRaw = response.text
     const communityUiConforms = () => communityUiOutputConforms({
       contract: communityUiContract,
-      rawText: response.text,
+      rawText: communityUiValidationRaw,
       renderedText: richReplyHtml || communityUiText || regexDisplay.text,
       appliedRegex: regexDisplay.applied
     })
 
     if (communityUiContract.active && !communityUiConforms() && !signal.aborted) {
-      const localRepair = tryRepairCommunityUiLocally(communityUiContract, response.text)
-      if (localRepair.repaired) {
-        richReplyHtml = renderRoleplayText(normalizeRichHtml(localRepair.text), persona.name, activeCharacter.name) || ''
-        communityUiText = ''
-        parsedOutput.warnings.push(localRepair.reason)
-      } else {
-        // 只有本地无法确认“只是格式问题”时，才允许一次模型纠偏。
-        const uiRepairRequest = createRequest(visionUsed)
-        uiRepairRequest.temperature = Math.min(uiRepairRequest.temperature ?? 0.8, 0.35)
-        uiRepairRequest.messages = [
-          ...uiRepairRequest.messages,
-          { role: 'system', content: buildCommunityUiRepairPrompt(communityUiContract, response.text) }
-        ]
-        try {
-          response = await provider.chat(uiRepairRequest)
-          collectTokenUsage(response)
-          parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
-          applyVisibleMacrosToParsedOutput()
-          regexDisplay = applyRegexScripts(response.text, displayAssistantRegex, regexMacros)
-          richReplyHtml = !presentationHidesCommunityUi && (regexDisplay.rich || looksLikeRichHtml(regexDisplay.text))
-            ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '')
-            : ''
-          communityUiText = !presentationHidesCommunityUi && communityUiContract.active && !richReplyHtml
-            ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, activeCharacter.name) || '')
-            : ''
-          if (!communityUiConforms()) {
-            const repairedAfterAi = tryRepairCommunityUiLocally(communityUiContract, response.text)
-            if (repairedAfterAi.repaired) {
-              richReplyHtml = renderRoleplayText(normalizeRichHtml(repairedAfterAi.text), persona.name, activeCharacter.name) || ''
-              communityUiText = ''
-              parsedOutput.warnings.push(repairedAfterAi.reason.replace('未追加第二次 AI 调用', '使用一次 AI 内容纠偏后由本地编译完成'))
-            }
-          }
-        } catch (uiRepairError) {
-          if (isAbortError(uiRepairError)) throw uiRepairError
-          if (isTokenLimitError(uiRepairError)) {
-            parsedOutput.warnings.push('社区 UI 自动纠偏因 Token / 上下文 / 额度限制未完成；第一版真实 AI 回复已保留。')
-            noticeMessage.value = 'AI 已完成第一版回复，但社区 UI 格式纠偏因 Token / 上下文 / 额度限制未完成；正文已保留，未使用本地补写。'
-          } else {
-            parsedOutput.warnings.push(uiRepairError instanceof Error ? `社区 UI 自动纠偏失败：${uiRepairError.message}` : '社区 UI 自动纠偏失败。')
-          }
+      // Regex/XML 型状态 UI 最常见的失败不是“正文没生成”，而是模型偶尔漏掉状态字段。
+      // 先尝试只复用最近历史里 AI 自己已经生成过的同名字段；当前正文与当前字段始终优先。
+      // 这是 UI 状态延续，不是本地编剧情；合并后的作者结构会写入 rawContent，供后续 Regex/UI 状态连续性使用。
+      const previousCommunityRawOutputs = [...messages.value]
+        .filter(item => item.senderId !== 'user' && !item.recalledAt)
+        .reverse()
+        .map(item => item.rawContent || item.content)
+        .filter((item): item is string => Boolean(item?.trim()))
+        .slice(0, 8)
+      const carriedState = tryCarryForwardCommunityUiState(communityUiContract, response.text, previousCommunityRawOutputs)
+      if (carriedState.repaired) {
+        const carriedRegex = applyRegexScripts(carriedState.text, displayAssistantRegex, regexMacros)
+        const carriedRich = !presentationHidesCommunityUi && (carriedRegex.rich || looksLikeRichHtml(carriedRegex.text))
+          ? (renderRoleplayText(normalizeRichHtml(carriedRegex.text), persona.name, macroCharacterName) || '')
+          : ''
+        const carriedText = !presentationHidesCommunityUi && communityUiContract.active && !carriedRich
+          ? (renderRoleplayText(sanitizeCommunityUiText(carriedRegex.text), persona.name, macroCharacterName) || '')
+          : ''
+        const carriedConforms = communityUiOutputConforms({
+          contract: communityUiContract,
+          rawText: carriedState.text,
+          renderedText: carriedRich || carriedText || carriedRegex.text,
+          appliedRegex: carriedRegex.applied
+        })
+        if (carriedConforms) {
+          communityUiValidationRaw = carriedState.text
+          regexDisplay = carriedRegex
+          richReplyHtml = carriedRich
+          communityUiText = carriedText
+          parsedOutput.warnings.push(carriedState.reason)
         }
       }
+
+      if (!communityUiConforms()) {
+        const localRepair = tryRepairCommunityUiLocally(communityUiContract, response.text)
+        if (localRepair.repaired) {
+          communityUiValidationRaw = localRepair.text
+          richReplyHtml = renderRoleplayText(normalizeRichHtml(localRepair.text), persona.name, macroCharacterName) || ''
+          communityUiText = ''
+          parsedOutput.warnings.push(localRepair.reason)
+        } else {
+          // Regex/XML UI 只缺作者状态字段时，第二次调用必须是紧凑“状态数据补全”，不能重新跑整套角色 Prompt / 历史并重写剧情。
+          if (communityUiContract.mode === 'regex-html' && communityUiContract.requiredTagNames.length) {
+            const tagNeedles = communityUiContract.requiredTagNames.map(name => name.toLocaleLowerCase())
+            const relevantAuthorRules = lorebook.activated
+              .map(entry => ({
+                content: applyWorldRegex(entry.content || ''),
+                score: tagNeedles.reduce((count, tag) => count + ((entry.content || '').toLocaleLowerCase().includes(tag) ? 1 : 0), 0)
+                  + (entry.activationReason.includes('作者每轮') ? 8 : 0)
+              }))
+              .filter(item => item.score > 0)
+              .sort((a, b) => b.score - a.score)
+              .map(item => item.content)
+              .join('\n\n')
+              .slice(0, 6000)
+            const roleContext = [
+              activeCharacter.cardDescription || activeCharacter.persona || activeCharacter.identity || '',
+              activeCharacter.cardPersonality || '',
+              activeCharacter.relationship ? `与用户关系：${activeCharacter.relationship}` : '',
+              persona.description || persona.identity ? `用户 Persona：${persona.description || persona.identity}` : ''
+            ].filter(Boolean).join('\n\n').slice(0, 4000)
+            const compactRepairPrompt = buildCommunityUiStateRepairPrompt({
+              contract: communityUiContract,
+              currentOutput: initialAiResponse.text,
+              authorRules: relevantAuthorRules,
+              roleContext,
+              conversationState: buildConversationStatePrompt(conversationState.value),
+              latestUserText
+            })
+            const uiRepairRequest: ChatRequest = {
+              model: currentModelSettings.model,
+              temperature: Math.min(currentModelSettings.temperature ?? 0.8, 0.25),
+              signal,
+              messages: [{ role: 'system', content: compactRepairPrompt }]
+            }
+            try {
+              const repairResponse = await provider.chat(uiRepairRequest)
+              collectTokenUsage(repairResponse)
+              const mergedRepair = mergeCommunityUiStateRepair(communityUiContract, initialAiResponse.text, repairResponse.text)
+              if (mergedRepair.repaired) {
+                const repairedRegex = applyRegexScripts(mergedRepair.text, displayAssistantRegex, regexMacros)
+                const repairedRich = !presentationHidesCommunityUi && (repairedRegex.rich || looksLikeRichHtml(repairedRegex.text))
+                  ? (renderRoleplayText(normalizeRichHtml(repairedRegex.text), persona.name, macroCharacterName) || '')
+                  : ''
+                const repairedText = !presentationHidesCommunityUi && communityUiContract.active && !repairedRich
+                  ? (renderRoleplayText(sanitizeCommunityUiText(repairedRegex.text), persona.name, macroCharacterName) || '')
+                  : ''
+                const repairedConforms = communityUiOutputConforms({
+                  contract: communityUiContract,
+                  rawText: mergedRepair.text,
+                  renderedText: repairedRich || repairedText || repairedRegex.text,
+                  appliedRegex: repairedRegex.applied
+                })
+                if (repairedConforms) {
+                  communityUiValidationRaw = mergedRepair.text
+                  regexDisplay = repairedRegex
+                  richReplyHtml = repairedRich
+                  communityUiText = repairedText
+                  parsedOutput.warnings.push(`Community UI 紧凑状态补全：第二次 AI 仅补 ${mergedRepair.addedTags.length} 个作者状态字段，第一版正文未重写。`)
+                }
+              }
+            } catch (uiRepairError) {
+              if (isAbortError(uiRepairError)) throw uiRepairError
+              if (isTokenLimitError(uiRepairError)) {
+                parsedOutput.warnings.push('社区 UI 状态补全因 Token / 上下文 / 额度限制未完成；第一版真实 AI 回复已保留。')
+                noticeMessage.value = 'AI 已完成第一版回复，但社区 UI 状态补全未完成；正文已保留，未使用本地补写。'
+              } else {
+                parsedOutput.warnings.push(uiRepairError instanceof Error ? `社区 UI 状态补全失败：${uiRepairError.message}` : '社区 UI 状态补全失败。')
+              }
+            }
+          } else {
+            // 非 Regex/XML 合同沿用一次内容纠偏，但不增加额外本地角色内容。
+            const uiRepairRequest = createRequest(visionUsed)
+            uiRepairRequest.temperature = Math.min(uiRepairRequest.temperature ?? 0.8, 0.35)
+            uiRepairRequest.messages = [
+              ...uiRepairRequest.messages,
+              { role: 'system', content: buildCommunityUiRepairPrompt(communityUiContract, response.text) }
+            ]
+            try {
+              const repairResponse = await provider.chat(uiRepairRequest)
+              collectTokenUsage(repairResponse)
+              const repairedAfterAi = tryRepairCommunityUiLocally(communityUiContract, repairResponse.text)
+              if (repairedAfterAi.repaired) {
+                communityUiValidationRaw = repairedAfterAi.text
+                richReplyHtml = renderRoleplayText(normalizeRichHtml(repairedAfterAi.text), persona.name, macroCharacterName) || ''
+                communityUiText = ''
+                parsedOutput.warnings.push(repairedAfterAi.reason.replace('未追加第二次 AI 调用', '使用一次 AI 内容纠偏后由本地编译完成'))
+              }
+            } catch (uiRepairError) {
+              if (isAbortError(uiRepairError)) throw uiRepairError
+              if (isTokenLimitError(uiRepairError)) {
+                parsedOutput.warnings.push('社区 UI 自动纠偏因 Token / 上下文 / 额度限制未完成；第一版真实 AI 回复已保留。')
+              } else {
+                parsedOutput.warnings.push(uiRepairError instanceof Error ? `社区 UI 自动纠偏失败：${uiRepairError.message}` : '社区 UI 自动纠偏失败。')
+              }
+            }
+          }
+        }
+    }
     }
 
     if (communityUiContract.active && !communityUiConforms()) {
       // 格式纠偏没有成功时，恢复第一版真实 AI 回复。UI 可以降级，正文不能被静默丢弃。
       response = initialAiResponse
+      communityUiValidationRaw = response.text
       parsedOutput = parseCompanionOutput(response.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
       applyVisibleMacrosToParsedOutput()
       regexDisplay = applyRegexScripts(response.text, displayAssistantRegex, regexMacros)
       richReplyHtml = !presentationHidesCommunityUi && (regexDisplay.rich || looksLikeRichHtml(regexDisplay.text))
-        ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, activeCharacter.name) || '')
+        ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, macroCharacterName) || '')
         : ''
       communityUiText = !presentationHidesCommunityUi && !richReplyHtml
-        ? (renderRoleplayText(sanitizeCommunityUiText(response.text), persona.name, activeCharacter.name) || '')
+        ? (renderRoleplayText(sanitizeCommunityUiText(response.text), persona.name, macroCharacterName) || '')
         : ''
       parsedOutput.warnings.push('社区 UI 未完全匹配原卡格式：已保留第一版真实 AI 回复，未因 UI/Regex 失败丢弃正文。')
     }
@@ -1895,7 +2006,7 @@ async function requestAssistantReply(options?: {
       if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], ...patch }
       noticeMessage.value = `已生成第 ${activeAlternativeIndex + 1} 个候选回复。`
     } else if (richReplyHtml) {
-      await saveRichAssistantMessage({ html: richReplyHtml, rawContent: response.text, provider: providerId, model: usedModel, source: regexDisplay.applied.length ? 'regex' : 'worldbook-ui', replaceMessageId: streamSession.messageId, proactiveSource: options?.proactiveSource })
+      await saveRichAssistantMessage({ html: richReplyHtml, rawContent: communityUiValidationRaw, provider: providerId, model: usedModel, source: regexDisplay.applied.length ? 'regex' : 'worldbook-ui', replaceMessageId: streamSession.messageId, proactiveSource: options?.proactiveSource })
       streamSession.messageId = undefined
     } else if (communityUiContract.active) {
       const preserved = communityUiText || sanitizeCommunityUiText(response.text)
@@ -1908,7 +2019,7 @@ async function requestAssistantReply(options?: {
         replaceMessageId: streamSession.messageId,
         roleCardUi: visibleRoleCardUi,
         proactiveSource: options?.proactiveSource,
-        rawContent: response.text
+        rawContent: communityUiValidationRaw
       })
       streamSession.messageId = undefined
     } else if (useStreaming) {
@@ -2319,9 +2430,13 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
 
   const rawGreeting = greeting.trim()
   const userName = activePersona.value?.name?.trim() || '你'
-  const macroResolved = rawGreeting
-    .replace(/\{\{user\}\}/gi, userName)
-    .replace(/\{\{char\}\}/gi, character.value.name)
+  const macroResolved = renderCharacterCardPromptText(
+    rawGreeting,
+    userName,
+    characterMacroName(character.value),
+    `${conversation.value.id}:greeting:${greetingIndex}`,
+    { angleCharacterAliases: detectCharacterCardFamily(character.value) === 'v3' }
+  ) || rawGreeting
   const plainSource = normalizeCommunityPlainText(macroResolved)
   const greetingRuntimeProfile = chatSettings.value
     ? resolveCharacterRuntimeProfile({ character: character.value, settings: chatSettings.value })
@@ -2340,7 +2455,7 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
   const greetingDisplayRegex = greetingPresentationHidesUi
     ? greetingAssistantRegex.filter(item => !regexProducesRichUi(item))
     : greetingAssistantRegex
-  const regexDisplay = applyRegexScripts(macroResolved, greetingDisplayRegex, { user: userName, char: character.value.name })
+  const regexDisplay = applyRegexScripts(macroResolved, greetingDisplayRegex, { user: userName, char: characterMacroName(character.value) })
   const rawIsRich = regexDisplay.rich || looksLikeRichHtml(regexDisplay.text)
   let isRich = !greetingPresentationHidesUi && rawIsRich
   let displayText = isRich ? regexDisplay.text : normalizeCommunityPlainText(regexDisplay.text)
@@ -2473,6 +2588,15 @@ async function selectGreetingByIndex(index: number, source: 'picker' | 'settings
     return
   }
   await applyCharacterGreeting(greeting, index, source)
+}
+
+async function useRandomGreeting() {
+  if (!availableGreetings.value.length) {
+    noticeMessage.value = '当前角色没有可用开场。'
+    return
+  }
+  const index = Math.floor(Math.random() * availableGreetings.value.length)
+  await selectGreetingByIndex(index, 'picker')
 }
 
 async function switchCharacterGreeting(greeting: string) {
@@ -3168,6 +3292,7 @@ onUnmounted(() => {
           :panel-style="panelStyle"
           @select="selectGreetingByIndex($event, 'picker')"
           @free="useFreeOpening"
+          @random="useRandomGreeting"
           @close="activePanel = null"
         />
 

@@ -3,6 +3,7 @@ import type {
   CharacterExampleDialogue,
   ChatSettings
 } from '../types/domain'
+import { isImportedCommunityCharacter } from './characterCardCompatibility'
 
 function compact(value?: string) {
   return value?.trim() || ''
@@ -77,11 +78,8 @@ export function buildCharacterCardPrompt(
     .map(value => compact(value))
     .filter(Boolean)
     .join(' ')
-  const importedCommunityCard = Boolean(
-    (character.importFormat && character.importFormat !== 'native') ||
-    character.sourceSpec ||
-    compact(character.cardDescription) ||
-    compact(character.cardPersonality)
+  const importedCommunityCard = isImportedCommunityCharacter(character) || Boolean(
+    compact(character.cardDescription) || compact(character.cardPersonality)
   )
 
   // 社区导入卡只把作者原始字段送进 Prompt。本地阅读器为了好看而建立的年龄/职业/关系/喜好等派生字段
@@ -121,8 +119,6 @@ export function buildCharacterCardPrompt(
     compact(character.worldBookHint) ? `原卡关联世界书提示：${character.worldBookHint}` : '',
     modeRule,
     ...behaviorRules,
-    compact(character.systemPrompt) ? `角色专属补充规则：${character.systemPrompt}` : '',
-    compact(character.creatorNotes) ? `创作者备注：${character.creatorNotes}` : ''
   ].filter(Boolean).join('\n')
 }
 

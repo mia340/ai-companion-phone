@@ -4,6 +4,14 @@
 > 当前使用说明请看 `README.md`，当前状态请看 `PROJECT_STATUS.md`，当前架构请看 `ARCHITECTURE.md`。  
 > 这里的旧版本描述保持历史语境，不代表当前运行状态；数据库版本、限制和实现边界以当前文档为准。
 
+## V0.4.6.0 · Character Card Compatibility Alignment
+
+本轮不推翻现有 Conversation / ResourceBinding / WorldBook Engine，而是在 Raw Card 与现有 Runtime 之间增加薄兼容层。通用底层优先跟随 Character Card V2/V3 与成熟社区实践；手机呈现、Presence、Resource Session、Prompt Debug、Safe Community UI 继续作为本项目特色。V2/V3 `creator_notes` 不再进入 Prompt，`system_prompt` / `post_history_instructions` 使用 override/`{{original}}` 语义，V3 nickname 与常见宏进入 Prompt/开场编译；V3 导入后再导出不再被强制降为 V2。Regex/XML 每轮 UI 增加“历史真实状态字段继承 + 紧凑状态补全”兜底：正文成功后不再重复完整角色生成；第二次 AI 仅补作者声明状态标签，第一版正文保持不变。
+
+## V0.4.5.1 · WorldBook V2 兼容修复
+
+修正部分 V3 社区卡同时设置 `constant=true` 与 `use_regex=true` 时，常驻世界书被错误排除的问题。该错误会表现为 Prompt Debug 中“评估条目 > 0，但初始激活 = 0”，并进一步导致作者状态栏/Regex UI 无法继续。同步修复资源库移动端超宽，并将协议级测试与普通用户验收分离。
+
 ## V0.4.5.0 · WorldBook Engine V2 第一阶段
 
 - 运行时修正 ST/Tavo selectiveLogic：0 AND ANY、1 NOT ALL、2 NOT ANY、3 AND ALL。

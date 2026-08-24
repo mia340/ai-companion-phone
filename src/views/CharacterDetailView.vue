@@ -7,6 +7,7 @@ import { createSingleConversation, deleteCharacterSafely, getOrCreateSingleConve
 import { listResourceBindings } from '../services/resourceBindingService'
 import { buildCharacterCardLocalIndex, type CharacterCardLocalIndex } from '../services/characterCardIndexService'
 import { renderRoleplayText } from '../services/textMacroService'
+import { characterMacroName } from '../services/characterCardCompatibility'
 import type { Character, Conversation } from '../types/domain'
 
 const route = useRoute()
@@ -36,7 +37,7 @@ function isImageAvatar(avatar?: string) {
 
 function renderVisible(value?: string | number) {
   if (value === undefined || value === null || String(value).trim() === '') return ''
-  return renderRoleplayText(String(value), boundPersonaName.value || '你', character.value?.name) || String(value)
+  return renderRoleplayText(String(value), boundPersonaName.value || '你', character.value ? characterMacroName(character.value) : undefined) || String(value)
 }
 
 function showList(values?: string[]) {
@@ -248,6 +249,13 @@ onMounted(loadCharacter)
             <span v-if="cardIndex.regexCount">Regex {{ cardIndex.regexCount }}</span>
           </div>
           <small v-if="cardIndex.sourceFileName" class="reader-file">来源：{{ cardIndex.sourceFileName }}</small>
+          <div v-if="cardIndex.compatibilityNotes.length" class="reader-compat">
+            <b>兼容层</b>
+            <span>宏角色名：{{ cardIndex.macroCharacterName }}</span>
+            <span>system_prompt：{{ cardIndex.systemPromptMode }}</span>
+              <span>post_history：{{ cardIndex.postHistoryMode }}</span>
+            <small v-for="note in cardIndex.compatibilityNotes" :key="note">{{ note }}</small>
+          </div>
 
           <details v-for="section in cardIndex.sections" :key="section.key" class="reader-detail" :open="section.key === 'description'">
             <summary>{{ section.label }}</summary>
@@ -587,7 +595,7 @@ onMounted(loadCharacter)
 
 
 
-.card-reader-card{display:grid;gap:10px}.reader-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.reader-head h2{margin:0 0 5px}.reader-head p{margin:0;color:#8f7280;line-height:1.6}.reader-head>span{flex:0 0 auto;border-radius:999px;background:#eef8f1;color:#4f8065;padding:5px 9px;font-size:11px;font-weight:800}.reader-file{color:#9b7e8a;word-break:break-all}.reader-detail{border-radius:14px;background:#fff8fb;border:1px solid #e2eef7;padding:10px 12px}.reader-detail summary,.reader-nested summary{cursor:pointer;color:#628bad;font-weight:800}.reader-detail pre,.reader-nested pre{margin:10px 0 0;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.7;color:#654b56}.reader-detail p{color:#856a76;line-height:1.6}.reader-nested{margin-top:9px;border-top:1px dashed #ead8e0;padding-top:9px}
+.card-reader-card{display:grid;gap:10px}.reader-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.reader-head h2{margin:0 0 5px}.reader-head p{margin:0;color:#8f7280;line-height:1.6}.reader-head>span{flex:0 0 auto;border-radius:999px;background:#eef8f1;color:#4f8065;padding:5px 9px;font-size:11px;font-weight:800}.reader-compat{display:grid;gap:5px;margin:10px 0;padding:10px 12px;border-radius:13px;background:#f1f8ff;color:#607d98}.reader-compat b{color:#4f7599}.reader-compat span,.reader-compat small{font-size:11px;line-height:1.5}.reader-file{color:#9b7e8a;word-break:break-all}.reader-detail{border-radius:14px;background:#fff8fb;border:1px solid #e2eef7;padding:10px 12px}.reader-detail summary,.reader-nested summary{cursor:pointer;color:#628bad;font-weight:800}.reader-detail pre,.reader-nested pre{margin:10px 0 0;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.7;color:#654b56}.reader-detail p{color:#856a76;line-height:1.6}.reader-nested{margin-top:9px;border-top:1px dashed #ead8e0;padding-top:9px}
 
 .conversation-card{display:grid;gap:10px}.conversation-card>p{margin:0;color:#71839a;font-size:12px;line-height:1.65}.conversation-row{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px;border:0;border-bottom:1px solid rgba(78,111,150,.12);background:transparent;color:#40546b;text-align:left}.conversation-row span{display:flex;min-width:0;flex-direction:column;gap:4px}.conversation-row b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.conversation-row small,.conversation-row time{color:#8da0b6;font-size:11px}.conversation-row time{flex:0 0 auto}
 </style>

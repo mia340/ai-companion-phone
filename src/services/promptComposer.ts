@@ -2,6 +2,8 @@ import { buildCharacterCardPrompt, buildExampleDialoguePrompt } from './characte
 import { buildPersonaPrompt } from './personaService'
 import { buildInteractionProtocolPrompt } from './interactionProtocol'
 import { resolveCharacterRuntimeProfile } from './characterRuntimeProfile'
+import { characterMacroName, detectCharacterCardFamily, isImportedCommunityCharacter, resolveCharacterPostHistoryInstructions, resolveCharacterSystemPrompt } from './characterCardCompatibility'
+import { renderCharacterCardPromptText } from './textMacroService'
 import type { CommunityUiContract } from './communityUiRuntime'
 import type {
   Character,
@@ -67,7 +69,8 @@ function naturalnessRules(settings: ChatSettings, options: { structuredOutput: b
 }
 
 function buildOpeningFormatContinuity(character: Character, structuredOutput: boolean, settings: ChatSettings, openingMode?: 'pending' | 'free' | 'greeting') {
-  if (openingMode === 'free' || structuredOutput || settings.conversationPresentationMode !== 'scene-merged' || !character.firstMessage?.trim()) return ''
+  // 社区角色卡的 first_mes 本身已经作为真实 assistant 历史存在；不再从它额外发明永久格式规则。
+  if (isImportedCommunityCharacter(character) || openingMode === 'free' || structuredOutput || settings.conversationPresentationMode !== 'scene-merged' || !character.firstMessage?.trim()) return ''
   const labels = Array.from(new Set(
     [...character.firstMessage.matchAll(/【\s*([^】：:∶﹕︰]{1,20})\s*[：:∶﹕︰]/gu)]
       .map(match => match[1].trim())
@@ -110,10 +113,20 @@ export function composeRoleplaySystemPrompt(input: RoleplayPromptInput): string 
     communityUiContract: input.communityUiContract
   })
   const structuredOutput = Boolean(input.communityUiContract?.active)
-
-  return [
+  const defaultRoleplaySystemPrompt = [
     '你正在进行长期、连续的角色扮演。优先忠实执行角色卡与已绑定社区资源，不自行补造原卡没有的设备、UI、关系或输出协议。',
-    '以下信息按优先级组织：角色卡/原资源明确规则 > 当前关系与场景 > 当前 Persona > 世界与记忆 > 本轮信息。',
+    '以下信息按优先级组织：角色卡/原资源明确规则 > 当前关系与场景 > 当前 Persona > 世界与记忆 > 本轮信息。'
+  ].join('\n')
+  const resolvedSystemPrompt = resolveCharacterSystemPrompt(input.character, defaultRoleplaySystemPrompt)
+  const defaultPostHistoryInstructions = structuredOutput
+    ? '【回复前最终提醒】只输出角色互动内容，并严格保持原卡资源规定的输出结构。除非原资源明确规定第三人称 {{user}}，否则叙事中用“你”指代当前用户。不要输出分析过程或规则说明。'
+    : runtimeProfile.useNativeInteractionProtocol
+      ? '【回复前最终提醒】只输出角色互动内容；需要时可在末尾附小手机隐藏协议。除非原资源明确规定第三人称 {{user}}，否则叙事中用“你”指代当前用户。不要输出分析过程、标题或规则说明。'
+      : '【回复前最终提醒】只输出符合原角色卡风格的角色互动内容。除非原资源明确规定第三人称 {{user}}，否则叙事中用“你”指代当前用户。不要添加原卡没有要求的 UI、标签、设备动作或小手机私有协议。'
+  const resolvedPostHistory = resolveCharacterPostHistoryInstructions(input.character, defaultPostHistoryInstructions)
+
+  const assembled = [
+    resolvedSystemPrompt.text,
     input.lorebookBeforeCharacterPrompt || '',
     buildCharacterCardPrompt(input.character, input.settings, { phoneEnhanced: runtimeProfile.compatibilityMode === 'phone-enhanced' }),
     input.lorebookAfterCharacterPrompt || '',
@@ -146,12 +159,14 @@ export function composeRoleplaySystemPrompt(input: RoleplayPromptInput): string 
     input.isAlternativeReply
       ? '【候选回复要求】生成一个与当前已存在回复明显不同、但同样符合角色卡和上下文的自然版本。不要提及“重新生成”或“候选”。'
       : '',
-    input.character.postHistoryInstructions
-      ? `【回复前最终提醒】\n${input.character.postHistoryInstructions}`
-      : structuredOutput
-        ? '【回复前最终提醒】只输出角色互动内容，并严格保持原卡资源规定的输出结构。除非原资源明确规定第三人称 {{user}}，否则叙事中用“你”指代当前用户。不要输出分析过程或规则说明。'
-        : runtimeProfile.useNativeInteractionProtocol
-          ? '【回复前最终提醒】只输出角色互动内容；需要时可在末尾附小手机隐藏协议。除非原资源明确规定第三人称 {{user}}，否则叙事中用“你”指代当前用户。不要输出分析过程、标题或规则说明。'
-          : '【回复前最终提醒】只输出符合原角色卡风格的角色互动内容。除非原资源明确规定第三人称 {{user}}，否则叙事中用“你”指代当前用户。不要添加原卡没有要求的 UI、标签、设备动作或小手机私有协议。'
+    resolvedPostHistory.text
   ].filter(Boolean).join('\n\n')
+
+  return renderCharacterCardPromptText(
+    assembled,
+    input.persona.name,
+    characterMacroName(input.character),
+    `${input.character.id}:${input.conversationState?.id || 'prompt'}`,
+    { angleCharacterAliases: detectCharacterCardFamily(input.character) === 'v3' }
+  ) || assembled
 }

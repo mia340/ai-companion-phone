@@ -1,5 +1,6 @@
 import { db } from '../db/database'
 import { listResourceBindings } from './resourceBindingService'
+import { buildCharacterRuntimeManifest } from './characterCardCompatibility'
 import type { Character, LorebookEntry } from '../types/domain'
 
 export interface CardReaderSection {
@@ -24,6 +25,10 @@ export interface CharacterCardLocalIndex {
   lorebookCount: number
   regexCount: number
   characterDefinitionEntries: CardReaderEntry[]
+  compatibilityNotes: string[]
+  macroCharacterName: string
+  systemPromptMode: string
+  postHistoryMode: string
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -67,7 +72,8 @@ export async function buildCharacterCardLocalIndex(character: Character): Promis
   push('scenario', 'scenario · 场景 / 背景', data.scenario ?? character.scenario)
   push('system_prompt', 'system_prompt · 作者系统规则', data.system_prompt ?? character.systemPrompt)
   push('post_history_instructions', 'post_history_instructions · 回复前规则', data.post_history_instructions ?? character.postHistoryInstructions)
-  push('creator_notes', 'creator_notes · 作者备注', data.creator_notes ?? character.creatorNotes)
+  const manifest = buildCharacterRuntimeManifest(character)
+  push('creator_notes', 'creator_notes · 作者备注（仅供阅读，不进 Prompt）', manifest.creatorNotesDisplay)
   push('mes_example', 'mes_example · 示例对话原文', data.mes_example)
 
   const rawText = archive?.rawText || JSON.stringify(archive?.rawJson || {})
@@ -92,6 +98,10 @@ export async function buildCharacterCardLocalIndex(character: Character): Promis
     greetingCount: (character.firstMessage?.trim() ? 1 : 0) + (character.alternateGreetings?.filter(item => item.trim()).length || 0),
     lorebookCount: lorebookIds.size,
     regexCount: regexIds.size,
-    characterDefinitionEntries
+    characterDefinitionEntries,
+    compatibilityNotes: manifest.notes,
+    macroCharacterName: manifest.macroCharacterName,
+    systemPromptMode: manifest.systemPromptMode,
+    postHistoryMode: manifest.postHistoryMode
   }
 }

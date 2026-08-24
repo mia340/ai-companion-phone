@@ -1,14 +1,14 @@
 # AI Companion Phone Docs
 
-当前文档版本：**V0.4.5.0**
+当前文档版本：**V0.4.6.0**
 
 ```text
-应用：V0.4.5.0
+应用：V0.4.6.0
 IndexedDB：V14
 Backup：V9
 ```
 
-V0.4.5.0 进入 WorldBook Engine V2 第一阶段：加入生成前预算、递归扫描、Timed Effects、分组选择、深度/位置注入与调试链；数据库版本保持不变。
+V0.4.6.0 是 **Character Card Compatibility Alignment**：底层读取尽量向 Character Card V2/V3 与成熟社区前端对齐，同时保留小手机的多会话、场景呈现、Prompt Debug、资源会话与 Safe Community UI。数据库版本保持不变。
 
 ## 文档怎么读
 

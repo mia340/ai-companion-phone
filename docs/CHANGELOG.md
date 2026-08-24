@@ -2,6 +2,27 @@
 
 > 精简版本变化。完整逐版本说明见 `RELEASE_HISTORY.md`。
 
+## V0.4.6.0 · Character Card Compatibility Alignment
+
+- 新增轻量 Character Compatibility Layer / Runtime Manifest，不升级数据库；
+- V2/V3 `creator_notes` 退出 Prompt，保留阅读展示；
+- V2/V3 `system_prompt` / `post_history_instructions` 支持 override + `{{original}}`；
+- V3 `nickname` 接入 `{{char}}`，新增 random/pick/roll/comment 宏；
+- 社区 `first_mes` 仅作为真实开场历史，不再推导永久格式连续性；
+- V3 再导出保持 V3 并保留 nickname/source/assets/multilingual notes/未知扩展；
+- WorldBook `constant + use_regex` 改为标准优先、旧无 key 数据兼容兜底；
+- Regex/XML UI 缺状态时先继承上一轮真实 AI 状态；仍缺字段时使用紧凑状态补全调用，只返回作者标签，第一版正文不重写；
+- Prompt Debug 与原卡阅读器新增兼容层诊断；
+- IndexedDB V14 / Backup V9 不变。
+
+## V0.4.5.1 · WorldBook constant/use_regex 与资源库移动端修复
+
+- 修复 `constant=true + use_regex=true` 条目被 WorldBook Engine V2 错误跳过的问题。
+- 无关键词且作者明确声明“每轮/每次回复必须”的输出合同增加兼容兜底。
+- 修复资源库长标题、文件名、兼容报告导致 PhoneFrame 横向撑宽。
+- 用户验收测试简化；高级 WorldBook 协议测试改由开发回归承担。
+- IndexedDB V14 / Backup V9 不变。
+
 ## V0.4.5.0 · WorldBook Engine V2 第一阶段
 
 - 修正 selectiveLogic 数值语义；

@@ -1,7 +1,7 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.4.5.0**。  
-> V0.4.5.0 进入 WorldBook Engine V2 第一阶段：世界书从“命中即拼接”升级为带预算、递归、Timed Effects、分组选择、位置/深度注入和可观测调试的执行器。  
+> 当前文档版本：**V0.4.6.0**。  
+> V0.4.6.0 在现有 Runtime 上增加薄兼容层：角色卡字段语义优先跟随 V2/V3 与成熟社区生态，不通过大改数据库来重新定义角色卡。  
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
 ## 1. 总体边界
@@ -27,6 +27,36 @@ IndexedDB Persistence
 - Character 与 Conversation 分离；
 - Community Resource 使用共享资源本体 + ResourceBinding；
 - 不针对具体角色、作者、文件名写生产逻辑。
+
+## 1.0.1 Character Card Compatibility Layer（V0.4.6.0）
+
+```text
+Raw Card / PNG metadata
+        ↓
+无损归档（Source of Truth）
+        ↓
+Compatibility Adapter
+├─ V2 语义
+├─ V3 语义
+└─ 常见旧 Tavern / 社区兼容兜底
+        ↓
+CharacterRuntimeManifest（可重建 / 0 Token）
+        ↓
+现有 Prompt / WorldBook / Regex / Conversation Runtime
+```
+
+该层故意保持“薄”：不替换 Character、ResourceBinding 或 Conversation 数据模型，只校准字段该去哪里。标准底层尽量跟生态，手机交互与安全渲染继续做本项目特色。
+
+关键字段边界：
+
+- `description/personality/scenario`：角色 Prompt 资产；
+- `first_mes/alternate_greetings`：选择后才成为真实 assistant 历史；
+- `creator_notes`：V2/V3 阅读器资料，不默认进 Prompt；
+- `system_prompt`：V2/V3 override，`{{original}}` 可引用默认 system；
+- `post_history_instructions`：历史之后的最终作者指令；
+- `character_book`：交给 WorldBook Runtime；
+- Regex：交给 Regex Pipeline，不展平到角色 description；
+- 未识别 `extensions/assets/source`：Raw escrow 保留，能安全理解的再进入 Runtime。
 
 ## 1.1 参考项目学习后的架构约束
 

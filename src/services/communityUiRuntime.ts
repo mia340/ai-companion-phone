@@ -217,7 +217,6 @@ function characterText(character: Character) {
     character.systemPrompt,
     character.postHistoryInstructions,
     character.depthPrompt?.prompt,
-    character.creatorNotes,
     character.scenario,
     character.firstMessage,
     ...(character.alternateGreetings || [])
@@ -398,6 +397,145 @@ export function tryRepairCommunityUiLocally(contract: CommunityUiContract, rawTe
     repaired: true,
     text: html,
     reason: 'Community UI Compiler V2：AI 已生成状态/正文数据，本地填回作者 HTML 模板，未追加第二次 AI 调用。'
+  }
+}
+
+
+function extractStructuredTagBlock(source: string, name: string) {
+  const escaped = escapeRegex(name)
+  return source.match(new RegExp(`<\\s*${escaped}(?:\\s[^>]*)?>[\\s\\S]*?<\\s*\\/\\s*${escaped}\\s*>`, 'i'))?.[0]?.trim() || ''
+}
+
+function removeStructuredTagBlocks(source: string, names: string[]) {
+  let output = source
+  for (const name of names) {
+    const escaped = escapeRegex(name)
+    output = output.replace(new RegExp(`<\\s*${escaped}(?:\\s[^>]*)?>[\\s\\S]*?<\\s*\\/\\s*${escaped}\\s*>`, 'gi'), '')
+  }
+  return output.replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/**
+ * Regex/XML 社区 UI 的无生成兜底：
+ * 当前正文已经由 AI 生成，但模型偶尔漏掉作者要求的状态标签时，只复用最近历史中 AI 自己已经生成过的同名字段。
+ * 不推断、不补写字段值；当前轮已有字段永远优先于旧值。
+ */
+export function tryCarryForwardCommunityUiState(
+  contract: CommunityUiContract,
+  currentRawText: string,
+  previousRawOutputs: string[]
+) {
+  if (contract.mode !== 'regex-html' || !contract.requiredTagNames.length || hasRichHtml(currentRawText)) {
+    return { repaired: false, text: currentRawText, reason: '', carriedTags: [] as string[] }
+  }
+
+  const currentBlocks = new Map<string, string>()
+  for (const name of contract.requiredTagNames) {
+    const block = extractStructuredTagBlock(currentRawText, name)
+    if (block) currentBlocks.set(name, block)
+  }
+  if (currentBlocks.size === contract.requiredTagNames.length) {
+    return { repaired: false, text: currentRawText, reason: '', carriedTags: [] as string[] }
+  }
+
+  const resolved = new Map(currentBlocks)
+  const carriedTags: string[] = []
+  for (const previous of previousRawOutputs) {
+    if (!previous?.trim()) continue
+    for (const name of contract.requiredTagNames) {
+      if (resolved.has(name)) continue
+      const block = extractStructuredTagBlock(previous, name)
+      if (!block) continue
+      resolved.set(name, block)
+      carriedTags.push(name)
+    }
+    if (resolved.size === contract.requiredTagNames.length) break
+  }
+
+  // 至少要把作者要求的字段补齐到可供 Regex 使用；否则交给后续纠偏流程。
+  if (resolved.size < contract.requiredTagNames.length || !carriedTags.length) {
+    return { repaired: false, text: currentRawText, reason: '', carriedTags: [] as string[] }
+  }
+
+  const body = removeStructuredTagBlocks(currentRawText, contract.requiredTagNames)
+  const structured = contract.requiredTagNames.map(name => resolved.get(name) || '').filter(Boolean).join('\n')
+  const text = [body, structured].filter(Boolean).join('\n\n').trim()
+  return {
+    repaired: true,
+    text,
+    carriedTags,
+    reason: `Community UI 状态继承：本轮缺少 ${carriedTags.length} 个作者状态字段，已复用上一轮真实 AI 状态（${carriedTags.slice(0, 6).join('、')}${carriedTags.length > 6 ? '…' : ''}），未本地生成内容。`
+  }
+}
+
+/**
+ * Regex/XML 社区 UI 的紧凑状态补全提示。
+ * 这不是第二次角色演出：模型只返回作者要求的结构化状态字段，正文永远保留第一次真实回复。
+ */
+export function buildCommunityUiStateRepairPrompt(options: {
+  contract: CommunityUiContract
+  currentOutput: string
+  authorRules?: string
+  roleContext?: string
+  conversationState?: string
+  latestUserText?: string
+}) {
+  const { contract } = options
+  if (contract.mode !== 'regex-html' || !contract.requiredTagNames.length) return ''
+  const limit = (value: string | undefined, max: number) => (value || '').trim().slice(0, max)
+  return [
+    '【社区状态字段补全 · 仅数据，不重写剧情】',
+    '你正在修复同一轮已经生成成功的角色回复。正文已经确定，不得改写、续写、总结或重新表演剧情。',
+    '只根据角色设定、作者状态规则、当前会话状态、用户本轮消息和第一版真实回复，补齐作者明确要求的状态字段。',
+    '状态值必须由模型依据这些输入判断；不要把未知内容留给应用推断。不得替用户新增台词、动作、选择或消息。',
+    `只允许输出这些标签，且每个标签恰好一次：${contract.requiredTagNames.map(name => `<${name}>...</${name}>`).join(' ')}`,
+    '不要输出 Markdown、代码围栏、解释、正文、HTML、JSON，也不要输出未列出的额外标签。',
+    contract.regexInputSkeleton ? `【作者 Regex 输入骨架】\n${limit(contract.regexInputSkeleton, 4000)}` : '',
+    options.authorRules?.trim() ? `【与状态 UI 直接相关的作者规则】\n${limit(options.authorRules, 6000)}` : '',
+    options.roleContext?.trim() ? `【角色核心资料】\n${limit(options.roleContext, 4000)}` : '',
+    options.conversationState?.trim() ? `【当前会话事实】\n${limit(options.conversationState, 1800)}` : '',
+    options.latestUserText?.trim() ? `【用户本轮真实消息】\n${limit(options.latestUserText, 1600)}` : '',
+    `【第一版真实 AI 回复】\n${limit(options.currentOutput, 7000)}`
+  ].filter(Boolean).join('\n\n')
+}
+
+/**
+ * 把“只补状态字段”的 AI 输出合回第一版正文。
+ * 第一版已有字段优先；补全输出只能提供 contract 声明的字段，额外标签不会进入结果。
+ */
+export function mergeCommunityUiStateRepair(
+  contract: CommunityUiContract,
+  currentRawText: string,
+  repairRawText: string
+) {
+  if (contract.mode !== 'regex-html' || !contract.requiredTagNames.length) {
+    return { repaired: false, text: currentRawText, addedTags: [] as string[] }
+  }
+
+  const resolved = new Map<string, string>()
+  const addedTags: string[] = []
+  for (const name of contract.requiredTagNames) {
+    const current = extractStructuredTagBlock(currentRawText, name)
+    if (current) resolved.set(name, current)
+  }
+  for (const name of contract.requiredTagNames) {
+    if (resolved.has(name)) continue
+    const repaired = extractStructuredTagBlock(repairRawText, name)
+    if (!repaired) continue
+    resolved.set(name, repaired)
+    addedTags.push(name)
+  }
+
+  if (resolved.size !== contract.requiredTagNames.length || !addedTags.length) {
+    return { repaired: false, text: currentRawText, addedTags: [] as string[] }
+  }
+
+  const body = removeStructuredTagBlocks(currentRawText, contract.requiredTagNames)
+  const structured = contract.requiredTagNames.map(name => resolved.get(name) || '').filter(Boolean).join('\n')
+  return {
+    repaired: true,
+    text: [body, structured].filter(Boolean).join('\n\n').trim(),
+    addedTags
   }
 }
 

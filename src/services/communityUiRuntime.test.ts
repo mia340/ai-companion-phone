@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildCommunityUiPriorityPrompt,
+  buildCommunityUiStateRepairPrompt,
   communityUiOutputConforms,
   detectCommunityUiContract,
   enforceUserMessageOwnershipInRichHtml,
+  mergeCommunityUiStateRepair,
   sanitizeCommunityUiText,
+  tryCarryForwardCommunityUiState,
   tryRepairCommunityUiLocally
 } from './communityUiRuntime'
 import type { Character, RegexScript } from '../types/domain'
@@ -162,4 +165,72 @@ it('V0.4.4.7 Community UI Compiler V2 可用紧凑状态和正文恢复作者固
   expect(repaired.text).toContain('2027.08.31')
   expect(repaired.text).toContain('他看向你。“走吧。”')
   expect(repaired.text).not.toContain('互动占位')
+})
+
+
+it('V0.4.6.0 Regex/XML UI 缺少状态字段时只继承上一轮 AI 已生成字段，不编造内容', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    assistantRegex: [statusRegex],
+    lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>日期</日期><时间>时间</时间><地点>地点</地点>'
+  })
+  const current = '他看向你。\n\n“今天早点休息。”'
+  const previous = '<日期>8月23日</日期><时间>22:10</时间><地点>家</地点>\n\n上一轮正文'
+  const repaired = tryCarryForwardCommunityUiState(contract, current, [previous])
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('他看向你。')
+  expect(repaired.text).toContain('<日期>8月23日</日期>')
+  expect(repaired.text).toContain('<时间>22:10</时间>')
+  expect(repaired.text).toContain('<地点>家</地点>')
+  expect(repaired.carriedTags).toEqual(expect.arrayContaining(['日期', '时间', '地点']))
+})
+
+it('V0.4.6.0 没有历史真实状态时不伪造 Regex/XML UI 字段', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    assistantRegex: [statusRegex],
+    lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>日期</日期><时间>时间</时间><地点>地点</地点>'
+  })
+  const repaired = tryCarryForwardCommunityUiState(contract, '只有正文', [])
+  expect(repaired.repaired).toBe(false)
+  expect(repaired.text).toBe('只有正文')
+})
+
+
+it('V0.4.6.0 紧凑状态补全只补作者声明标签，不能覆盖本轮新状态', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    assistantRegex: [statusRegex],
+    lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>日期</日期><时间>时间</时间><地点>地点</地点>'
+  })
+  const base = '本轮正文\n<日期>8月23日</日期>'
+  const repair = '<日期>错误覆盖</日期>\n<时间>22:30</时间>\n<地点>卧室</地点>\n<额外>不允许进入</额外>'
+  const merged = mergeCommunityUiStateRepair(contract, base, repair)
+  expect(merged.repaired).toBe(true)
+  expect(merged.text).toContain('<日期>8月23日</日期>')
+  expect(merged.text).not.toContain('错误覆盖')
+  expect(merged.text).toContain('<时间>22:30</时间>')
+  expect(merged.text).toContain('<地点>卧室</地点>')
+  expect(merged.text).not.toContain('<额外>')
+  expect(merged.addedTags).toEqual(['时间', '地点'])
+})
+
+it('V0.4.6.0 紧凑状态补全提示不要求重写正文或 HTML', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    assistantRegex: [statusRegex],
+    lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>日期</日期><时间>时间</时间><地点>地点</地点>'
+  })
+  const prompt = buildCommunityUiStateRepairPrompt({
+    contract,
+    currentOutput: '他看着你。',
+    authorRules: '每次回复必须输出日期、时间、地点。',
+    roleContext: '测试角色很安静。',
+    conversationState: '当前地点：家。',
+    latestUserText: '几点了？'
+  })
+  expect(prompt).toContain('仅数据，不重写剧情')
+  expect(prompt).toContain('<日期>...</日期>')
+  expect(prompt).toContain('不要输出 Markdown')
+  expect(prompt).toContain('他看着你。')
 })

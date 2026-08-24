@@ -130,6 +130,17 @@ export function buildPromptDebugReport(trace: PromptDebugTrace) {
     '## 预算分区',
     ...(trace.promptSections || []).map(item => `- ${item.label}：${item.characters}${item.budget ? ` / 建议 ${item.budget}` : ''}${item.truncated ? '（偏长）' : ''}`),
     '',
+    '## Character Card Runtime',
+    ...(trace.characterCardRuntime ? [
+      `- 规格：${trace.characterCardRuntime.family} · ${trace.characterCardRuntime.sourceLabel}`,
+      `- {{char}} 宏：${trace.characterCardRuntime.macroCharacterName}`,
+      `- system_prompt：${trace.characterCardRuntime.systemPromptMode}`,
+      `- post_history_instructions：${trace.characterCardRuntime.postHistoryMode || '旧记录未记录'}`,
+      `- creator_notes 进入 Prompt：否`,
+      `- 开场池：${trace.characterCardRuntime.greetingCount} 条`,
+      ...trace.characterCardRuntime.notes.map(item => `- ${item}`)
+    ] : ['- 未记录角色卡兼容层']),
+    '',
     '## 世界书触发',
     ...(trace.activatedLorebook.length ? trace.activatedLorebook.map(item => `- ${item.title}${item.reason ? `：${item.reason}` : ''}`) : ['- 无']),
     '',

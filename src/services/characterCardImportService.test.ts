@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseCharacterCardJson } from './characterCardImportService'
+import { exportCharacterCardJson, parseCharacterCardJson } from './characterCardImportService'
 
 describe('character card import', () => {
   it('imports SillyTavern V2 JSON', () => {
@@ -162,4 +162,37 @@ it('识别 user基本情况 / user设定 世界书，同时忽略 user_personal_
   expect(result.embeddedUser?.patch.age).toBe('20')
   expect(result.embeddedUser?.patch.height).toBe('168cm')
   expect(result.embeddedUser?.rawTemplate).toContain('姜阮')
+})
+
+
+it('V3 读取 nickname / multilingual notes / assets，并按 V3 回写', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v3', spec_version: '3.0',
+    data: {
+      name: '角色V3', nickname: '阿三', description: '描述', personality: '', scenario: '', first_mes: '你好', mes_example: '',
+      creator_notes: 'English fallback', creator_notes_multilingual: { zh: '中文作者说明', en: 'English note' },
+      system_prompt: '作者系统', post_history_instructions: '', alternate_greetings: ['备用'], group_only_greetings: [],
+      tags: [], creator: 'tester', character_version: '1.0', extensions: {}, source: ['https://example.com/card'],
+      assets: [{ type: 'icon', uri: 'https://example.com/a.png', name: 'main', ext: 'png' }]
+    }
+  }))
+  expect(result.patch.nickname).toBe('阿三')
+  expect(result.patch.sourceUrl).toBe('https://example.com/card')
+  expect(result.patch.avatar).toBe('https://example.com/a.png')
+  expect((result.patch.rawCardExtensions?.v3 as Record<string, unknown>)?.assets).toBeTruthy()
+
+  const now = '2026-08-23T00:00:00.000Z'
+  const json = exportCharacterCardJson({
+    id: 'char', worldId: 'world', name: result.patch.name || '角色V3', nickname: result.patch.nickname,
+    avatar: '', persona: result.patch.persona || '', cardDescription: result.patch.cardDescription, cardPersonality: result.patch.cardPersonality,
+    relationship: '', mood: '', activity: '', replySpeed: 'natural', createdAt: now,
+    importFormat: 'sillytavern-v3', sourceSpec: 'chara_card_v3', sourceSpecVersion: '3.0', rawCardExtensions: result.patch.rawCardExtensions,
+    firstMessage: result.patch.firstMessage, alternateGreetings: result.patch.alternateGreetings, creatorNotes: result.patch.creatorNotes,
+    systemPrompt: result.patch.systemPrompt, postHistoryInstructions: result.patch.postHistoryInstructions, tags: [], creator: 'tester'
+  })
+  const exported = JSON.parse(json)
+  expect(exported.spec).toBe('chara_card_v3')
+  expect(exported.data.nickname).toBe('阿三')
+  expect(exported.data.creator_notes_multilingual.zh).toBe('中文作者说明')
+  expect(exported.data.assets).toHaveLength(1)
 })

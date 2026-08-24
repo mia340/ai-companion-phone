@@ -106,6 +106,20 @@ watch(conversationId, load)
           <p v-else class="empty">没有记录规则影响。</p>
         </details>
 
+        <details v-if="selected.characterCardRuntime" open class="debug-section">
+          <summary>Character Card Runtime</summary>
+          <div class="score-grid">
+            <article><span>规格</span><b>{{ selected.characterCardRuntime.family }}</b></article>
+            <article><span>system_prompt</span><b>{{ selected.characterCardRuntime.systemPromptMode }}</b></article>
+            <article><span>post-history</span><b>{{ selected.characterCardRuntime.postHistoryMode || '旧记录未记录' }}</b></article>
+            <article><span>开场池</span><b>{{ selected.characterCardRuntime.greetingCount }}</b></article>
+            <article><span>creator_notes</span><b>0 Token</b></article>
+          </div>
+          <p><b><span v-pre>{{char}}</span> 宏：</b>{{ selected.characterCardRuntime.macroCharacterName }}</p>
+          <p><b>来源：</b>{{ selected.characterCardRuntime.sourceLabel }}</p>
+          <div v-if="selected.characterCardRuntime.notes.length" class="rule-list"><span v-for="note in selected.characterCardRuntime.notes" :key="note">{{ note }}</span></div>
+        </details>
+
         <details open class="debug-section">
           <summary>触发的世界书</summary>
           <article v-for="entry in selected.activatedLorebook" :key="entry.id" class="memory-row"><b>{{ entry.title }}</b><small>{{ entry.reason || '关键词或常驻规则触发' }}</small></article>

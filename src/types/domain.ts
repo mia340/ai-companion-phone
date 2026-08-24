@@ -624,6 +624,16 @@ export interface PromptDebugTrace {
   activatedLorebook: Array<{ id: UUID; title: string; reason?: string }>
   resourceRouting?: Array<{ id: UUID; title: string; status: 'focused' | 'activated' | 'deferred'; reason: string; characters: number }>
   estimatedSavedCharacters?: number
+  characterCardRuntime?: {
+    family: 'native' | 'legacy' | 'v2' | 'v3' | 'community'
+    sourceLabel: string
+    macroCharacterName: string
+    systemPromptMode: 'default' | 'replace' | 'replace-with-original' | 'append'
+    postHistoryMode?: 'default' | 'replace' | 'replace-with-original' | 'append'
+    creatorNotesInPrompt: false
+    greetingCount: number
+    notes: string[]
+  }
   lorebookEngine?: {
     evaluatedEntries: number
     initialActivated: number

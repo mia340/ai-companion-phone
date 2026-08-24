@@ -1,14 +1,40 @@
 # AI Companion Phone 项目状态
 
+## V0.4.6.0｜Character Card Compatibility Alignment
+
+本轮把开发方向从“继续发明更多角色卡运行规则”改为“**社区底层跟成熟生态，产品体验保留小手机特色**”。核心改动：
+
+- 新增轻量 `Character Compatibility Layer / Runtime Manifest`，不改 IndexedDB schema；
+- V2/V3 `creator_notes` 只供阅读，默认 0 Prompt Token；
+- V2/V3 `system_prompt` 与 `post_history_instructions` 按 override 语义执行，支持 `{{original}}`；原生角色继续保持原有 append 行为；
+- V3 `nickname` 成为 `{{char}}` 宏名，支持常见 `{{random}} / {{pick}} / {{roll}} / {{// comment}}`；
+- `first_mes / alternate_greetings` 只作为用户选择后的真实 assistant 历史，不再从社区开场推断永久格式规则；
+- V3 导入/再导出保留 nickname、multilingual creator notes、source、assets、日期字段及未知扩展，不强制降为 V2；
+- WorldBook 对 `constant + use_regex` 改为标准优先、旧社区无 key 冲突数据兼容兜底；
+- Regex/XML 社区 UI 本轮漏状态时，优先复用上一轮**真实 AI 已生成**的同名状态字段；若仍不完整，第二次 AI 调用只补作者状态标签，不再重跑完整角色 Prompt/历史或重写正文；不本地生成剧情/好感/心声；
+- Prompt Debug 新增 Character Card Runtime，可直接查看卡版本、system prompt 模式、宏名与 creator_notes 是否进 Prompt。
+
+### 本轮没有推翻的特色
+
+- 三种聊天呈现方式；
+- Presence / Conversation State；
+- 多聊天与 Branch；
+- Resource Session；
+- WorldBook Engine V2；
+- 六层记忆；
+- Safe Community UI；
+- Prompt Debug；
+- IndexedDB V14 / Backup V9。
+
 ## 当前版本
 
 ```text
-应用：V0.4.5.0
+应用：V0.4.6.0
 IndexedDB：V14
 Backup：V9
 ```
 
-V0.4.5.0 是 **WorldBook Engine V2 第一阶段**：在不升级 IndexedDB / Backup 的前提下，把此前“能导入字段”推进为“真正执行字段”，并将新一批公开小手机项目的架构学习结果纳入长期路线。
+V0.4.6.0 是 **Character Card Compatibility Alignment**：在不升级 IndexedDB / Backup 的前提下，把此前“能导入字段”推进为“真正执行字段”，并将新一批公开小手机项目的架构学习结果纳入长期路线。
 
 ## 当前阶段
 

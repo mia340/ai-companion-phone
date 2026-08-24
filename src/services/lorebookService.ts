@@ -1,5 +1,6 @@
 import { db } from '../db/database'
 import { getCharacterResourceIds } from './resourceBindingService'
+import { initialLorebookEntryMode } from './lorebookSemantics'
 import {
   buildResourceFocusInstruction,
   buildResourceSessionContinuationContent,
@@ -615,7 +616,14 @@ export async function buildLorebookPrompt(options: {
       continue
     }
 
-    if (item.constant && !item.useRegex) {
+    const initialMode = initialLorebookEntryMode(item)
+    if (initialMode === 'mandatory') {
+      if (probabilityPasses(item)) addCandidate(makeCandidate(item, { reason: '作者每轮强制输出合同', kind: 'constant', score: 900 }))
+      continue
+    }
+
+    // SillyTavern 的 use_regex 只决定关键词如何匹配；constant 条目与关键词无关。
+    if (initialMode === 'constant') {
       if (item.constant && looksLikeLargeFeatureModule(item) && looksLikeOnDemandFeatureModule(item) && !looksLikeMandatoryPerReplyContract(item)) {
         defer(item, '大型功能模块：本轮未明确调用，已按需休眠', 'constant')
         continue
@@ -624,7 +632,7 @@ export async function buildLorebookPrompt(options: {
       continue
     }
 
-    if (!item.keywords.length) continue
+    if (initialMode !== 'keyword') continue
     const source = buildScanSource({ entry: item, messages: options.messages, latestText, bookScanDepth: book?.scanDepth, character: options.character, persona: options.persona })
     const details = matchKeys(item, source)
     if (details.matched && probabilityPasses(item)) {

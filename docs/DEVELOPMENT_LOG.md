@@ -1,5 +1,48 @@
 # 开发记录
 
+## 2026-08-23 · V0.4.6.0｜从“自创角色卡协议”转向生态兼容校准
+
+### 决策
+
+用户提供了大量公开“小手机 / 角色卡前端”参考项目。横向对照后决定：**角色卡 / WorldBook / Preset / Regex 这类生态底层优先学习成熟实现和 Character Card V2/V3 规范；本项目的差异化集中在手机交互、Presence、三种呈现、多聊天、Resource Session、Prompt Debug、记忆和 Safe Community UI。**
+
+不采用“看到一张卡异常就给统一 Prompt 再加一句”的模式，也不为了追求功能数量推翻现有数据库。
+
+### 本轮对照来源
+
+底层语义优先核对：
+
+- Character Card V2 Spec：`https://github.com/malfoyslastname/character-card-spec-v2`
+- Character Card V3 Spec：`https://github.com/kwaroran/character-card-spec-v3`
+- SillyTavern Characters / Prompts / Macros 文档：`https://docs.sillytavern.app/`
+- roleplay-studio/character-card：V1/V2/V3 parser / builder 的字段分层实践
+
+小手机 / 产品架构继续对照用户提供的 FLOAT、Miya、StoryPhone、InternalBeyond Mobile、Melt、Love Boat、弯弯机等公开项目。底层只有在“规范 + 多个成熟实现”方向一致时优先跟随；单个项目的特色玩法不会直接升级成项目协议。
+
+### 本轮高价值校准
+
+1. `creator_notes` 在 V2/V3 是作者阅读资料，不应混入角色 Prompt。
+2. V2/V3 非空 `system_prompt` 是 override；`{{original}}` 用来嵌入前端默认 system。
+3. V3 `nickname` 应成为 `{{char}}` 的角色名来源。
+4. `first_mes / alternate_greetings` 是真实开场历史，不是 system 规则。自由开局时不应该从 first_mes 偷偷提炼永久格式。
+5. Character Card V3 是 V2 的扩展，导入后再导出应尽量保持 V3 字段和未知扩展，而不是统一降级成 V2。
+6. WorldBook 标准语义与真实旧社区脏数据要分开处理：标准优先，冲突数据只做窄兜底。
+7. 作者 UI 应优先走作者世界书 + Regex + Renderer；正文已经成功时，确定性的 UI 连续性优先本地处理，不重复生成角色剧情。
+
+### Community UI 新边界
+
+对于 XML/Regex 状态 UI，本轮漏字段时先复用最近历史里 AI 自己已经生成的同名状态；不能从应用默认值推断好感、计划、心理。历史仍不足时，第二次调用改成只补作者状态标签的小请求，不再重发完整角色 Prompt/历史，也不重写第一版正文。这个能力是“状态继承 + AI 状态补全”，不是“本地角色生成器”。
+
+## 2026-08-23 · V0.4.5.1｜真实 V3 卡回归暴露 constant/use_regex 语义错误
+
+真实 `chara_card_v3` 样本出现 `WorldBook Engine V2：评估 11 条、初始激活 0 条`。核对原卡后确认 11 个启用条目均为 `constant=true`，同时均设置 `use_regex=true`。V0.4.5.0 错误使用 `constant && !useRegex` 判断常驻条目。
+
+结论：`use_regex` 是 key matcher 的行为开关，不能改变 constant 的常驻语义。修复后这类卡的角色信息、背景、状态栏、手机格式等常驻规则重新参与 Prompt，固定状态 Regex/UI 也能恢复执行链。
+
+同时记录产品测试原则：协议级组合测试由开发者自动/代码回归负责，普通用户只验证真实角色卡结果，不要求理解 Bessie/Rufus、Selective Logic 数值或 @D 位置参数。
+
+# 开发记录
+
 ## 2026-08-23 · V0.4.5.0｜参考项目学习与 WorldBook Engine V2
 
 ### 为什么这一轮先做 WorldBook

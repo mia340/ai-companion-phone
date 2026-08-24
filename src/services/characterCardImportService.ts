@@ -22,6 +22,12 @@ interface CardPayload {
   extensions?: unknown
   character_book?: unknown
   group_only_greetings?: unknown
+  nickname?: unknown
+  creator_notes_multilingual?: unknown
+  source?: unknown
+  assets?: unknown
+  creation_date?: unknown
+  modification_date?: unknown
 }
 
 
@@ -64,6 +70,18 @@ function importableAvatar(value: unknown) {
   if (/^(?:data:image\/|blob:|https?:\/\/)/i.test(avatar)) return avatar
   // 只把很短的文本当 Emoji/字符头像；Tavo 的 charaCard/xxx.jpg 路径没有随 JSON 一起提供文件，不能伪装成可用图片。
   return avatar.length <= 12 && !/[\/\.]/.test(avatar) ? avatar : undefined
+}
+
+
+function v3PrimaryIconUri(value: unknown) {
+  if (!Array.isArray(value)) return undefined
+  const icons = value
+    .map(asRecord)
+    .filter(item => asText(item.type).toLowerCase() === 'icon')
+  if (!icons.length) return undefined
+  const main = icons.find(item => asText(item.name).toLowerCase() === 'main') || icons[0]
+  const uri = asText(main.uri)
+  return importableAvatar(uri)
 }
 
 function extractDepthPrompt(...extensions: Record<string, unknown>[]) {
@@ -461,7 +479,13 @@ function extractData(root: Record<string, unknown>): CardPayload {
     character_version: firstDefined(source, ['character_version', 'characterVersion', 'version']),
     extensions: firstDefined(source, ['extensions', 'extension']),
     character_book: firstDefined(source, ['character_book', 'characterBook', 'world_book', 'worldBook', 'lorebook', 'lore_book']),
-    group_only_greetings: firstDefined(source, ['group_only_greetings', 'groupOnlyGreetings'])
+    group_only_greetings: firstDefined(source, ['group_only_greetings', 'groupOnlyGreetings']),
+    nickname: firstDefined(source, ['nickname']),
+    creator_notes_multilingual: firstDefined(source, ['creator_notes_multilingual', 'creatorNotesMultilingual']),
+    source: firstDefined(source, ['source', 'sources']),
+    assets: firstDefined(source, ['assets']),
+    creation_date: firstDefined(source, ['creation_date', 'creationDate']),
+    modification_date: firstDefined(source, ['modification_date', 'modificationDate'])
   }
 }
 
@@ -516,20 +540,36 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   const knownDataKeys = new Set([
     'name', 'avatar', 'description', 'personality', 'scenario', 'first_mes', 'mes_example', 'alternate_greetings',
     'creator_notes', 'system_prompt', 'post_history_instructions', 'tags', 'creator', 'character_version', 'extensions',
-    'character_book', 'group_only_greetings'
+    'character_book', 'group_only_greetings', 'nickname', 'creator_notes_multilingual', 'source', 'assets', 'creation_date', 'modification_date'
   ])
   const unknownData = Object.fromEntries(Object.entries(nestedData).filter(([key]) => !knownDataKeys.has(key)))
   const rootMetadata = Object.fromEntries(Object.entries(record).filter(([key]) => !['spec', 'spec_version', 'specVersion', 'data', 'extensions'].includes(key)))
+  const v3Metadata = {
+    nickname: asText(data.nickname) || undefined,
+    creator_notes_multilingual: asRecord(data.creator_notes_multilingual),
+    source: asStringArray(data.source),
+    assets: Array.isArray(data.assets) ? data.assets : [],
+    creation_date: asNumber(data.creation_date),
+    modification_date: asNumber(data.modification_date)
+  }
   const rawCardExtensions = JSON.parse(JSON.stringify({
     dataExtensions: extensions,
     rootExtensions,
     unknownData,
     rootMetadata,
+    v3: v3Metadata,
     originalAvatar: asText(data.avatar ?? record.avatar) || undefined,
     sourceSpec,
     sourceSpecVersion
   })) as Record<string, unknown>
   const notes: string[] = []
+  const numericSpecVersion = Number.parseFloat(sourceSpecVersion || '')
+  if (format === 'sillytavern-v3' && Number.isFinite(numericSpecVersion) && numericSpecVersion > 3) {
+    notes.push(`角色卡 spec_version=${sourceSpecVersion} 高于当前已知 CCv3 3.0；已继续导入并完整保留未知字段，未识别的新能力不会擅自执行。`)
+  }
+  if (format === 'sillytavern-v2' && sourceSpecVersion && sourceSpecVersion !== '2.0') {
+    notes.push(`角色卡声明 V2 spec_version=${sourceSpecVersion}；按 V2 兼容读取并保留原始字段。`)
+  }
 
   if (!asText(data.name) && !description && !personality) {
     throw new Error('没有找到角色姓名、描述或性格。请确认选择的是角色卡，而不是预设、世界书或正则 JSON。')
@@ -560,10 +600,7 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
     { label: '角色扩展 user Persona', preview: buildEmbeddedUserPreviewFromExtensions([rootExtensions, extensions], characterName) },
     { label: '内嵌世界书 user 人设条目', preview: buildEmbeddedUserPreviewFromCharacterBook(data.character_book, characterName) },
     { label: '角色 description', preview: buildEmbeddedUserPreview(description, characterName) },
-    { label: '角色 scenario', preview: buildEmbeddedUserPreview(asText(data.scenario), characterName) },
-    { label: '角色 creator_notes', preview: buildEmbeddedUserPreview(asText(data.creator_notes), characterName) },
-    { label: '角色 system_prompt', preview: buildEmbeddedUserPreview(asText(data.system_prompt), characterName) },
-    { label: '角色 post_history_instructions', preview: buildEmbeddedUserPreview(asText(data.post_history_instructions), characterName) }
+    { label: '角色 scenario', preview: buildEmbeddedUserPreview(asText(data.scenario), characterName) }
   ]
   const embeddedUserCandidate = embeddedUserSources.find(item => Boolean(item.preview))
   const embeddedUser = embeddedUserCandidate?.preview
@@ -583,7 +620,8 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   const characterIntroduction = buildImportedCharacterIntroduction(description, personality)
   const patch: Partial<Character> = {
     name: asText(data.name) || undefined,
-    avatar: importableAvatar(data.avatar ?? record.avatar),
+    nickname: asText(data.nickname) || undefined,
+    avatar: importableAvatar(data.avatar ?? record.avatar) || (format === 'sillytavern-v3' ? v3PrimaryIconUri(data.assets) : undefined),
     relationship: inferredRelationship,
     // 无法可靠拆分成‘说话方式/背景故事’时，不猜字段；保留一份完整角色介绍用于展示与手动补充。
     persona: characterIntroduction || undefined,
@@ -604,7 +642,9 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
     tags: asStringArray(data.tags),
     creator: asText(data.creator) || undefined,
     resourceVersion: asText(data.character_version) || undefined,
-    sourceUrl: asText(rootExtensions.source_url ?? rootExtensions.sourceUrl ?? extensions.source_url ?? extensions.sourceUrl) || undefined,
+    sourceUrl: asText(rootExtensions.source_url ?? rootExtensions.sourceUrl ?? extensions.source_url ?? extensions.sourceUrl)
+      || asStringArray(data.source).find(item => /^https?:\/\//i.test(item))
+      || undefined,
     license: asText(rootExtensions.license ?? extensions.license) || undefined,
     allowDerivative: typeof extensions.allow_derivative === 'boolean'
       ? extensions.allow_derivative
@@ -619,6 +659,14 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   if (format === 'legacy-json') notes.push('已按旧版 JSON 字段导入，部分扩展字段可能无法识别。')
   if (!patch.exampleDialogues?.length) notes.push('角色卡没有可识别的示例对话。')
   if (!patch.firstMessage) notes.push('角色卡没有开场白。')
+  if (format === 'sillytavern-v2' || format === 'sillytavern-v3') {
+    if (patch.creatorNotes) notes.push('creator_notes 只在原卡阅读器展示，不进入模型 Prompt。')
+    if (patch.systemPrompt) notes.push('system_prompt 将按角色卡规范覆盖默认 system prompt；{{original}} 可引用默认规则。')
+  }
+  if (format === 'sillytavern-v3' && patch.nickname) notes.push(`V3 nickname“${patch.nickname}”将用于 {{char}} 宏。`)
+  if (format === 'sillytavern-v3' && Array.isArray(data.assets) && data.assets.length) {
+    notes.push(`检测到 V3 assets ${data.assets.length} 项：元数据已无损归档；支持的主 icon 可作为角色头像，其它资产暂不主动执行。`)
+  }
   if (inferredRelationship) notes.push(`从角色卡明确状态/用户设定识别到与用户关系：${inferredRelationship}。`)
   if (lorebookEntries.length) notes.push(`检测到内嵌角色世界书 ${lorebookEntries.length} 条：将导入共享资源库，并默认绑定当前角色；之后可给其它角色复用。`)
   if (embeddedUser) {
@@ -771,11 +819,14 @@ export async function parseCharacterCardFile(file: File) {
   throw new Error('请选择 JSON 或带角色卡 metadata 的 PNG 文件。')
 }
 
-export function exportCharacterAsSillyTavernV2(character: Character, resources: { lorebook?: LorebookResource; lorebookEntries?: LorebookEntry[]; regexScripts?: RegexScript[] } = {}) {
+export function exportCharacterCardJson(character: Character, resources: { lorebook?: LorebookResource; lorebookEntries?: LorebookEntry[]; regexScripts?: RegexScript[] } = {}) {
   const stored = asRecord(character.rawCardExtensions)
   const storedDataExtensions = asRecord(stored.dataExtensions ?? stored.data)
   const storedRootExtensions = asRecord(stored.rootExtensions ?? stored.root)
+  const storedV3 = asRecord(stored.v3)
   const unknownData = asRecord(stored.unknownData)
+  const rootMetadata = asRecord(stored.rootMetadata)
+  const exportAsV3 = character.importFormat === 'sillytavern-v3' || /chara_card_v3/i.test(character.sourceSpec || '')
   const extensions: Record<string, unknown> = {
     ...storedDataExtensions,
     source_url: character.sourceUrl || storedDataExtensions.source_url || '',
@@ -868,8 +919,10 @@ export function exportCharacterAsSillyTavernV2(character: Character, resources: 
     : ''
 
   return JSON.stringify({
-    spec: 'chara_card_v2',
-    spec_version: '2.0',
+    ...rootMetadata,
+    ...(Object.keys(storedRootExtensions).length ? { extensions: storedRootExtensions } : {}),
+    spec: exportAsV3 ? 'chara_card_v3' : 'chara_card_v2',
+    spec_version: exportAsV3 ? (character.sourceSpecVersion || '3.0') : '2.0',
     data: {
       ...unknownData,
       name: character.name,
@@ -898,7 +951,18 @@ export function exportCharacterAsSillyTavernV2(character: Character, resources: 
       tags: character.tags || [],
       creator: character.creator || '',
       character_version: character.resourceVersion || '',
-      extensions
+      extensions,
+      ...(exportAsV3 ? {
+        nickname: character.nickname || asText(storedV3.nickname) || undefined,
+        creator_notes_multilingual: asRecord(storedV3.creator_notes_multilingual),
+        source: asStringArray(storedV3.source),
+        assets: Array.isArray(storedV3.assets) ? storedV3.assets : [],
+        creation_date: asNumber(storedV3.creation_date),
+        modification_date: asNumber(storedV3.modification_date)
+      } : {})
     }
   }, null, 2)
 }
+
+/** 旧调用名保留兼容；现在会优先保持原卡 V2/V3 规格，不再强制把 V3 降级成 V2。 */
+export const exportCharacterAsSillyTavernV2 = exportCharacterCardJson
