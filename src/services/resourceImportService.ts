@@ -293,8 +293,8 @@ export function parseRegexJson(text: string, fileName = '正则.json'): ParsedRe
     runOnEdit: asBoolean(raw.runOnEdit ?? raw.run_on_edit, false),
     substituteRegex: asNumber(raw.substituteRegex ?? raw.substitute_regex, 0),
     order: asNumber(raw.order ?? raw.priority ?? index, index),
-    minDepth: raw.minDepth == null ? undefined : asNumber(raw.minDepth, 0),
-    maxDepth: raw.maxDepth == null ? undefined : asNumber(raw.maxDepth, 0),
+    minDepth: (raw.minDepth ?? raw.min_depth) == null ? undefined : asNumber(raw.minDepth ?? raw.min_depth, 0),
+    maxDepth: (raw.maxDepth ?? raw.max_depth) == null ? undefined : asNumber(raw.maxDepth ?? raw.max_depth, 0),
     sourceFileName: fileName,
     sourceFormat: sourceFormat(fileName, record),
     raw: cloneRecord(raw)
@@ -307,8 +307,13 @@ export function parseRegexJson(text: string, fileName = '正则.json'): ParsedRe
       format: 'SillyTavern / Tavo regex',
       name,
       summary: [`${scripts.length} 条正则`, `${scripts.filter(item => item.enabled).length} 条启用`],
-      supported: ['findRegex / replaceString', 'placement', 'order / 执行顺序', 'promptOnly', 'markdownOnly', '深度字段保留', '显示 HTML 安全渲染'],
-      warnings: ['第三方 JavaScript 不执行；HTML/CSS 会进入隔离的安全渲染器。']
+      supported: ['findRegex / replaceString', 'placement 1/2/5 分阶段执行', 'order / 执行顺序', 'markdownOnly 显示投影', 'promptOnly 出站 Prompt 投影', 'minDepth / maxDepth', 'runOnEdit', '显示 HTML 安全渲染'],
+      warnings: [
+        '第三方 JavaScript 不执行；HTML/CSS 会进入隔离的安全渲染器。',
+        ...(scripts.some(item => item.placement.includes(3) || item.placement.includes(6))
+          ? ['placement 3（Slash）/ 6（Reasoning）字段已保留，但主聊天暂未接入对应运行时。']
+          : [])
+      ]
     }
   }
 }

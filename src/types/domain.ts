@@ -405,7 +405,12 @@ export interface Message {
   status: MessageStatus
   createdAt: string
   roleCardUi?: RoleCardUiState
+  // V0.4.7.0 Regex Pipeline V2：rawContent 保存进入后续上下文的完整规范化原文；modelOutput 保留模型第一版原始输出；displayContent 只用于显示投影。
   rawContent?: string
+  modelOutput?: string
+  displayContent?: string
+  regexPipelineVersion?: 2
+  regexApplied?: { storage?: string[]; display?: string[] }
   richHtml?: string
   richSource?: 'regex' | 'card-ui' | 'worldbook-ui'
 
@@ -632,6 +637,16 @@ export interface PromptDebugTrace {
     postHistoryMode?: 'default' | 'replace' | 'replace-with-original' | 'append'
     creatorNotesInPrompt: false
     greetingCount: number
+    notes: string[]
+  }
+  regexPipeline?: {
+    activeScripts: number
+    storageApplied: string[]
+    displayApplied: string[]
+    promptApplied: string[]
+    worldInfoApplied: string[]
+    depthSkipped: string[]
+    unsupported: string[]
     notes: string[]
   }
   lorebookEngine?: {

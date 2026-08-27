@@ -1,14 +1,14 @@
 # AI Companion Phone Docs
 
-当前文档版本：**V0.4.6.0**
+当前文档版本：**V0.4.7.0**
 
 ```text
-应用：V0.4.6.0
+应用：V0.4.7.0
 IndexedDB：V14
 Backup：V9
 ```
 
-V0.4.6.0 是 **Character Card Compatibility Alignment**：底层读取尽量向 Character Card V2/V3 与成熟社区前端对齐，同时保留小手机的多会话、场景呈现、Prompt Debug、资源会话与 Safe Community UI。数据库版本保持不变。
+V0.4.7.0 是 **Regex Pipeline V2 / Renderer 分层**：继续沿用 V0.4.6.0 的角色卡生态兼容层，把 Regex 真正拆成规范化存储、显示投影和出站 Prompt 三阶段；底层继续向 Character Card / SillyTavern 社区语义靠拢，小手机特色仍集中在多会话、Presence、三种呈现、Resource Session、Prompt Debug 与 Safe Community UI。数据库版本保持不变。
 
 ## 文档怎么读
 

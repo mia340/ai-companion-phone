@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { applyRegexScript, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml, regexExecutionOrder } from './regexRuntime'
+import { applyRegexScript, applyRegexStage, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml, regexEphemerality, regexExecutionOrder, regexScriptsForDynamicDepthPhase, regexScriptsForStage } from './regexRuntime'
+import { regexProducesRichUi } from './communityUiRuntime'
 import type { RegexScript } from '../types/domain'
 
 const script: RegexScript = {
@@ -78,4 +79,104 @@ it('keeps surrounding text when a full HTML UI is embedded in the reply', () => 
 it('resolves user/char macros inside regex replacement UI', () => {
   const output = applyRegexScript('<x>状态</x>', { ...script, findRegex: '/<x>(.*?)<\\/x>/s', replaceString: '<div>{{user}} · {{char}} · $1</div>' }, { user: '用户甲', char: '角色甲' })
   expect(output).toBe('<div>用户甲 · 角色甲 · 状态</div>')
+})
+
+
+describe('Regex Pipeline V2 ephemerality', () => {
+  const makeScript = (overrides: Partial<RegexScript> = {}): RegexScript => ({
+    ...script,
+    id: overrides.id || crypto.randomUUID(),
+    name: overrides.name || 'pipeline',
+    findRegex: 'SECRET',
+    replaceString: 'VISIBLE',
+    placement: [2],
+    markdownOnly: false,
+    promptOnly: false,
+    runOnEdit: false,
+    sourceFormat: 'tavo',
+    ...overrides
+  })
+
+  it('neither flag means persistent storage mutation only', () => {
+    const item = makeScript()
+    expect(regexEphemerality(item)).toBe('persistent')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'storage', depth: 0 }).text).toBe('VISIBLE')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'display', depth: 0 }).text).toBe('SECRET')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'outgoing-prompt', depth: 0 }).text).toBe('SECRET')
+  })
+
+  it('markdownOnly changes display without mutating storage or outgoing prompt', () => {
+    const item = makeScript({ markdownOnly: true })
+    expect(regexEphemerality(item)).toBe('display-only')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'storage', depth: 0 }).text).toBe('SECRET')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'display', depth: 0 }).text).toBe('VISIBLE')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'outgoing-prompt', depth: 0 }).text).toBe('SECRET')
+  })
+
+  it('promptOnly changes only the outgoing model view', () => {
+    const item = makeScript({ promptOnly: true })
+    expect(regexEphemerality(item)).toBe('prompt-only')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'storage', depth: 0 }).text).toBe('SECRET')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'display', depth: 0 }).text).toBe('SECRET')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'outgoing-prompt', depth: 0 }).text).toBe('VISIBLE')
+  })
+
+  it('markdownOnly + promptOnly changes display and model view while preserving storage', () => {
+    const item = makeScript({ markdownOnly: true, promptOnly: true })
+    expect(regexEphemerality(item)).toBe('display-and-prompt')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'storage', depth: 0 }).text).toBe('SECRET')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'display', depth: 0 }).text).toBe('VISIBLE')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'outgoing-prompt', depth: 0 }).text).toBe('VISIBLE')
+  })
+
+  it('respects placement and does not apply an AI-response script to user input', () => {
+    const item = makeScript({ placement: [2] })
+    expect(applyRegexStage('SECRET', [item], { source: 'user-input', phase: 'storage', depth: 0 }).text).toBe('SECRET')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'storage', depth: 0 }).text).toBe('VISIBLE')
+  })
+
+  it('respects minDepth and maxDepth where depth 0 is the newest message', () => {
+    const item = makeScript({ promptOnly: true, minDepth: 1, maxDepth: 2 })
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'outgoing-prompt', depth: 0 }).text).toBe('SECRET')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'outgoing-prompt', depth: 1 }).text).toBe('VISIBLE')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'outgoing-prompt', depth: 2 }).text).toBe('VISIBLE')
+    expect(applyRegexStage('SECRET', [item], { source: 'assistant-output', phase: 'outgoing-prompt', depth: 3 }).text).toBe('SECRET')
+  })
+
+  it('keeps future-depth prompt candidates before each history row knows its actual depth', () => {
+    const item = makeScript({ promptOnly: true, minDepth: 2, maxDepth: 4 })
+    const candidates = regexScriptsForDynamicDepthPhase([item], { source: 'assistant-output', phase: 'outgoing-prompt' })
+    expect(candidates).toHaveLength(1)
+    expect(applyRegexStage('SECRET', candidates, { source: 'assistant-output', phase: 'outgoing-prompt', depth: 0 }).text).toBe('SECRET')
+    expect(applyRegexStage('SECRET', candidates, { source: 'assistant-output', phase: 'outgoing-prompt', depth: 3 }).text).toBe('VISIBLE')
+  })
+
+  it('only reruns runOnEdit scripts during an edit event', () => {
+    const disabledOnEdit = makeScript({ runOnEdit: false })
+    const enabledOnEdit = makeScript({ id: 'edit-enabled', runOnEdit: true })
+    expect(applyRegexStage('SECRET', [disabledOnEdit], { source: 'assistant-output', phase: 'storage', depth: 0, event: 'edit' }).text).toBe('SECRET')
+    expect(applyRegexStage('SECRET', [enabledOnEdit], { source: 'assistant-output', phase: 'storage', depth: 0, event: 'edit' }).text).toBe('VISIBLE')
+  })
+
+  it('keeps imported scripts with empty placement inert but preserves old native compatibility', () => {
+    const imported = makeScript({ placement: [], sourceFormat: 'tavo' })
+    const native = makeScript({ placement: [], sourceFormat: 'native' })
+    expect(regexScriptsForStage([imported], { source: 'assistant-output', phase: 'storage' })).toHaveLength(0)
+    expect(regexScriptsForStage([native], { source: 'assistant-output', phase: 'storage' })).toHaveLength(1)
+  })
+
+  it('applies persistent and prompt-affecting World Info regex only during prompt assembly', () => {
+    const persistent = makeScript({ placement: [5] })
+    const prompt = makeScript({ id: 'wi-prompt', placement: [5], promptOnly: true })
+    const displayOnly = makeScript({ id: 'wi-display', placement: [5], markdownOnly: true })
+    const result = applyRegexStage('SECRET', [persistent, prompt, displayOnly], { source: 'world-info', phase: 'outgoing-prompt' })
+    expect(result.applied).toContain(persistent.name)
+    expect(result.applied).not.toContain(displayOnly.name)
+  })
+
+  it('recognizes rich markdownOnly+promptOnly renderers as display UI, but not promptOnly-only renderers', () => {
+    const rich = '<div class="status">$1</div>'
+    expect(regexProducesRichUi(makeScript({ markdownOnly: true, promptOnly: true, replaceString: rich }))).toBe(true)
+    expect(regexProducesRichUi(makeScript({ markdownOnly: false, promptOnly: true, replaceString: rich }))).toBe(false)
+  })
 })

@@ -141,6 +141,18 @@ export function buildPromptDebugReport(trace: PromptDebugTrace) {
       ...trace.characterCardRuntime.notes.map(item => `- ${item}`)
     ] : ['- 未记录角色卡兼容层']),
     '',
+    '## Regex Pipeline V2',
+    ...(trace.regexPipeline ? [
+      `- 当前相关脚本：${trace.regexPipeline.activeScripts}`,
+      trace.regexPipeline.storageApplied.length ? `- 永久改写存储：${trace.regexPipeline.storageApplied.join('、')}` : '- 永久改写存储：无',
+      trace.regexPipeline.displayApplied.length ? `- 仅显示投影：${trace.regexPipeline.displayApplied.join('、')}` : '- 仅显示投影：无',
+      trace.regexPipeline.promptApplied.length ? `- 发给 AI 的临时改写：${trace.regexPipeline.promptApplied.join('、')}` : '- 发给 AI 的临时改写：无',
+      trace.regexPipeline.worldInfoApplied.length ? `- 世界书 Regex：${trace.regexPipeline.worldInfoApplied.join('、')}` : '- 世界书 Regex：无',
+      trace.regexPipeline.depthSkipped.length ? `- 因历史深度跳过：${trace.regexPipeline.depthSkipped.join('、')}` : '- 因历史深度跳过：无',
+      trace.regexPipeline.unsupported.length ? `- 当前未支持 placement：${trace.regexPipeline.unsupported.join('、')}` : '- 当前未支持 placement：无',
+      ...trace.regexPipeline.notes.map(item => `- ${item}`)
+    ] : ['- 本轮未记录 Regex Pipeline V2 数据']),
+    '',
     '## 世界书触发',
     ...(trace.activatedLorebook.length ? trace.activatedLorebook.map(item => `- ${item.title}${item.reason ? `：${item.reason}` : ''}`) : ['- 无']),
     '',

@@ -218,7 +218,7 @@ export function useChatSpeech(options: {
       }
       return
     }
-    speakText(message.content, message.id)
+    speakText(message.displayContent ?? message.content, message.id)
   }
 
   function speechStateForMessage(id: string): 'idle' | 'playing' | 'paused' {

@@ -28,6 +28,7 @@ const emit = defineEmits<{
 const timer = ref<number>()
 const images = computed(() => getMessageImages(props.message).filter(image => Boolean(image.dataUrl)))
 const urls = computed(() => images.value.map(image => image.dataUrl || ''))
+const displayText = computed(() => props.message.displayContent ?? props.message.content)
 const alternativeCount = computed(() => props.message.alternatives?.length || 0)
 const alternativeIndex = computed(() => Math.min(
   Math.max(0, props.message.activeAlternativeIndex ?? 0),
@@ -91,7 +92,7 @@ onBeforeUnmount(cancel)
       </section>
       <div v-if="message.type==='action'" class="scene-action-card">
         <small>{{ character?.name || '角色' }}此刻</small>
-        <span>{{ message.content }}</span>
+        <span>{{ displayText }}</span>
       </div>
       <CharacterAvatar v-if="character && message.type!=='action'" :avatar="character.avatar" :name="character.name" :size="38" />
       <div v-if="message.type!=='action'" class="assistant-message-stack">
@@ -150,17 +151,17 @@ onBeforeUnmount(cancel)
                 />
               </button>
             </div>
-            <span v-if="message.content" class="image-caption">{{ message.content }}</span>
+            <span v-if="displayText" class="image-caption">{{ displayText }}</span>
           </template>
           <span v-else-if="message.type==='image' && message.placeholderImagePrompt" class="image-placeholder"><b>角色想分享一张图片</b><small>{{ message.placeholderImagePrompt }}</small></span>
-          <span v-else-if="message.type==='image'" class="missing-image">图片未包含在这份备份中<small v-if="message.content">{{ message.content }}</small></span>
-          <template v-else-if="message.type==='emoji'"><span class="emoji-message">{{ message.content }}</span></template>
-          <template v-else-if="message.type==='voice'"><span class="voice-message-icon">{{ speechState==='playing' ? 'Ⅱ' : '▶' }}</span><span class="voice-message-main"><b>语音消息 · {{ message.voiceDurationSeconds || 2 }}″</b><small>{{ message.content }}</small></span></template>
-          <template v-else><span v-if="message.type==='music'" class="music-message-mark">♫</span>{{ message.content }}<i v-if="streaming" class="streaming-caret"></i></template>
+          <span v-else-if="message.type==='image'" class="missing-image">图片未包含在这份备份中<small v-if="displayText">{{ displayText }}</small></span>
+          <template v-else-if="message.type==='emoji'"><span class="emoji-message">{{ displayText }}</span></template>
+          <template v-else-if="message.type==='voice'"><span class="voice-message-icon">{{ speechState==='playing' ? 'Ⅱ' : '▶' }}</span><span class="voice-message-main"><b>语音消息 · {{ message.voiceDurationSeconds || 2 }}″</b><small>{{ displayText }}</small></span></template>
+          <template v-else><span v-if="message.type==='music'" class="music-message-mark">♫</span>{{ displayText }}<i v-if="streaming" class="streaming-caret"></i></template>
         </button>
         <div v-if="message.reactionEmoji" class="message-reaction">{{ message.reactionEmoji }}</div>
         <small v-if="message.proactiveSource" class="proactive-source">{{ message.proactiveSource==='continue-topic'?'延续话题':message.proactiveSource==='promise-reminder'?'履行承诺':message.proactiveSource==='daily-share'?'分享日常':message.proactiveSource==='care'?'关心状态':'剧情事件' }}</small>
-        <div v-if="speechAvailable && message.type!=='image' && message.type!=='voice' && message.type!=='emoji' && message.type!=='rich' && message.content && !streaming" class="speech-controls">
+        <div v-if="speechAvailable && message.type!=='image' && message.type!=='voice' && message.type!=='emoji' && message.type!=='rich' && displayText && !streaming" class="speech-controls">
           <button type="button" @click.stop="emit('toggleSpeech',message)">{{ speechState==='playing'?'暂停':speechState==='paused'?'继续':'朗读' }}</button>
           <button v-if="speechState==='playing'||speechState==='paused'" type="button" @click.stop="emit('stopSpeech')">停止</button>
         </div>
@@ -214,14 +215,14 @@ onBeforeUnmount(cancel)
               />
             </button>
           </div>
-          <span v-if="message.content" class="image-caption image-caption--mine">{{ message.content }}</span>
+          <span v-if="displayText" class="image-caption image-caption--mine">{{ displayText }}</span>
         </template>
         <span v-else-if="message.type==='image' && message.placeholderImagePrompt" class="image-placeholder image-placeholder--mine"><b>想分享一张图片</b><small>{{ message.placeholderImagePrompt }}</small></span>
-        <span v-else-if="message.type==='image'" class="missing-image missing-image--mine">图片未包含在这份备份中<small v-if="message.content">{{ message.content }}</small></span>
-        <template v-else-if="message.type==='emoji'"><span class="emoji-message">{{ message.content }}</span></template>
-        <template v-else-if="message.type==='voice'"><span class="voice-message-icon">▶</span><span class="voice-message-main"><b>语音消息 · {{ message.voiceDurationSeconds || 2 }}″</b><small>{{ message.content }}</small></span></template>
+        <span v-else-if="message.type==='image'" class="missing-image missing-image--mine">图片未包含在这份备份中<small v-if="displayText">{{ displayText }}</small></span>
+        <template v-else-if="message.type==='emoji'"><span class="emoji-message">{{ displayText }}</span></template>
+        <template v-else-if="message.type==='voice'"><span class="voice-message-icon">▶</span><span class="voice-message-main"><b>语音消息 · {{ message.voiceDurationSeconds || 2 }}″</b><small>{{ displayText }}</small></span></template>
         <SafeRichHtml v-else-if="message.type==='rich' && message.richHtml" :html="message.richHtml" @select-greeting="emit('selectGreeting', $event)" />
-        <template v-else>{{ message.content }}</template>
+        <template v-else>{{ displayText }}</template>
       </button>
       <span v-if="message.reactionEmoji" class="message-reaction message-reaction--mine">{{ message.reactionEmoji }}</span>
       <button type="button" :class="['message-delivery-state',`message-delivery-state--${message.status}`,{'message-delivery-state--vision-fallback':message.visionFallback}]" :title="message.status==='failed'||message.status==='cancelled'?'点击重试':undefined" @click="message.status==='failed'||message.status==='cancelled'?emit('retryMessage',message):openMenu()">{{ deliveryLabel }}</button>

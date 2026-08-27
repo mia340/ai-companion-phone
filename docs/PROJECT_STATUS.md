@@ -1,5 +1,19 @@
 # AI Companion Phone 项目状态
 
+## V0.4.7.0｜Regex Pipeline V2 / Renderer 分层
+
+本轮继续“大改”，但只重构生态兼容层，不推翻 Conversation、WorldBook、Memory 或数据库。核心目标是把同一条消息拆成 **模型原始输出 / 规范化存储 / 显示投影 / 下一次发给 AI 的临时投影**，避免社区 Regex 把 HTML 写进历史或把 promptOnly 错套到整个 System Prompt。
+
+- User Input / AI Response / World Info 按 placement 分源执行；
+- persistent / markdownOnly / promptOnly / 两者同时四种语义分离；
+- Depth 0=最近消息，minDepth/maxDepth 在出站历史上执行；
+- 出站 Prompt 的候选筛选不提前假定 depth=0，`minDepth>0` 会在真实历史行上逐条判断；
+- 开场与手动编辑进入同一 Regex Pipeline；
+- markdownOnly Rich UI 继续由 Safe Community UI 渲染，底层 canonical 内容保持作者原结构；
+- Prompt Debug 可直接观察每一阶段实际命中的 Regex；
+- Slash / Reasoning placement 完整保留，当前主聊天暂不执行，避免假装兼容；
+- IndexedDB V14 / Backup V9 不变。
+
 ## V0.4.6.0｜Character Card Compatibility Alignment
 
 本轮把开发方向从“继续发明更多角色卡运行规则”改为“**社区底层跟成熟生态，产品体验保留小手机特色**”。核心改动：
@@ -29,12 +43,12 @@
 ## 当前版本
 
 ```text
-应用：V0.4.6.0
+应用：V0.4.7.0
 IndexedDB：V14
 Backup：V9
 ```
 
-V0.4.6.0 是 **Character Card Compatibility Alignment**：在不升级 IndexedDB / Backup 的前提下，把此前“能导入字段”推进为“真正执行字段”，并将新一批公开小手机项目的架构学习结果纳入长期路线。
+V0.4.7.0 是 **Regex Pipeline V2 / Renderer 分层**：在不升级 IndexedDB / Backup 的前提下，把此前“能导入字段”推进为“真正执行字段”，并将新一批公开小手机项目的架构学习结果纳入长期路线。
 
 ## 当前阶段
 

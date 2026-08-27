@@ -7,7 +7,7 @@ import { db } from '../db/database'
 import { DEFAULT_WORLD_ID } from '../db/seed'
 import { deleteCommunityResource, deleteCommunityResourceArchive, importCommunityFile, listCommunityResources } from '../services/communityResourceService'
 import { setResourceBinding } from '../services/resourceBindingService'
-import { regexExecutionOrder } from '../services/regexRuntime'
+import { regexEphemeralityLabel, regexExecutionOrder, regexPlacementLabel } from '../services/regexRuntime'
 import type { Character, CommunityResourceArchive, ConversationState, LorebookResource, PromptPreset, RegexScript, ResourceBinding, ResourceType } from '../types/domain'
 
 const route = useRoute()
@@ -169,6 +169,12 @@ async function saveRegexEditor() {
     message.value = '正则名称和 findRegex 不能为空。'
     return
   }
+  const minDepth = optionalNumberFromText(regexForm.minDepth)
+  const maxDepth = optionalNumberFromText(regexForm.maxDepth)
+  if (minDepth != null && maxDepth != null && maxDepth < minDepth) {
+    message.value = 'maxDepth 不能小于 minDepth。Depth 0 表示最近一条消息。'
+    return
+  }
   await db.regexScripts.put({
     ...original,
     name: regexForm.name.trim(),
@@ -182,8 +188,8 @@ async function saveRegexEditor() {
     runOnEdit: regexForm.runOnEdit,
     substituteRegex: Number.isFinite(Number(regexForm.substituteRegex)) ? Number(regexForm.substituteRegex) : 0,
     order: Number.isFinite(Number(regexForm.order)) ? Number(regexForm.order) : 0,
-    minDepth: optionalNumberFromText(regexForm.minDepth),
-    maxDepth: optionalNumberFromText(regexForm.maxDepth),
+    minDepth,
+    maxDepth,
     updatedAt: new Date().toISOString()
   })
   message.value = `已保存正则脚本“${regexForm.name.trim()}”。`
@@ -391,9 +397,9 @@ onMounted(async () => {
       </section>
 
       <section v-else-if="tab==='regex'" class="resource-list">
-        <header class="section-head"><div><h2>正则</h2><p>Regex 是后处理器：脚本启停决定它是否运行，“应用”只决定当前角色/全局是否使用。未命中时保留 AI 原文；第三方 JavaScript 仍不执行。</p></div><button @click="tab='library'; chooseImport()">导入</button></header>
+        <header class="section-head"><div><h2>正则</h2><p>Regex 按来源与阶段运行：作者可以永久改写存储、只改变显示，或只改变下一次发给 AI 的临时上下文。未命中时保留原文；第三方 JavaScript 仍不执行。</p></div><button @click="tab='library'; chooseImport()">导入</button></header>
         <article v-for="script in regexes" :key="script.id" class="resource-card">
-          <div class="resource-main"><div class="resource-icon">🧷</div><div><b>{{ script.name }}</b><small>{{ originLabel(script) }} · placement {{ script.placement.join(',') || '默认' }} · order {{ regexExecutionOrder(script) }}</small><code>{{ script.findRegex.slice(0,120) }}{{ script.findRegex.length>120?'…':'' }}</code><span class="usage-line">{{ usageLabel('regex', script.id) }}</span></div></div>
+          <div class="resource-main"><div class="resource-icon">🧷</div><div><b>{{ script.name }}</b><small>{{ originLabel(script) }} · {{ regexPlacementLabel(script) }} · {{ regexEphemeralityLabel(script) }} · order {{ regexExecutionOrder(script) }}</small><code>{{ script.findRegex.slice(0,120) }}{{ script.findRegex.length>120?'…':'' }}</code><span class="usage-line">{{ usageLabel('regex', script.id) }}</span></div></div>
           <div class="regex-quick-controls">
             <label class="toggle"><input type="checkbox" :checked="script.enabled" @change="toggleRegexScriptEnabled(script,checkedFromEvent($event))" />脚本启用</label>
             <label class="order-control">执行顺序 <input type="number" :value="regexExecutionOrder(script)" @change="updateRegexOrder(script,numberFromEvent($event,regexExecutionOrder(script)))" /></label>
@@ -421,21 +427,22 @@ onMounted(async () => {
     <div v-if="editingRegex" class="regex-editor-backdrop" @click.self="closeRegexEditor">
       <section class="regex-editor-sheet">
         <header class="regex-editor-head"><div><small>REGEX · SHARED RESOURCE</small><h2>编辑正则</h2></div><button type="button" @click="closeRegexEditor">×</button></header>
-        <p class="regex-editor-note">这里只编辑社区 Regex 自己的字段。执行顺序越小越先运行；Regex 未命中不会阻止 AI 回复。</p>
+        <p class="regex-editor-note">按 SillyTavern 常见语义执行：placement 1=用户输入、2=AI 回复、3=Slash、5=世界书、6=Reasoning。主聊天目前执行 1/2/5；3/6 字段会保留但尚未接入对应运行时。Depth 0 是最近消息。</p>
         <div class="regex-editor-fields">
           <label>名称<input v-model="regexForm.name" /></label>
           <label>findRegex<textarea v-model="regexForm.findRegex" rows="5" spellcheck="false" /></label>
           <label>replaceString<textarea v-model="regexForm.replaceString" rows="7" spellcheck="false" /></label>
           <label>trimStrings（每行一项）<textarea v-model="regexForm.trimStringsText" rows="3" /></label>
-          <div class="regex-editor-grid"><label>placement<input v-model="regexForm.placementText" placeholder="例如 1, 2" /></label><label>执行顺序 order<input v-model.number="regexForm.order" type="number" /></label></div>
-          <div class="regex-editor-grid"><label>minDepth<input v-model="regexForm.minDepth" type="number" placeholder="留空" /></label><label>maxDepth<input v-model="regexForm.maxDepth" type="number" placeholder="留空" /></label></div>
+          <div class="regex-editor-grid"><label>placement<input v-model="regexForm.placementText" placeholder="例如 1, 2" /><small>1 用户 · 2 AI · 3 Slash · 5 世界书 · 6 Reasoning</small></label><label>执行顺序 order<input v-model.number="regexForm.order" type="number" /><small>数值越小越先执行</small></label></div>
+          <div class="regex-editor-grid"><label>minDepth<input v-model="regexForm.minDepth" type="number" placeholder="留空" /><small>0 = 最近一条消息</small></label><label>maxDepth<input v-model="regexForm.maxDepth" type="number" placeholder="留空" /><small>必须 ≥ minDepth</small></label></div>
           <label>substituteRegex<input v-model.number="regexForm.substituteRegex" type="number" /></label>
           <div class="regex-editor-toggles">
             <label><input v-model="regexForm.enabled" type="checkbox" />脚本启用</label>
-            <label><input v-model="regexForm.markdownOnly" type="checkbox" />markdownOnly</label>
-            <label><input v-model="regexForm.promptOnly" type="checkbox" />promptOnly</label>
+            <label><input v-model="regexForm.markdownOnly" type="checkbox" />markdownOnly · 只改变显示</label>
+            <label><input v-model="regexForm.promptOnly" type="checkbox" />promptOnly · 只改变发给 AI 的临时视图</label>
             <label><input v-model="regexForm.runOnEdit" type="checkbox" />runOnEdit</label>
           </div>
+          <p class="regex-editor-note">两项都不勾：永久改写聊天存储；只勾 markdownOnly：只改显示；只勾 promptOnly：只改下一次模型上下文；两项都勾：显示与模型上下文都改，但存储保持原文。runOnEdit 只控制手动编辑消息时是否重跑。</p>
         </div>
         <div class="regex-editor-actions"><button type="button" @click="closeRegexEditor">取消</button><button type="button" class="primary" @click="saveRegexEditor">保存 Regex</button></div>
       </section>

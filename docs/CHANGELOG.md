@@ -2,6 +2,20 @@
 
 > 精简版本变化。完整逐版本说明见 `RELEASE_HISTORY.md`。
 
+## V0.4.7.0 · Regex Pipeline V2 / Renderer 分层
+
+- Regex 按 placement + phase 执行，不再把 `promptOnly` 脚本错误作用到整个 System Prompt；
+- 对齐常见 SillyTavern ephemerality：两项都不勾=永久存储；markdownOnly=显示；promptOnly=出站 Prompt；两项都勾=显示+出站且不改存储；
+- `minDepth / maxDepth` 真正按历史深度执行，Depth 0 为最近消息；内部 director/music 指令不再错误推高历史 depth；
+- 修复出站 Prompt 在预筛选阶段把所有 Regex 误当 depth=0 的问题；带 `minDepth>0` 的脚本会保留到每条真实历史消息再判断；
+- `runOnEdit` 真正控制手动编辑消息时是否重跑 Regex；
+- 新增消息 `modelOutput / displayContent / regexPipelineVersion / regexApplied` 可选字段，不升级 IndexedDB；
+- 开场、用户输入、AI 回复、World Info 统一走分阶段 Regex Pipeline；
+- markdownOnly 社区 HTML/UI 只进入安全显示层，原始结构继续留在聊天上下文，不再把渲染 HTML 污染存储；
+- Prompt Debug 新增 Regex Pipeline V2，显示存储/显示/出站/World Info/Depth 跳过信息；
+- Regex 资源编辑器增加中文 placement、ephemerality、Depth 说明；placement 3/6 完整保留但主聊天暂未接 Slash/Reasoning runtime；
+- IndexedDB V14 / Backup V9 不变。
+
 ## V0.4.6.0 · Character Card Compatibility Alignment
 
 - 新增轻量 Character Compatibility Layer / Runtime Manifest，不升级数据库；

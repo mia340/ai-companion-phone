@@ -224,7 +224,9 @@ function characterText(character: Character) {
 }
 
 export function regexProducesRichUi(script: RegexScript) {
-  if (!script.enabled || script.promptOnly) return false
+  if (!script.enabled) return false
+  // ST ephemerality: promptOnly-only 不影响显示；markdownOnly+promptOnly 同时勾选时仍会影响显示，只是不写回存储。
+  if (script.promptOnly && !script.markdownOnly) return false
   return hasRichHtml(script.replaceString || '')
 }
 

@@ -2,13 +2,97 @@ import { db } from '../db/database'
 import { getCharacterResourceIds } from './resourceBindingService'
 import type { RegexScript } from '../types/domain'
 
-export type RegexTarget = 'user-input' | 'assistant-output' | 'world-info' | 'prompt'
+/**
+ * V0.4.7.0 Regex Pipeline V2
+ *
+ * SillyTavern-compatible model:
+ * - placement decides WHICH source is affected (user / assistant / world-info / reasoning / slash).
+ * - markdownOnly / promptOnly decide WHERE the transformed view exists:
+ *   - neither: persistent storage mutation; stored text is then naturally used by display + future prompts.
+ *   - markdownOnly only: display-only, storage unchanged.
+ *   - promptOnly only: outgoing-prompt-only, storage/display unchanged.
+ *   - both: display + outgoing prompt, storage unchanged.
+ *
+ * The app keeps the old exported helpers as compatibility wrappers, but new generation code should use
+ * applyRegexStage() with an explicit source + phase. This prevents a promptOnly response regex from being
+ * incorrectly applied to the whole system prompt.
+ */
 
-function targetPlacement(target: RegexTarget) {
-  if (target === 'user-input') return 1
-  if (target === 'assistant-output') return 2
-  if (target === 'world-info') return 5
-  return -1
+export type RegexSource = 'user-input' | 'assistant-output' | 'world-info' | 'slash-command' | 'reasoning'
+export type RegexPhase = 'storage' | 'display' | 'outgoing-prompt'
+export type RegexEvent = 'generate' | 'edit'
+
+/** @deprecated use RegexSource; kept so older imports compile. */
+export type RegexTarget = RegexSource | 'prompt'
+
+export type RegexEphemerality = 'persistent' | 'display-only' | 'prompt-only' | 'display-and-prompt'
+
+export interface RegexExecutionTrace {
+  scriptId: string
+  name: string
+  source: RegexSource
+  phase: RegexPhase
+  depth?: number
+  applied: boolean
+  reason?: 'matched' | 'no-match' | 'wrong-phase' | 'wrong-placement' | 'depth' | 'edit-disabled' | 'invalid-depth' | 'unsupported-placement'
+}
+
+export interface RegexStageOptions {
+  source: RegexSource
+  phase: RegexPhase
+  depth?: number
+  event?: RegexEvent
+  macros?: { user?: string; char?: string }
+}
+
+export interface RegexStageResult {
+  text: string
+  applied: string[]
+  rich: boolean
+  traces: RegexExecutionTrace[]
+}
+
+const SOURCE_PLACEMENT: Record<RegexSource, number> = {
+  'user-input': 1,
+  'assistant-output': 2,
+  'slash-command': 3,
+  'world-info': 5,
+  reasoning: 6
+}
+
+const SUPPORTED_NORMAL_PLACEMENTS = new Set(Object.values(SOURCE_PLACEMENT))
+
+export function regexSourcePlacement(source: RegexSource) {
+  return SOURCE_PLACEMENT[source]
+}
+
+export function regexEphemerality(script: RegexScript): RegexEphemerality {
+  if (script.markdownOnly && script.promptOnly) return 'display-and-prompt'
+  if (script.markdownOnly) return 'display-only'
+  if (script.promptOnly) return 'prompt-only'
+  return 'persistent'
+}
+
+/** Human-readable semantic label used by the resource editor/debugger. */
+export function regexEphemeralityLabel(script: RegexScript) {
+  const mode = regexEphemerality(script)
+  if (mode === 'persistent') return '永久改写存储'
+  if (mode === 'display-only') return '仅改变显示'
+  if (mode === 'prompt-only') return '仅改变发给 AI 的内容'
+  return '显示 + 发给 AI（不改存储）'
+}
+
+export function regexPlacementLabel(script: RegexScript) {
+  const labels = script.placement.map(value => {
+    if (value === 1) return '用户输入'
+    if (value === 2) return 'AI 回复'
+    if (value === 3) return 'Slash'
+    if (value === 5) return '世界书'
+    if (value === 6) return 'Reasoning'
+    return `未知 ${value}`
+  })
+  if (!labels.length && (script.sourceFormat === 'native' || script.sourceFormat === 'legacy')) return 'AI 回复（旧版兼容）'
+  return labels.length ? labels.join('、') : '未指定（正常聊天不执行）'
 }
 
 function parsePattern(source: string) {
@@ -48,16 +132,14 @@ function expandReplacement(template: string, match: string, groups: string[]) {
   return output
 }
 
-
 function normalizeStructuralDelimitersForRegex(text: string, script: RegexScript) {
   const source = script.findRegex || ''
-  // 只在作者 Regex 明确使用方括号结构时启用，避免把普通正文标点无条件改写。
+  // 作者明确写了方括号结构时，允许模型常见的全角括号偏差；不改作者 Regex 本体。
   if (!/(?:\\\[|\[)/.test(source)) return text
   let normalized = text
     .replace(/[【［]/g, '[')
     .replace(/[】］]/g, ']')
 
-  // 某些卡用半角冒号写字段名，模型常输出全角冒号；只处理方括号字段头，不改正文里的冒号。
   if (source.includes(':') && !source.includes('：')) {
     normalized = normalized.replace(/(\[[^\]\n]{1,40})：/g, '$1:')
   }
@@ -74,8 +156,6 @@ export function applyRegexScript(text: string, script: RegexScript, macros?: { u
     if (!pattern) return input
     return input.replace(pattern, (...args: unknown[]) => {
       const match = String(args[0] ?? '')
-      const offset = typeof args.at(-2) === 'number' ? Number(args.at(-2)) : 0
-      void offset
       const groupCount = Math.max(0, args.length - 3)
       const groups = args.slice(1, 1 + groupCount).map(value => String(value ?? ''))
       const trimmed = (script.trimStrings || []).reduce((current, item) => item ? current.split(item).join('') : current, match)
@@ -86,8 +166,6 @@ export function applyRegexScript(text: string, script: RegexScript, macros?: { u
   const direct = replaceWithPattern(text)
   if (direct !== text) return direct
 
-  // V0.4.4.5：作者写 [字段]、模型输出 【字段】 时做本地确定性兼容。
-  // 只改变 Regex 的输入视图，不改作者 Regex，也不调用第二次 AI。
   const compatibleInput = normalizeStructuralDelimitersForRegex(text, script)
   if (compatibleInput === text) return text
   const compatible = replaceWithPattern(compatibleInput)
@@ -101,10 +179,122 @@ export function regexExecutionOrder(script: RegexScript) {
   return Number.isFinite(legacy) ? legacy : 0
 }
 
+function regexPlacementMatches(script: RegexScript, source: RegexSource) {
+  // Old native/legacy rows created by this app used an empty placement to mean assistant output.
+  // Imported ST/Tavo/community rows keep standard semantics: empty placement = no automatic activation.
+  if (!script.placement.length) {
+    return source === 'assistant-output' && (script.sourceFormat === 'native' || script.sourceFormat === 'legacy' || !script.sourceFormat)
+  }
+  return script.placement.includes(regexSourcePlacement(source))
+}
+
+function hasUnsupportedOnlyPlacement(script: RegexScript) {
+  return Boolean(script.placement.length) && !script.placement.some(value => SUPPORTED_NORMAL_PLACEMENTS.has(value))
+}
+
+function normalizedDepthBounds(script: RegexScript) {
+  const min = script.minDepth == null || script.minDepth < 0 ? undefined : Math.floor(script.minDepth)
+  const max = script.maxDepth == null || script.maxDepth < 0 ? undefined : Math.floor(script.maxDepth)
+  return { min, max, invalid: min != null && max != null && max < min }
+}
+
+function regexDepthMatches(script: RegexScript, source: RegexSource, depth?: number) {
+  if (source === 'world-info' || source === 'slash-command') return { matches: true, invalid: false }
+  const bounds = normalizedDepthBounds(script)
+  if (bounds.invalid) return { matches: false, invalid: true }
+  const currentDepth = Math.max(0, Math.floor(depth ?? 0))
+  if (bounds.min != null && currentDepth < bounds.min) return { matches: false, invalid: false }
+  if (bounds.max != null && currentDepth > bounds.max) return { matches: false, invalid: false }
+  return { matches: true, invalid: false }
+}
+
+/**
+ * Determines whether a script should run in a specific ephemeral phase.
+ * Persistent message scripts run once in storage, not again in display/prompt, because their result is already canonical.
+ * World Info has no chat-storage row, so persistent scripts are applied while assembling the outgoing prompt.
+ */
+export function regexRunsInPhase(script: RegexScript, source: RegexSource, phase: RegexPhase) {
+  const mode = regexEphemerality(script)
+  if (source === 'world-info') {
+    if (phase !== 'outgoing-prompt') return false
+    return mode === 'persistent' || mode === 'prompt-only' || mode === 'display-and-prompt'
+  }
+  if (phase === 'storage') return mode === 'persistent'
+  if (phase === 'display') return mode === 'display-only' || mode === 'display-and-prompt'
+  return mode === 'prompt-only' || mode === 'display-and-prompt'
+}
+
+/**
+ * Pre-filter a phase whose message depth is not known yet (for example historical outgoing Prompt rows).
+ * Depth is intentionally NOT evaluated here; applyRegexStage() evaluates minDepth/maxDepth per real message later.
+ */
+export function regexScriptsForDynamicDepthPhase(
+  scripts: RegexScript[],
+  options: Pick<RegexStageOptions, 'source' | 'phase' | 'event'>
+) {
+  return scripts.filter(script => {
+    if (!script.enabled || !script.findRegex) return false
+    if (!regexPlacementMatches(script, options.source)) return false
+    if (!regexRunsInPhase(script, options.source, options.phase)) return false
+    if (options.event === 'edit' && !script.runOnEdit) return false
+    return true
+  })
+}
+
+export function regexScriptsForStage(scripts: RegexScript[], options: Omit<RegexStageOptions, 'macros'>) {
+  return regexScriptsForDynamicDepthPhase(scripts, options).filter(script =>
+    regexDepthMatches(script, options.source, options.depth).matches
+  )
+}
+
+export function applyRegexStage(text: string, scripts: RegexScript[], options: RegexStageOptions): RegexStageResult {
+  let output = text
+  const applied: string[] = []
+  const traces: RegexExecutionTrace[] = []
+  const sorted = scripts.slice().sort((a, b) => regexExecutionOrder(a) - regexExecutionOrder(b) || a.createdAt.localeCompare(b.createdAt))
+
+  for (const script of sorted) {
+    const baseTrace = { scriptId: script.id, name: script.name, source: options.source, phase: options.phase, depth: options.depth } as const
+    if (!script.enabled || !script.findRegex) continue
+    if (hasUnsupportedOnlyPlacement(script)) {
+      traces.push({ ...baseTrace, applied: false, reason: 'unsupported-placement' })
+      continue
+    }
+    if (!regexPlacementMatches(script, options.source)) {
+      traces.push({ ...baseTrace, applied: false, reason: 'wrong-placement' })
+      continue
+    }
+    if (!regexRunsInPhase(script, options.source, options.phase)) {
+      traces.push({ ...baseTrace, applied: false, reason: 'wrong-phase' })
+      continue
+    }
+    if (options.event === 'edit' && !script.runOnEdit) {
+      traces.push({ ...baseTrace, applied: false, reason: 'edit-disabled' })
+      continue
+    }
+    const depth = regexDepthMatches(script, options.source, options.depth)
+    if (!depth.matches) {
+      traces.push({ ...baseTrace, applied: false, reason: depth.invalid ? 'invalid-depth' : 'depth' })
+      continue
+    }
+    const next = applyRegexScript(output, script, options.macros)
+    if (next !== output) {
+      applied.push(script.name)
+      traces.push({ ...baseTrace, applied: true, reason: 'matched' })
+      output = next
+    } else {
+      traces.push({ ...baseTrace, applied: false, reason: 'no-match' })
+    }
+  }
+
+  return { text: output, applied, rich: looksLikeRichHtml(output), traces }
+}
+
+/** Compatibility helper: applies the supplied scripts exactly once without phase filtering. */
 export function applyRegexScripts(text: string, scripts: RegexScript[], macros?: { user?: string; char?: string }) {
   let output = text
   const applied: string[] = []
-  for (const script of scripts) {
+  for (const script of scripts.slice().sort((a, b) => regexExecutionOrder(a) - regexExecutionOrder(b) || a.createdAt.localeCompare(b.createdAt))) {
     const next = applyRegexScript(output, script, macros)
     if (next !== output) applied.push(script.name)
     output = next
@@ -112,28 +302,26 @@ export function applyRegexScripts(text: string, scripts: RegexScript[], macros?:
   return { text: output, applied, rich: looksLikeRichHtml(output) }
 }
 
+/** Returns active scripts scoped to a source. Phase filtering is intentionally separate. */
 export async function listActiveRegexScripts(characterId: string, target: RegexTarget): Promise<RegexScript[]> {
   const activeIds = new Set(await getCharacterResourceIds(characterId, 'regex'))
   const rows = await db.regexScripts.toArray()
-  const placement = targetPlacement(target)
   return rows
-    .filter(item => item.enabled)
-    .filter(item => activeIds.has(item.id))
+    .filter(item => item.enabled && activeIds.has(item.id))
     .filter(item => {
+      // Old callers used target='prompt'. Keep it as a safe compatibility view: prompt-affecting scripts only,
+      // but never pretend they target the whole system prompt.
       if (target === 'prompt') return item.promptOnly
-      if (item.promptOnly) return false
-      return item.placement.length === 0 ? target === 'assistant-output' : item.placement.includes(placement)
+      return regexPlacementMatches(item, target)
     })
     .sort((a, b) => regexExecutionOrder(a) - regexExecutionOrder(b) || a.createdAt.localeCompare(b.createdAt))
 }
-
 
 export function normalizeRichHtml(value: string) {
   const trimmed = value.trim()
   const fullyFenced = trimmed.match(/^```(?:html)?\s*([\s\S]*?)\s*```$/i)
   let source = (fullyFenced?.[1] || trimmed).trim()
 
-  // HTML fence 可能只是整条回复中的一部分；只解开 html fence，不破坏社区自己需要的普通 code block。
   source = source.replace(/```html\s*([\s\S]*?)\s*```/gi, (_whole, body: string) => String(body).trim())
 
   const documentToFragment = (documentHtml: string) => {
@@ -147,11 +335,8 @@ export function normalizeRichHtml(value: string) {
       .replace(/<\/?body\b[^>]*>/gi, '')
   }
 
-  // 社区正则经常返回完整 document。逐块转为 Shadow DOM 可挂载 fragment，
-  // 这样正文 + HTML UI 混合输出时也不会把正文一起丢掉。
   source = source.replace(/(?:<!doctype\s+html[^>]*>\s*)?<html\b[^>]*>[\s\S]*?<\/html>/gi, documentToFragment)
 
-  // 容错：少数模板只带 doctype/head/body，没有完整 </html>。
   if (/^\s*<!doctype\s+html/i.test(source) && /<body\b/i.test(source)) {
     source = documentToFragment(source)
   }
@@ -164,10 +349,6 @@ export function looksLikeRichHtml(value: string) {
   return /<(?:style|div|details|summary|section|article|span|img|table|p|audio|video|html|body|main|header|footer|ul|ol|li)\b/i.test(source)
 }
 
-/**
- * 很多 Tavo / 酒馆开场只用 <br> 做换行，并不是一整块 HTML UI。
- * 这类内容应该作为普通聊天文本显示真实换行，而不是把“<br>”字样漏进气泡。
- */
 export function normalizeCommunityPlainText(value: string) {
   if (looksLikeRichHtml(value)) return value.trim()
   return value
@@ -181,9 +362,23 @@ export async function applyRegexPipeline(options: {
   text: string
   characterId: string
   target: RegexTarget
+  phase?: RegexPhase
+  depth?: number
+  event?: RegexEvent
   userName?: string
   characterName?: string
 }) {
+  if (options.target === 'prompt') {
+    // Legacy API safety: promptOnly has no source by itself. Applying it to an arbitrary whole prompt would be wrong.
+    // New callers must choose user-input / assistant-output / world-info and phase='outgoing-prompt'.
+    return { text: options.text, applied: [], rich: looksLikeRichHtml(options.text), traces: [] as RegexExecutionTrace[] }
+  }
   const scripts = await listActiveRegexScripts(options.characterId, options.target)
-  return applyRegexScripts(options.text, scripts, { user: options.userName, char: options.characterName })
+  return applyRegexStage(options.text, scripts, {
+    source: options.target,
+    phase: options.phase || (options.target === 'world-info' ? 'outgoing-prompt' : 'display'),
+    depth: options.depth,
+    event: options.event,
+    macros: { user: options.userName, char: options.characterName }
+  })
 }

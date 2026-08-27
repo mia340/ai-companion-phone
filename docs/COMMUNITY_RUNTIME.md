@@ -55,6 +55,22 @@ V0.4.6.0 的 Prompt/开场兼容层支持 `{{user}}`、V3 nickname 驱动的 `{{
 
 V3 `use_regex` 有自己的 key matcher 语义。若条目存在 regex keys，则按标准关键词路径执行；对于真实旧社区导出中 `constant=true + use_regex=true + keys=[]` 的矛盾数据，兼容层保留 constant 常驻，避免旧卡整本世界书失活。该兜底只处理可识别的冲突数据，不作为新的全局协议。
 
+
+## 1.2 Regex Pipeline V2（V0.4.7.0）
+
+社区 Regex 现在按 SillyTavern 常见语义拆成三个实际阶段：
+
+| 配置 | 聊天存储 | 用户看到 | 下一次 AI 看到 |
+| --- | --- | --- | --- |
+| markdownOnly=false, promptOnly=false | **改写** | 改写后的 canonical | 改写后的 canonical |
+| markdownOnly=true, promptOnly=false | 不改 | **临时显示替换** | canonical 原文 |
+| markdownOnly=false, promptOnly=true | 不改 | canonical 原文 | **临时 Prompt 替换** |
+| markdownOnly=true, promptOnly=true | 不改 | **临时显示替换** | **临时 Prompt 替换** |
+
+`placement` 当前执行：1 用户输入、2 AI 回复、5 World Info；3 Slash 与 6 Reasoning 字段无损保留，主聊天暂未接对应运行时。`minDepth/maxDepth` 以最近消息为 Depth 0。手动编辑时只有 `runOnEdit=true` 的脚本重跑。
+
+因此典型社区状态 UI 可以保持：AI 输出 XML/占位符存在于 canonical 历史，`markdownOnly` Regex 只在屏幕上转换成作者 HTML；若另有 `promptOnly` 隐藏脚本，下一轮发给模型时才移除内部标签。显示 HTML 不再被误存回聊天历史。
+
 ## 2. 核心原则
 
 ### 2.1 原卡是内容权威

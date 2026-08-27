@@ -56,7 +56,7 @@ npm run dev -- --host 0.0.0.0
 ## 当前版本
 
 ```text
-V0.4.6.0
+V0.4.7.0
 IndexedDB V14
 Backup V9
 ```
@@ -89,4 +89,4 @@ Backup V9
 3. 截图；
 4. Prompt Debug。
 
-V0.4.6.0 起 Prompt Debug 的 `Character Card Runtime` 会显示卡版本、`{{char}}` 宏名、system prompt 模式、creator_notes 是否进 Prompt；协议级组合由开发回归负责。
+V0.4.7.0 起 Prompt Debug 的 `Character Card Runtime` 会显示卡版本、`{{char}}` 宏名、system prompt 模式、creator_notes 是否进 Prompt；协议级组合由开发回归负责。

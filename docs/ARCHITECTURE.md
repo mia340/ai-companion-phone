@@ -1,6 +1,6 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.4.6.0**。  
+> 当前文档版本：**V0.4.7.0**。  
 > V0.4.6.0 在现有 Runtime 上增加薄兼容层：角色卡字段语义优先跟随 V2/V3 与成熟社区生态，不通过大改数据库来重新定义角色卡。  
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
@@ -57,6 +57,34 @@ CharacterRuntimeManifest（可重建 / 0 Token）
 - `character_book`：交给 WorldBook Runtime；
 - Regex：交给 Regex Pipeline，不展平到角色 description；
 - 未识别 `extensions/assets/source`：Raw escrow 保留，能安全理解的再进入 Runtime。
+
+
+## 1.0.2 Regex Pipeline V2（V0.4.7.0）
+
+Regex 不再被视为“统一后处理器”。运行时把一条消息维护成多个视图：
+
+```text
+Provider raw output
+        ↓
+Storage Regex（两项 ephemerality 都未勾选）
+        ↓
+Canonical Message Storage
+        ├─ Display Regex（markdownOnly） → displayContent / Safe Rich UI
+        └─ Outgoing Regex（promptOnly） → 下一次请求的临时 ChatTurn
+```
+
+关键约束：
+
+- `placement` 决定来源，当前主聊天执行 1(User Input) / 2(AI Response) / 5(World Info)；
+- `markdownOnly` 与 `promptOnly` 是临时视图开关，不是脚本类型；
+- 两项都不勾才永久改写消息存储；
+- 两项都勾时显示与模型上下文都改变，但 canonical 存储保持原文；
+- `promptOnly` 永远不再对整个 System Prompt 运行；
+- `minDepth/maxDepth` 只按真实聊天行计数，内部导演指令不参与 depth；
+- `runOnEdit` 只在用户手动编辑消息时决定是否重跑；
+- Rich HTML 仍走 Safe Community UI，未知第三方 JS 不执行。
+
+这层只负责生态兼容；Presence、三种呈现、Resource Session、Memory 等产品 Runtime 不被 Regex 反向控制。
 
 ## 1.1 参考项目学习后的架构约束
 

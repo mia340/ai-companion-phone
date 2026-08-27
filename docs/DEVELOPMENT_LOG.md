@@ -1,5 +1,24 @@
 # 开发记录
 
+## 2026-08-25 · V0.4.7.0｜深读其他小手机后重构 Regex / Renderer 边界
+
+继续横向对照公开小手机与 SillyTavern 生态后，确认“角色卡/世界书/预设/Regex 是兼容底座，手机玩法是产品层”的方向。SillyTavern 当前 Regex 文档明确把 Affects、Depth 和 Ephemerality 分开；其他兼容前端也容易在只保留一个 `promptOnly` 开关时产生“屏幕改了、模型仍看到旧文本”的兼容缺口，因此本项目不再简化这层。
+
+本轮抽样用户提供的社区资源，识别到的 Regex 以 `markdownOnly` 显示脚本为主，同时存在 `markdownOnly+promptOnly` 的隐藏脚本和少量永久用户输入变换。由此决定：
+
+本轮对用户提供的社区资源包再次做元数据统计：可直接识别的 11 条 Regex 中，9 条是 `markdownOnly` 显示专用、1 条是 `markdownOnly+promptOnly`、1 条是永久改写；placement 以 AI 回复（2）为主，也有用户输入（1），并存在真实 `minDepth/maxDepth` 与 `runOnEdit`。这说明分离 Storage / Display / Outgoing Prompt 不是为单卡特判，而是与真实社区用法吻合。
+
+
+1. canonical storage、display projection、outgoing prompt projection 必须独立；
+2. promptOnly 按 placement 处理对应聊天消息/World Info，绝不能扫整个 system prompt；
+3. HTML Regex 属于 Renderer，不应该因此改变 AI 历史；
+4. 旧 native 空 placement 保留 AI-output 兼容，导入的社区空 placement 不擅自猜；
+5. 主聊天没有 Slash/Reasoning runtime 时明确标记“字段保留、暂未执行”，不做伪兼容；
+6. 用户无需手造 Regex 协议测试，开发回归负责四种 ephemerality、Depth、runOnEdit 与真实社区组合。
+7. 出站 Prompt 不能在候选阶段用缺省 depth=0 过滤 `minDepth>0`；候选先按 source/phase 保留，真正 depth 必须在每条历史消息上执行。
+
+保留本项目特色：Presence 与呈现模式独立、多聊天/Branch、Resource Session、六层记忆、Prompt Debug、Safe Community UI。
+
 ## 2026-08-23 · V0.4.6.0｜从“自创角色卡协议”转向生态兼容校准
 
 ### 决策
@@ -40,8 +59,6 @@
 结论：`use_regex` 是 key matcher 的行为开关，不能改变 constant 的常驻语义。修复后这类卡的角色信息、背景、状态栏、手机格式等常驻规则重新参与 Prompt，固定状态 Regex/UI 也能恢复执行链。
 
 同时记录产品测试原则：协议级组合测试由开发者自动/代码回归负责，普通用户只验证真实角色卡结果，不要求理解 Bessie/Rufus、Selective Logic 数值或 @D 位置参数。
-
-# 开发记录
 
 ## 2026-08-23 · V0.4.5.0｜参考项目学习与 WorldBook Engine V2
 
