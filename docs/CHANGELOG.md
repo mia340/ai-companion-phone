@@ -2,6 +2,16 @@
 
 > 精简版本变化。完整逐版本说明见 `RELEASE_HISTORY.md`。
 
+## V0.4.7.1 · Community UI / 编辑后重生成稳定补丁
+
+- 修复无 Regex、由 WorldBook HTML 模板驱动的状态 UI 未识别 `【状态栏】` 前导，后续回复可直接本地回填作者模板；
+- Rich UI 不再统一透明：作者自带视觉表面继续透明承载，裸旧社区 markup 使用中性背景；HTML 开场中的 Markdown 图片转成安全静态 `<img>`；
+- 纯手机多气泡新增“共同回应最新用户消息”的连续性约束，不再鼓励泛泛拆句；
+- 动作/台词分开模式在自然反应存在时加强 `scene_action` 输出合同，远程动作只描述角色自己一端；
+- 用户消息操作菜单新增“从这条消息重新回复”，编辑用户消息后可确认截断旧后续并重新生成；
+- 回滚时重建该节点前 ConversationState，只清理失效分支的自动记忆/状态历史/Prompt Debug，不删除手工或导入记忆；
+- IndexedDB V14 / Backup V9 不变。
+
 ## V0.4.7.0 · Regex Pipeline V2 / Renderer 分层
 
 - Regex 按 placement + phase 执行，不再把 `promptOnly` 脚本错误作用到整个 System Prompt；

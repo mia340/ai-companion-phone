@@ -4,6 +4,10 @@
 > 当前使用说明请看 `README.md`，当前状态请看 `PROJECT_STATUS.md`，当前架构请看 `ARCHITECTURE.md`。  
 > 这里的旧版本描述保持历史语境，不代表当前运行状态；数据库版本、限制和实现边界以当前文档为准。
 
+## V0.4.7.1｜Community UI / 编辑后重生成稳定补丁
+
+基于 V0.4.7.0 的真实角色卡验收，修复四类通用运行问题：WorldBook HTML 状态栏的数据标题兼容、旧 Rich 开场透明/Markdown 图片、纯手机与动作分离输出合同、用户消息编辑后的分支重生成。作者模板仍是视觉权威，本地只做确定性数据填槽与安全承载；用户消息 rewind 会截断失效后续并重建 ConversationState，手工/导入记忆不受影响。IndexedDB 仍为 V14，Backup 仍为 V9。
+
 ## V0.4.7.0｜Regex Pipeline V2 / Renderer 分层
 
 在 V0.4.6.0 角色卡兼容校准基础上，重构 Regex 执行边界：消息新增 raw/model/canonical/display 多视图；用户输入、AI 回复与 World Info 按 placement 执行；markdownOnly/promptOnly 按 ephemerality 分离存储、显示和出站 Prompt；Depth/runOnEdit 真正执行，并修复动态历史 depth 在预筛选阶段被误当 0 的边界；开场、编辑、普通回复统一进入 Pipeline；Prompt Debug 和资源编辑器同步升级。数据库仍为 IndexedDB V14 / Backup V9。

@@ -1,14 +1,14 @@
 # AI Companion Phone Docs
 
-当前文档版本：**V0.4.7.0**
+当前文档版本：**V0.4.7.1**
 
 ```text
-应用：V0.4.7.0
+应用：V0.4.7.1
 IndexedDB：V14
 Backup：V9
 ```
 
-V0.4.7.0 是 **Regex Pipeline V2 / Renderer 分层**：继续沿用 V0.4.6.0 的角色卡生态兼容层，把 Regex 真正拆成规范化存储、显示投影和出站 Prompt 三阶段；底层继续向 Character Card / SillyTavern 社区语义靠拢，小手机特色仍集中在多会话、Presence、三种呈现、Resource Session、Prompt Debug 与 Safe Community UI。数据库版本保持不变。
+V0.4.7.1 是 **Community UI / 呈现协议稳定补丁**：不改变 V0.4.7.0 的 Regex Pipeline V2 架构，修复作者状态栏 HTML 本地恢复、旧开场透明承载与 Markdown 图片、纯手机多气泡上下文连续性、动作/台词分开缺少动作，以及用户消息编辑后无法从该节点重新回复的问题。数据库版本保持 IndexedDB V14 / Backup V9。
 
 ## 文档怎么读
 

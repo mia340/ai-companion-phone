@@ -71,6 +71,14 @@ V3 `use_regex` 有自己的 key matcher 语义。若条目存在 regex keys，�
 
 因此典型社区状态 UI 可以保持：AI 输出 XML/占位符存在于 canonical 历史，`markdownOnly` Regex 只在屏幕上转换成作者 HTML；若另有 `promptOnly` 隐藏脚本，下一轮发给模型时才移除内部标签。显示 HTML 不再被误存回聊天历史。
 
+## 1.3 Community UI 承载与作者模板连续性（V0.4.7.1）
+
+当作者世界书明确提供每轮 HTML 状态栏模板，而模型输出的是 `【状态栏】...【正文】...` 这类数据形态时，Community UI Compiler 可以确定性地把 AI 已生成的数据填回作者模板。`状态栏` 与 `状态信息` 都视为通用状态前导标签；应用只替换模板槽，不创造角色状态。
+
+Rich HTML 的宿主表面按内容能力判定：作者 HTML 自带 background/border/shadow 时不套额外气泡；只有旧社区 `<details>/<br>` 等没有视觉表面的开场才提供中性承载背景。HTML 中混用的 `![](https://...)` Markdown 图片会转换成静态 `<img>`，之后仍由 SafeRichHtml 执行 URL/DOM 安全清洗。
+
+三种呈现继续独立于 Presence：纯手机多条 text 必须共同回应最新用户消息；动作/台词分开模式可在远程场景展示角色自己一端的自然 `scene_action`，但不能暗示用户物理可见，也不能本地生成动作。
+
 ## 2. 核心原则
 
 ### 2.1 原卡是内容权威

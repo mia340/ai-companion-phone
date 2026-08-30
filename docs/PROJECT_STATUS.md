@@ -1,5 +1,16 @@
 # AI Companion Phone 项目状态
 
+## V0.4.7.1｜Community UI / 编辑后重生成稳定补丁
+
+本轮不是新协议大改，而是对 V0.4.7.0 真实角色卡验收暴露的四条运行链做通用修复：
+
+- Community UI Compiler 的状态前导解析同时识别 `状态信息 / 状态栏`，AI 已生成状态数据时可本地填回作者原 HTML，不为 UI 重写剧情；
+- Rich UI 外层不再一律透明：作者 HTML 已自带背景/边框/阴影时保持透明承载，只有裸 `<details>/<br>` 等旧开场时增加中性表面；旧 HTML 开场内的 Markdown 图片转成安全静态 `<img>` 后仍由 SafeRichHtml 清洗；
+- 纯手机多气泡要求共同回应最新用户消息，禁止为了手机感拆成语义断裂的泛泛短句；是否追问具体细节仍由角色与语境决定；
+- 动作/台词分开模式在存在自然反应且作者未要求纯消息时，优先要求至少一个有情境价值的 `scene_action`；远程动作只描述角色自己一端，不改变 Presence；
+- 用户消息可“从这条消息重新回复”：确认后截断后续旧分支，回滚该分支的状态历史、调试记录与自动记忆，再按编辑后的真实消息重新生成；手工/导入记忆不会被误删；
+- IndexedDB V14 / Backup V9 不变，不需要清库或重导角色卡。
+
 ## V0.4.7.0｜Regex Pipeline V2 / Renderer 分层
 
 本轮继续“大改”，但只重构生态兼容层，不推翻 Conversation、WorldBook、Memory 或数据库。核心目标是把同一条消息拆成 **模型原始输出 / 规范化存储 / 显示投影 / 下一次发给 AI 的临时投影**，避免社区 Regex 把 HTML 写进历史或把 promptOnly 错套到整个 System Prompt。
@@ -43,12 +54,12 @@
 ## 当前版本
 
 ```text
-应用：V0.4.7.0
+应用：V0.4.7.1
 IndexedDB：V14
 Backup：V9
 ```
 
-V0.4.7.0 是 **Regex Pipeline V2 / Renderer 分层**：在不升级 IndexedDB / Backup 的前提下，把此前“能导入字段”推进为“真正执行字段”，并将新一批公开小手机项目的架构学习结果纳入长期路线。
+V0.4.7.1 延续 **Regex Pipeline V2 / Renderer 分层**，重点稳定 Community UI、三种呈现与用户消息编辑后的分支生命周期；底层协议与数据版本不变。
 
 ## 当前阶段
 

@@ -1,6 +1,6 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.4.7.0**。  
+> 当前文档版本：**V0.4.7.1**。  
 > V0.4.6.0 在现有 Runtime 上增加薄兼容层：角色卡字段语义优先跟随 V2/V3 与成熟社区生态，不通过大改数据库来重新定义角色卡。  
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
@@ -85,6 +85,15 @@ Canonical Message Storage
 - Rich HTML 仍走 Safe Community UI，未知第三方 JS 不执行。
 
 这层只负责生态兼容；Presence、三种呈现、Resource Session、Memory 等产品 Runtime 不被 Regex 反向控制。
+
+## 1.0.3 Renderer Surface + Message Rewind（V0.4.7.1）
+
+V0.4.7.1 不改变 Regex Pipeline V2 的三视图，只补两个产品边界：
+
+1. **Rich Surface 判定**：作者 HTML 本身声明 `background / border / box-shadow` 时，聊天气泡只做透明承载；只有旧社区裸 markup 没有视觉表面时，宿主提供中性背景。宿主不重写作者色彩与布局。
+2. **User-message rewind**：编辑或选择某条用户消息后可从该节点重新生成。运行时截断后续消息，并把 ConversationState 重建到该节点之前，再重放编辑后的用户消息产生的显式场景变化和自动记忆。该操作只清理当前失效分支产生的自动状态，不删除 Character / Persona / ResourceBinding / 手工记忆。
+
+这两个能力都属于应用 Runtime / Renderer，不改变 Character Card、WorldBook 或 Regex 的作者语义。
 
 ## 1.1 参考项目学习后的架构约束
 

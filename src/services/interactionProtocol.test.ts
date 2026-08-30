@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildInteractionProtocolPrompt,
   buildPresentationOverridePrompt,
   extractInlineSceneActions,
   naturalnessWarnings,
@@ -267,4 +268,20 @@ it('V0.4.4.7 纯手机在本轮只有旁白动作时宁可不显示，也不把�
   const parsed = parseCompanionOutput(raw)
   const shaped = shapeCompanionActions(parsed.messages, character, settings, false, createDefaultConversationState('v447-narration-only'))
   expect(shaped).toEqual([])
+})
+
+it('V0.4.7.1 纯手机多气泡提示要求共同承接最新用户消息', () => {
+  const settings = { ...createDefaultChatSettings('continuity'), conversationPresentationMode: 'phone-text' as const }
+  const prompt = buildPresentationOverridePrompt(settings)
+  expect(prompt).toContain('共同构成对用户最新一条消息的同一轮回应')
+  expect(prompt).toContain('不能为了“像聊天软件”而拆成彼此语义断裂')
+})
+
+it('V0.4.7.1 动作台词分开会要求有自然反应时优先输出 scene_action，远程不改变 presence 语义', () => {
+  const settings = { ...createDefaultChatSettings('split-action'), conversationPresentationMode: 'phone-split' as const, actionVisibility: 'always' as const }
+  const state = { ...createDefaultConversationState('split-action'), presence: 'remote' as const }
+  const prompt = buildInteractionProtocolPrompt(settings, character, state)
+  expect(prompt).toContain('至少包含 1 条 scene_action')
+  expect(prompt).toContain('角色自己一端')
+  expect(prompt).toContain('不代表用户物理可见')
 })

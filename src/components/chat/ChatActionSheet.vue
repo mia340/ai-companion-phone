@@ -77,12 +77,14 @@ const emit = defineEmits<{
       重新发送
     </button>
     <button
-      v-if="message && message.senderId !== 'user'"
+      v-if="message"
       type="button"
       :disabled="isSending"
       @click="emit('regenerate')"
     >
-      {{ swipeRepliesEnabled ? '换一个回复（保留旧版本）' : '重新生成' }}
+      {{ message.senderId === 'user'
+        ? '从这条消息重新回复'
+        : (swipeRepliesEnabled ? '换一个回复（保留旧版本）' : '重新生成') }}
     </button>
     <button type="button" class="danger-text" @click="emit('delete')">删除</button>
     <button type="button" @click="emit('close')">取消</button>

@@ -323,7 +323,7 @@ function splitStatusPrelude(raw: string) {
   const statusField = /^(?:[^\p{L}\p{N}\n]{0,3})?(?:日期|时间|地点|当前地点|天气|季节|人物|在场人物|在场角色|相对位置|衣着|穿着|关系|亲密状态|恋爱纪念日|恋爱天数|内心|心声|环境|状态)\s*[：:∶﹕︰|]/u
   for (; index < lines.length; index += 1) {
     const line = lines[index].trim()
-    if (/^【?状态信息】?\s*[：:]?$/u.test(line)) {
+    if (/^【?(?:状态信息|状态栏)】?\s*[：:]?$/u.test(line)) {
       started = true
       continue
     }
@@ -377,7 +377,7 @@ export function tryRepairCommunityUiLocally(contract: CommunityUiContract, rawTe
   let html = contract.exactHtmlTemplate
   const statusHtml = parts.status.map(escapeHtmlText).join('<br>')
   const bodyHtml = escapeHtmlText(body)
-    .replace(/(?:^|\n)\s*(?:【(?:正文|角色互动|场外观众席)】|(?:正文|角色互动|场外观众席)\s*[：:])\s*/g, '\n')
+    .replace(/(?:^|\n)\s*(?:【(?:状态栏|状态信息|正文|角色互动|场外观众席)】|(?:状态栏|状态信息|正文|角色互动|场外观众席)\s*[：:])\s*/g, '\n')
     .trim()
     .replace(/\n/g, '<br>')
 

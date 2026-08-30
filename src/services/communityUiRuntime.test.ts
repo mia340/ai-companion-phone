@@ -234,3 +234,27 @@ it('V0.4.6.0 紧凑状态补全提示不要求重写正文或 HTML', () => {
   expect(prompt).toContain('不要输出 Markdown')
   expect(prompt).toContain('他看着你。')
 })
+
+it('V0.4.7.1 本地 HTML Compiler 识别“【状态栏】”标题并恢复作者模板', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    lorebookPrompt: `每次回复正文开头必须携带状态栏格式UI。状态栏格式UI如下:
+<div style="width:260px;background:#FFFCFD"><details><summary>状态信息</summary><div><div>状态占位</div></div></details><div><div>正文</div><div>正文占位</div></div><details><summary>角色互动</summary><div><div>互动占位</div></div></details><details><summary>场外观众席</summary><div><div>观众占位</div></div></details></div>`
+  })
+  const repaired = tryRepairCommunityUiLocally(contract, `【状态栏】
+📆2027年9月10日 周五｜19:02｜暴雨如注
+🗺地点：A市-田螺公寓｜客厅
+😶在场角色：角色；你
+💛角色站在你身后。
+▪关系：重组家庭继兄妹
+♥内心：担心你。
+
+【正文】
+“对不起什么？”
+他把干净衣服递到你面前。`)
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('#FFFCFD')
+  expect(repaired.text).toContain('状态信息')
+  expect(repaired.text).toContain('对不起什么')
+  expect(repaired.text).not.toContain('【状态栏】')
+})

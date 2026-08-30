@@ -2884,10 +2884,20 @@ async function editSelectedMessage() {
   const index = messages.value.findIndex(item => item.id === message.id)
   if (index >= 0) messages.value[index] = { ...messages.value[index], ...patch }
   selectedMessage.value = index >= 0 ? messages.value[index] : undefined
-  noticeMessage.value = scripts.some(item => item.runOnEdit)
-    ? '消息已编辑；仅执行了作者标记为 runOnEdit 的 Regex。后续回复不会自动重算。'
-    : '消息已编辑。当前 Regex 没有启用 runOnEdit；后续回复不会自动重算。'
+  const updatedMessage = index >= 0 ? messages.value[index] : undefined
   activePanel.value = null
+
+  if (updatedMessage?.senderId === 'user') {
+    noticeMessage.value = scripts.some(item => item.runOnEdit)
+      ? '用户消息已编辑；已按作者 runOnEdit Regex 更新。可从这条消息重新生成后续回复。'
+      : '用户消息已编辑。可从这条消息重新生成后续回复。'
+    await regenerateFromUserMessage(updatedMessage, true)
+    return
+  }
+
+  noticeMessage.value = scripts.some(item => item.runOnEdit)
+    ? '角色消息已编辑；仅执行了作者标记为 runOnEdit 的 Regex。'
+    : '角色消息已编辑。当前 Regex 没有启用 runOnEdit。'
 }
 
 async function continueSelectedReply() {
@@ -3072,9 +3082,171 @@ function sourceMessageBefore(message: Message) {
   return undefined
 }
 
+async function rebuildConversationStateBeforeUserMessage(message: Message) {
+  if (!conversation.value || !character.value) return createDefaultConversationState(message.conversationId)
+  const selectedIndex = messages.value.findIndex(item => item.id === message.id)
+  const retained = selectedIndex > 0 ? messages.value.slice(0, selectedIndex) : []
+  const retainedIds = new Set(retained.map(item => item.id))
+  const personaName = activePersona.value?.name?.trim() || '你'
+  const state = createDefaultConversationState(conversation.value.id)
+
+  // 先恢复真实开场已经建立的场景事实，再重放该节点之前的状态历史。
+  const greeting = retained.find(item => item.isGreetingSeed && item.senderId !== 'user')
+  if (greeting) {
+    const source = greeting.rawContent || greeting.content
+    const plain = normalizeCommunityPlainText(source)
+    const ui = greeting.roleCardUi || extractRoleCardUiHints(plain)
+    const patch = roleCardUiToConversationPatch(plain, ui, [personaName])
+    const presence = resolvePresenceFromRoleCardScene(source, ui, undefined, [personaName]).resolvedPresence
+    Object.assign(state, patch)
+    if (presence) state.presence = presence
+    state.innerActivity = inferCardInitialActivity(source) || state.innerActivity
+    state.relationshipNote = inferCardInitialRelationship(source) || state.relationshipNote
+  }
+
+  const history = await db.conversationStateHistory.where('conversationId').equals(conversation.value.id).toArray()
+  const relevant = history
+    .filter(row => row.createdAt < message.createdAt)
+    .filter(row => !row.sourceMessageId || retainedIds.has(row.sourceMessageId))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  for (const row of relevant) {
+    if (row.field === 'location') state.location = row.nextValue
+    else if (row.field === 'presence' && (row.nextValue === 'together' || row.nextValue === 'remote')) state.presence = row.nextValue
+    else if (row.field === 'timePeriod') state.timePeriod = row.nextValue
+    else if (row.field === 'energy') state.energy = row.nextValue
+    else if (row.field === 'mood') state.innerMood = row.nextValue
+    else if (row.field === 'activity') state.innerActivity = row.nextValue
+    else if (row.field === 'relationship') state.relationshipNote = row.nextValue
+    else if (row.field === 'topic') state.unresolvedTopics = Array.from(new Set([...(state.unresolvedTopics || []), row.nextValue])).slice(-6)
+    else if (row.field === 'goal') state.shortTermGoals = Array.from(new Set([...(state.shortTermGoals || []), row.nextValue])).slice(-6)
+    else if (row.field === 'event' && row.label === '等待中的事件') state.pendingEvents = Array.from(new Set([...(state.pendingEvents || []), row.nextValue])).slice(-6)
+    else if (row.field === 'event') state.lastCompletedEvent = row.nextValue
+  }
+
+  state.summary = ''
+  state.summaryMessageCount = 0
+  state.innerThought = ''
+  state.thoughtUpdatedAt = undefined
+  state.activeResourceEntryId = undefined
+  state.activeResourceTitle = undefined
+  state.activeResourceUpdatedAt = undefined
+  state.lorebookRuntime = {}
+  state.lastActionSummary = ''
+  state.lastTechnicalError = ''
+  state.lastProviderNotice = ''
+  state.updatedAt = new Date().toISOString()
+  await db.conversationStates.put(state)
+  conversationState.value = state
+  return state
+}
+
+async function applyEditedUserMessageRuntimeEffects(message: Message) {
+  if (!conversation.value || !character.value || !chatSettings.value || !message.content.trim()) return
+  let state = conversationState.value || await getConversationState(conversation.value.id)
+  const now = new Date().toISOString()
+  const transition = deriveUserSceneTransition(message.content, state)
+  if (transition) {
+    const before = state
+    state = await patchConversationState(conversation.value.id, {
+      presence: transition.presence,
+      presenceResolutionSource: 'user-transition',
+      presenceResolutionReason: `${transition.reason}：${transition.evidence}`,
+      statusUpdatedAt: now
+    })
+    await recordConversationStateChanges({ conversationId: conversation.value.id, characterId: character.value.id, before, after: state, sourceMessageId: message.id })
+    conversationState.value = state
+    if (chatSettings.value.presenceMode !== 'auto') {
+      chatSettings.value = { ...chatSettings.value, presenceMode: 'auto' }
+      await saveChatSettings(chatSettings.value)
+    }
+  }
+
+  const runtimeProfile = resolveCharacterRuntimeProfile({ character: character.value, settings: chatSettings.value })
+  if (runtimeProfile.compatibilityMode === 'phone-enhanced') {
+    const before = state
+    state = await patchConversationState(conversation.value.id, deriveUserStatePatch(message.content, before))
+    await recordConversationStateChanges({ conversationId: conversation.value.id, characterId: character.value.id, before, after: state, sourceMessageId: message.id })
+    conversationState.value = state
+  }
+
+  if (chatSettings.value.memoryEnabled) {
+    await rememberFromMessageDetailed({
+      conversationId: conversation.value.id,
+      characterId: character.value.id,
+      sourceMessageId: message.id,
+      text: message.content,
+      strength: chatSettings.value.memoryStrength
+    })
+    await refreshMemoryList()
+  }
+}
+
+async function regenerateFromUserMessage(message: Message, confirmTruncate = true) {
+  if (!conversation.value || !character.value || !chatSettings.value || message.senderId !== 'user' || isSending.value) return
+  const index = messages.value.findIndex(item => item.id === message.id)
+  if (index < 0) return
+  const descendants = messages.value.slice(index + 1)
+  if (confirmTruncate && descendants.length) {
+    const confirmed = window.confirm('将从这条用户消息重新生成后续剧情。该消息之后现有的回复和后续消息会从当前聊天中移除；角色卡、Persona、资源绑定不会删除。\n\n确定继续吗？')
+    if (!confirmed) return
+  }
+
+  const affectedIds = new Set([message.id, ...descendants.map(item => item.id)])
+  const [memoryRows, historyRows, debugRows] = await Promise.all([
+    db.memories.where('conversationId').equals(conversation.value.id).toArray(),
+    db.conversationStateHistory.where('conversationId').equals(conversation.value.id).toArray(),
+    db.promptDebugTraces.where('conversationId').equals(conversation.value.id).toArray()
+  ])
+  const now = new Date().toISOString()
+  const automaticMemories = memoryRows.filter(row =>
+    (row.sourceType === 'automatic' || (!row.sourceType && Boolean(row.sourceMessageId))) &&
+    row.sourceMessageId &&
+    affectedIds.has(row.sourceMessageId)
+  )
+  // 只删除由当前分支新建的自动记忆；如果一条旧自动记忆只是后来被当前分支合并过，保留旧内容并移除失效来源。
+  const memoryIds = automaticMemories
+    .filter(row => row.createdAt >= message.createdAt)
+    .map(row => row.id)
+  const memoryPatches = automaticMemories
+    .filter(row => row.createdAt < message.createdAt)
+    .map(row => ({
+      id: row.id,
+      sourceMessageId: undefined,
+      mergedFrom: (row.mergedFrom || []).filter(id => !affectedIds.has(id)),
+      updatedAt: now
+    }))
+  const historyIds = historyRows.filter(row => row.sourceMessageId && affectedIds.has(row.sourceMessageId)).map(row => row.id)
+  const debugIds = debugRows.filter(row => row.createdAt >= message.createdAt).map(row => row.id)
+  const descendantIds = descendants.map(item => item.id)
+
+  await db.transaction('rw', [db.messages, db.memories, db.conversationStateHistory, db.promptDebugTraces, db.conversations], async () => {
+    if (descendantIds.length) await db.messages.bulkDelete(descendantIds)
+    if (memoryIds.length) await db.memories.bulkDelete(memoryIds)
+    for (const { id, ...changes } of memoryPatches) await db.memories.update(id, changes)
+    if (historyIds.length) await db.conversationStateHistory.bulkDelete(historyIds)
+    if (debugIds.length) await db.promptDebugTraces.bulkDelete(debugIds)
+    await db.conversations.update(conversation.value!.id, { updatedAt: now })
+  })
+
+  messages.value = messages.value.slice(0, index + 1)
+  await rebuildConversationStateBeforeUserMessage(message)
+  await applyEditedUserMessageRuntimeEffects(message)
+  await updateUserMessageState(message.id, 'delivered')
+  activePanel.value = null
+  noticeMessage.value = descendants.length ? '已回到编辑后的这条消息，正在重新生成后续回复。' : '正在根据这条消息生成回复。'
+  await requestAssistantReply({
+    sourceMessageId: message.id,
+    visualMessageId: message.type === 'image' ? message.id : undefined
+  })
+}
+
 async function regenerateSelectedMessage() {
   const message = selectedMessage.value
-  if (!message || message.senderId === 'user' || isSending.value) return
+  if (!message || isSending.value) return
+  if (message.senderId === 'user') {
+    await regenerateFromUserMessage(message)
+    return
+  }
 
   const source = sourceMessageBefore(message)
   activePanel.value = null

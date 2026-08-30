@@ -341,6 +341,14 @@ export function normalizeRichHtml(value: string) {
     source = documentToFragment(source)
   }
 
+  // 老社区卡常在 HTML / <details> 开场里混用 Markdown 图片。这里只转成静态图片，
+  // 后续仍由 SafeRichHtml 做 URL / DOM 清洗，不执行任何第三方脚本。
+  source = source.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/gi, (_whole, alt: string, url: string) => {
+    const safeAlt = String(alt).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    const safeUrl = String(url).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    return `<img src="${safeUrl}" alt="${safeAlt}" loading="lazy">`
+  })
+
   return source.trim()
 }
 

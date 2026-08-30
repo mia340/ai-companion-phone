@@ -152,12 +152,14 @@ export function buildPresentationOverridePrompt(settings: ChatSettings): string 
       '不要输出动作、旁白、心理、状态栏、日期地点、好感度、人物面板、HTML/XML/Markdown UI、场外观众席、角色互动栏或任何解释性标签。即使原卡通常带这些 UI，本模式也只保留其剧情语义，不输出界面外壳。',
       '如果角色这一轮自然发送一条完整长消息/小作文，就保持一条 text，不要按句号机械拆开；只有角色确实想连续发送数条独立短消息时才使用多个 text。',
       '绝对不要替用户生成新的发言、消息、选择或动作。任何 user/{{user}}/自己/我方/右侧用户消息槽只能引用真实历史中用户已经发送过的内容，本轮不得补写。',
-      '需要多条消息时优先使用 companion_packet 的多个 text；每个 text 都只能是角色本人发送的内容。'
+      '需要多条消息时优先使用 companion_packet 的多个 text；每个 text 都只能是角色本人发送的内容。',
+      '多个 text 必须共同构成对用户最新一条消息的同一轮回应：后一条应自然承接前一条，不能为了“像聊天软件”而拆成彼此语义断裂、泛泛关心或跳过当前话题的句子。角色是否追问细节仍由角色设定和语境决定。'
     ].join('\n')
   }
   return [
     '【用户选择的最终呈现方式 · 最高优先级】',
-    '当前是“动作 / 台词分开”。只输出角色本轮可见动作 scene_action 与角色本人真正说出/发送的 text。',
+    '当前是“动作 / 台词分开”。只输出角色本轮动作 scene_action 与角色本人真正说出/发送的 text。',
+    '这是读者呈现方式，不等于双方必须同场：远程时 scene_action 可以写角色自己那一端真实发生的动作、表情、停顿或与环境的互动，但不能伪装成用户亲眼看见。只要作者没有明确要求纯消息、且本轮角色存在自然反应，至少给出 1 条有情境价值的 scene_action；不要机械写“看手机/打字”。',
     '不要输出状态栏、日期地点面板、好感度面板、作者 HTML/UI 外壳、场外观众席或其它状态型附属界面；剧情事实可以继续在后台上下文中保持。',
     '绝对不要替用户生成新的发言、消息、选择或动作。'
   ].join('\n')
@@ -189,7 +191,7 @@ export function buildInteractionProtocolPrompt(
     ? '当前聊天呈现方式是“场景合并”：动作与对白使用同一个剧情气泡；scene_action 与相邻 text 会由界面合并，不要把动作复制进对白。'
     : presentationMode === 'phone-text'
       ? '当前聊天呈现方式是“纯手机消息”：只输出角色本人真正发送/说出的 text；不要输出 scene_action、状态栏、旁白或 UI。角色仍可在内部保持动作与环境事实。'
-      : '当前聊天呈现方式是“动作 / 台词分开”：scene_action 是独立动作消息，对白保持 text；不要把动作复制进对白。'
+      : '当前聊天呈现方式是“动作 / 台词分开”：scene_action 是独立动作消息，对白保持 text；不要把动作复制进对白。远程时 scene_action 可描述角色自己一端的真实动作，不代表用户物理可见。'
 
   const sceneRule = presence === 'together'
     ? [
@@ -205,6 +207,8 @@ export function buildInteractionProtocolPrompt(
         '当前相处状态：你与用户不在同一现场，通过当前世界观允许的远程方式联系。不要默认角色拥有手机、聊天软件或现代设备；若角色卡/世界观没有明确现代通讯设定，只描述角色自身状态与回复，不凭空加入设备动作。',
         presentationMode === 'phone-text' || actionVisibility !== 'always'
           ? '当前可见动作关闭：不要输出 scene_action。'
+          : presentationMode === 'phone-split'
+          ? '用户明确选择了动作 / 台词分开：若角色本轮有自然反应，至少输出 1 条有情境价值的 scene_action，可写角色自己一端的动作/表情/停顿；不要机械写“看手机/打字”。'
           : '可以输出有情境价值的 scene_action；不要为了满足协议机械补动作。',
         layoutRule,
         '远程对白保持自然完整。除非你明确想发送连续多条消息，否则不要为了“小手机感”把一个完整段落按句号、引号或换行机械拆成多条。'
@@ -212,13 +216,20 @@ export function buildInteractionProtocolPrompt(
       : [
         '当前相处状态尚未确定。必须根据原角色卡、当前剧情地点和本轮实际互动判断；不要默认远程，也不要默认同场。',
         '如果本轮出现明确身体接触或只能同场发生的近距离互动，presence 设为 together；如果明确分隔两地，presence 设为 remote；证据不足时不要强行改变状态。',
-        presentationMode === 'phone-text' || actionVisibility === 'off' ? '当前可见动作关闭：不要输出 scene_action。' : '只有自然需要时才输出 scene_action，不要机械补动作。',
+        presentationMode === 'phone-text' || actionVisibility === 'off'
+          ? '当前可见动作关闭：不要输出 scene_action。'
+          : presentationMode === 'phone-split'
+            ? '用户明确选择了动作 / 台词分开：若角色本轮有自然反应，至少输出 1 条有情境价值的 scene_action；证据不足时不要凭动作强行改变 presence。'
+            : '只有自然需要时才输出 scene_action，不要机械补动作。',
         '普通对白保持自然完整，不按标点机械拆分。'
       ]
 
   return [
     '【小手机互动协议 V2.1】',
-    '先像真实角色一样回应。普通一条文字最合适时可以直接输出正文；需要动作、连续短消息、停顿或状态变化时使用隐藏协议。',
+    presentationMode === 'phone-split' && actionVisibility !== 'off'
+      ? '先像真实角色一样回应。当前用户明确选择“动作 / 台词分开”，只要本轮存在自然的角色反应，优先使用 companion_packet，并至少包含 1 条 scene_action；对白另用 text。不要为了凑数机械补动作。'
+      : '先像真实角色一样回应。普通一条文字最合适时可以直接输出正文；需要动作、连续短消息、停顿或状态变化时使用隐藏协议。',
+    '所有可见内容都必须直接承接用户最新一条真实消息和当前剧情，不要跳回旧话题，也不要用与本轮无关的通用关心句替代回应。',
     ...sceneRule,
     '隐藏数据块格式示例：',
     '<companion_packet>{"messages":[{"kind":"text","content":"<由角色自行生成>"}],"status":{"presence":"together|remote|省略"}}</companion_packet>',

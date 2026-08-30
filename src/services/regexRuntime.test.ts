@@ -180,3 +180,9 @@ describe('Regex Pipeline V2 ephemerality', () => {
     expect(regexProducesRichUi(makeScript({ markdownOnly: false, promptOnly: true, replaceString: rich }))).toBe(false)
   })
 })
+
+it('V0.4.7.1 rich 开场中的 Markdown 图片会转成 SafeRichHtml 可显示的静态图片', () => {
+  const html = normalizeRichHtml('<details><summary>状态</summary>![](https://example.com/a.png)</details>')
+  expect(html).toContain('<img src="https://example.com/a.png"')
+  expect(html).not.toContain('![](')
+})

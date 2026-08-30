@@ -29,6 +29,14 @@ const timer = ref<number>()
 const images = computed(() => getMessageImages(props.message).filter(image => Boolean(image.dataUrl)))
 const urls = computed(() => images.value.map(image => image.dataUrl || ''))
 const displayText = computed(() => props.message.displayContent ?? props.message.content)
+
+const richHtmlHasOwnSurface = computed(() => {
+  const html = props.message.richHtml || ''
+  if (!html.trim()) return false
+  // 作者已经为 UI 声明背景/边框/阴影时，外层保持透明，避免二次套卡。
+  // 只有 bare markup（常见于老卡 first_mes 的 details/br）才由小手机提供中性承载面。
+  return /(?:background(?:-color)?|border(?:-color|-width|-style)?|box-shadow)\s*:/i.test(html)
+})
 const alternativeCount = computed(() => props.message.alternatives?.length || 0)
 const alternativeIndex = computed(() => Math.min(
   Math.max(0, props.message.activeAlternativeIndex ?? 0),
@@ -98,7 +106,7 @@ onBeforeUnmount(cancel)
       <div v-if="message.type!=='action'" class="assistant-message-stack">
         <div
           v-if="message.type==='rich' && message.richHtml"
-          class="bubble bubble--theirs bubble--rich"
+          :class="['bubble','bubble--theirs','bubble--rich',{'bubble--rich-fallback-surface':!richHtmlHasOwnSurface}]"
           @pointerdown="start"
           @pointerup="cancel"
           @pointerleave="cancel"
@@ -274,5 +282,5 @@ onBeforeUnmount(cancel)
 </style>
 
 <style scoped>
-.bubble--rich{max-width:min(430px,82vw);padding:0;background:transparent!important;box-shadow:none!important;border-radius:0!important;overflow:visible}.bubble--rich:active{transform:none}
+.bubble--rich{max-width:min(430px,82vw);padding:0;background:transparent!important;box-shadow:none!important;border-radius:0!important;overflow:visible}.bubble--rich.bubble--rich-fallback-surface{padding:12px 14px;background:rgba(255,255,255,.92)!important;border-radius:17px!important;box-shadow:0 2px 10px rgba(58,83,107,.06)!important;overflow:hidden}.bubble--rich:active{transform:none}
 </style>
