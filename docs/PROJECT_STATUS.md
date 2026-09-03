@@ -1,81 +1,149 @@
 # AI Companion Phone 项目状态
 
-## V0.4.7.1｜Community UI / 编辑后重生成稳定补丁
-
-本轮不是新协议大改，而是对 V0.4.7.0 真实角色卡验收暴露的四条运行链做通用修复：
-
-- Community UI Compiler 的状态前导解析同时识别 `状态信息 / 状态栏`，AI 已生成状态数据时可本地填回作者原 HTML，不为 UI 重写剧情；
-- Rich UI 外层不再一律透明：作者 HTML 已自带背景/边框/阴影时保持透明承载，只有裸 `<details>/<br>` 等旧开场时增加中性表面；旧 HTML 开场内的 Markdown 图片转成安全静态 `<img>` 后仍由 SafeRichHtml 清洗；
-- 纯手机多气泡要求共同回应最新用户消息，禁止为了手机感拆成语义断裂的泛泛短句；是否追问具体细节仍由角色与语境决定；
-- 动作/台词分开模式在存在自然反应且作者未要求纯消息时，优先要求至少一个有情境价值的 `scene_action`；远程动作只描述角色自己一端，不改变 Presence；
-- 用户消息可“从这条消息重新回复”：确认后截断后续旧分支，回滚该分支的状态历史、调试记录与自动记忆，再按编辑后的真实消息重新生成；手工/导入记忆不会被误删；
-- IndexedDB V14 / Backup V9 不变，不需要清库或重导角色卡。
-
-## V0.4.7.0｜Regex Pipeline V2 / Renderer 分层
-
-本轮继续“大改”，但只重构生态兼容层，不推翻 Conversation、WorldBook、Memory 或数据库。核心目标是把同一条消息拆成 **模型原始输出 / 规范化存储 / 显示投影 / 下一次发给 AI 的临时投影**，避免社区 Regex 把 HTML 写进历史或把 promptOnly 错套到整个 System Prompt。
-
-- User Input / AI Response / World Info 按 placement 分源执行；
-- persistent / markdownOnly / promptOnly / 两者同时四种语义分离；
-- Depth 0=最近消息，minDepth/maxDepth 在出站历史上执行；
-- 出站 Prompt 的候选筛选不提前假定 depth=0，`minDepth>0` 会在真实历史行上逐条判断；
-- 开场与手动编辑进入同一 Regex Pipeline；
-- markdownOnly Rich UI 继续由 Safe Community UI 渲染，底层 canonical 内容保持作者原结构；
-- Prompt Debug 可直接观察每一阶段实际命中的 Regex；
-- Slash / Reasoning placement 完整保留，当前主聊天暂不执行，避免假装兼容；
-- IndexedDB V14 / Backup V9 不变。
-
-## V0.4.6.0｜Character Card Compatibility Alignment
-
-本轮把开发方向从“继续发明更多角色卡运行规则”改为“**社区底层跟成熟生态，产品体验保留小手机特色**”。核心改动：
-
-- 新增轻量 `Character Compatibility Layer / Runtime Manifest`，不改 IndexedDB schema；
-- V2/V3 `creator_notes` 只供阅读，默认 0 Prompt Token；
-- V2/V3 `system_prompt` 与 `post_history_instructions` 按 override 语义执行，支持 `{{original}}`；原生角色继续保持原有 append 行为；
-- V3 `nickname` 成为 `{{char}}` 宏名，支持常见 `{{random}} / {{pick}} / {{roll}} / {{// comment}}`；
-- `first_mes / alternate_greetings` 只作为用户选择后的真实 assistant 历史，不再从社区开场推断永久格式规则；
-- V3 导入/再导出保留 nickname、multilingual creator notes、source、assets、日期字段及未知扩展，不强制降为 V2；
-- WorldBook 对 `constant + use_regex` 改为标准优先、旧社区无 key 冲突数据兼容兜底；
-- Regex/XML 社区 UI 本轮漏状态时，优先复用上一轮**真实 AI 已生成**的同名状态字段；若仍不完整，第二次 AI 调用只补作者状态标签，不再重跑完整角色 Prompt/历史或重写正文；不本地生成剧情/好感/心声；
-- Prompt Debug 新增 Character Card Runtime，可直接查看卡版本、system prompt 模式、宏名与 creator_notes 是否进 Prompt。
-
-### 本轮没有推翻的特色
-
-- 三种聊天呈现方式；
-- Presence / Conversation State；
-- 多聊天与 Branch；
-- Resource Session；
-- WorldBook Engine V2；
-- 六层记忆；
-- Safe Community UI；
-- Prompt Debug；
-- IndexedDB V14 / Backup V9。
-
 ## 当前版本
 
 ```text
-应用：V0.4.7.1
+开发线：V0.5.0-alpha.3
 IndexedDB：V14
 Backup：V9
+原始审查基线：用户上传 V0.4.7.1
+当前升级基线：V0.5.0-alpha.2.1
 ```
 
-V0.4.7.1 延续 **Regex Pipeline V2 / Renderer 分层**，重点稳定 Community UI、三种呈现与用户消息编辑后的分支生命周期；底层协议与数据版本不变。
+V0.5.0 不以继续堆 Phone App 为主，而是把 V0.4.x 已有功能收敛成**稳定、可测试、可解释的 AI Companion Runtime**。
 
-## 当前阶段
+## 当前阶段目标
 
-项目重点：
+> Character Runtime / Conversation Runtime / Community Runtime 分层，先解决聊天变更的数据一致性和 `ChatRoom.vue` 过载，再继续扩展群聊、朋友圈、日记等 App Surface。
 
-> **通用 Character Card / WorldBook / Preset / Regex / Community UI Runtime + 多会话剧情状态管理。**
+毕业阶段优先级：
 
-生产逻辑禁止按测试角色名、作者名、卡 ID 或文件名特判。
+```text
+稳定性 > 可测试性 > 架构清晰度 > 论文价值 > 新功能数量
+```
 
-## 已完成
+
+## V0.5.0-alpha.3 已完成
+
+### Conversation Runtime 第二刀：rewind / branch / opening reset
+
+新增三个 Runtime 边界，并扩展 Conversation Mutation：
+
+```text
+src/runtime/conversation/
+├─ conversationMutationService.ts
+├─ conversationStateReplayService.ts
+├─ conversationBranchService.ts
+└─ conversationOpeningService.ts
+```
+
+本轮把 `ChatRoom.vue` 中四类跨表编排迁到 Runtime：
+
+- **rewind / 从用户消息重新回复**：`truncateConversationAfterMessage()` 统一清除旧后续 Message、旧分支 automatic Memory、StateHistory 和该节点后的 PromptDebugTrace；保留锚点用户消息，再由 Runtime 重放锚点前状态。
+- **state replay**：`buildConversationStateSnapshot()` 统一按保留消息 + StateHistory 重建状态；rewind 模式明确丢弃旧分支 thought / active resource / lorebook timed runtime，branch 模式只继承分支节点之前已经成立的临时状态。
+- **branch**：`createConversationBranch()` 统一复制消息、reply reference、reply group、ChatSettings、Memory、StateHistory、ConversationState、MusicState，并阻止分支节点后的 source-less automatic memory / history 泄漏进新分支。
+- **greeting / free opening**：开场切换的清理与落库事务进入 `conversationOpeningService`；自由开局复用 `resetConversationRuntime(memoryPolicy='all')`，因此 Prompt Debug 也会被正确清理。
+
+`ChatRoom.vue` 从 alpha.2.1 的约 4.7k 行降到 **4,576 行**；直接 `db.` 调用约降到 **52 处**，但 generation pipeline 仍是下一阶段最大热点。
+
+### 新增测试
+
+新增 6 个 Runtime 行为用例：
+
+- rewind 保留锚点但失效旧派生数据；
+- source-less 的后置 StateHistory 不再穿越 rewind；
+- branch 只复制节点前消息/记忆/状态；
+- branch reply reference 映射到新消息 ID；
+- rewind 清空临时 thought/resource/lorebook runtime；
+- branch 只继承节点前有效的临时 Runtime。
+
+当前测试文件数 **21**，用例数 **155**。最终是否 155/155 仍以 Windows `npm test` 为准。
+
+## V0.5.0-alpha.1 已完成
+
+### Conversation Mutation 第一批
+
+新增 `src/runtime/conversation/conversationMutationService.ts`，把“删消息 / 重新开始聊天”从单纯 UI 数据删除推进到 Runtime 事务入口：
+
+- 删除消息时同步清理该消息直接产生的自动记忆；
+- 手工 / 导入记忆不被误删；
+- 老的合并自动记忆若只是失去来源，则保留内容并解除失效来源；
+- 删除对应 `ConversationStateHistory`；
+- 其它消息对被删消息的 `replyTo` 引用自动清空；
+- 会话 `updatedAt` 同事务更新；
+- UI 删除后从仍存在的消息与状态历史重建当前 `ConversationState`。
+
+### Restart Runtime 语义
+
+设置里的“清空聊天记录”改为更准确的“重新开始当前聊天”：
+
+- 删除消息；
+- 删除自动剧情记忆；
+- 清空状态历史；
+- 清空 Prompt Debug；
+- 重建默认 `ConversationState`；
+- 保留手工 / 导入记忆；
+- 保留角色卡、Persona、WorldBook、Regex、资源绑定。
+
+### Chat load stale-result guard
+
+`loadConversation()` 增加加载 epoch：快速切换 A/B 聊天时，旧异步任务完成后不再覆盖当前路由对应的会话 UI；组件卸载时同样使旧加载失效。
+
+### 测试
+
+新增 `conversationMutationService.test.ts`，第一批覆盖：
+
+- 自动记忆清理；
+- 手工 / 导入记忆保留；
+- 旧合并记忆解除失效来源；
+- `mergedFrom` 清理；
+- 状态历史清理；
+- reply quote 引用清理。
+
+## V0.5.0-alpha.2.1 已完成
+
+### scene-merged / multiBubble 语义回归修复
+
+Windows alpha.2 实测已经把 alpha.1 的 7 个失败降到 1 个：18/19 测试文件、148/149 用例通过。唯一剩余失败是 `interactionProtocol` 的场景合并语义。
+
+根因是 alpha.2 为“隐藏协议明确多个 `text`”保留消息边界时，把所有 `scene-merged + multiBubble + protocol` 都视为需要分气泡，导致旧有的：
+
+```text
+scene_action → text → scene_action → text
+```
+
+被拆成两个气泡。alpha.2.1 改成：
+
+- 当前轮存在**可见 scene_action**：scene-merged 优先，动作与对白继续合并成剧情气泡；
+- 当前轮没有可见 scene_action：若协议明确多个 `text` 且开启 multiBubble，则保留模型消息边界；
+- phone-text / phone-split 不受本热修影响。
+
+这一步不改数据库和备份格式。149/149 全绿后再进入 alpha.3 Conversation Runtime 第二刀。
+
+## V0.5.0-alpha.2 已完成
+
+### Reliability baseline：清零已有测试红灯
+
+Windows alpha.1 验收暴露 7 个既有兼容层测试失败；alpha.2 逐项确认产品语义后修实现/修错误测试，而不是通过删除断言让 CI 变绿：
+
+- Character Card 导入：`name + entries` 的独立 WorldBook JSON 不再误判为 community character；
+- Community UI：HTML 模板定位不再让“格式/模板”标记贪婪吞掉外层 `<div>`，Compiler V2 能拿到作者完整外壳；
+- Interaction Protocol：`multiBubble=true` 且隐藏协议明确给出多个 `text` 时，scene-merged 只合并 Action + Dialogue，不再抹掉模型明确消息边界；
+- Regex：兼容少数旧社区导出的一层过度转义 Regex，仅在原表达式不匹配时尝试一次 fallback，不改存储原文；
+- Rich HTML：兼容代码围栏边缘被序列化成字面 `\n` 的社区内容；
+- Regex World Info 测试：修正三个 fixture 同名导致的歧义断言，继续验证 display-only 不进入 outgoing prompt；
+- Role Card UI：兼容 pipe-style Tavo 状态文本里字面 `\n` 行分隔。
+
+### docs 清理正式落地
+
+`robocopy /E` 会保留目标目录旧文件，因此只整理新 ZIP 还不够。alpha.2 的 `npm run cleanup` 会删除已经明确归档的逐版本说明和旧社区审计文档；`npm run build` 的 prebuild 也会自动执行同一清理。当前长期文档仍以 `docs/README.md` 的清单为准。
+
+## 已完成的产品/Runtime 基础
 
 ### Phone / PWA
 
 - 手机外壳、锁屏、桌面、Dock、设置；
 - PWA / generateSW；
-- 白色 + 极淡蓝应用主题；
 - 本地持久化与备份恢复。
 
 ### Character / Persona
@@ -84,19 +152,16 @@ V0.4.7.1 延续 **Regex Pipeline V2 / Renderer 分层**，重点稳定 Community
 - 常见 SillyTavern / Tavo V2/V3 JSON；
 - PNG metadata；
 - 原卡阅读器；
-- Persona 导入/导出；
-- 角色专属 Persona；
+- Persona 导入/导出、角色专属 Persona；
 - 同源角色卡重复导入提示。
 
 ### Conversation
 
 - 同一角色多聊天；
-- 自由开局；
-- 多开场；
+- 自由开局 / 多开场；
 - 候选回复；
 - Branch V2；
-- 分支状态/记忆/resource session 快照；
-- 基础消息编辑与删除。
+- 基础消息编辑、删除、从用户消息节点 rewind/regenerate。
 
 ### Prompt / AI
 
@@ -106,7 +171,6 @@ V0.4.7.1 延续 **Regex Pipeline V2 / Renderer 分层**，重点稳定 Community
 - context/max token/quota 硬停止；
 - Prompt Debug；
 - card-first；
-- 默认第二人称 user；
 - 图片理解入口。
 
 ### Memory / World State
@@ -117,101 +181,71 @@ V0.4.7.1 延续 **Regex Pipeline V2 / Renderer 分层**，重点稳定 Community
 - ConversationState / StateHistory；
 - Presence；
 - pre-generation scene transition；
-- 主动消息基础能力。
+- 回访触发式主动消息基础能力。
 
 ### Community Runtime
 
 - Shared Resource + ResourceBinding；
-- WorldBook；
-- Regex；
+- WorldBook Engine V2 第一阶段；
+- Regex Pipeline V2；
 - Prompt Preset；
 - Resource Intent Router；
-- 大型按需模块休眠；
 - Active Resource Session；
 - Safe Rich HTML；
 - User Message Ownership；
-- Author Text Status Header；
-- Action Parser V2；
-- Dialogue Parser V2；
 - Community UI Compiler V2 第一阶段。
 
-## 当前限制
+## 当前 P0 / P1 技术债
 
-### WorldBook
+详细证据见 `ENGINEERING_AUDIT.md`。
 
-V0.4.5.0 已完成 Engine V2 第一阶段：
+1. `ChatRoom.vue` 仍是最大的应用编排热点；V0.5 目标是从 4k+ 行逐步降到可维护范围。
+2. Conversation lifecycle 已覆盖 delete/reset/rewind/branch/greeting/free opening；下一步风险集中在 generation persistence、会话 load repair 与 View 仍有约 52 处直接 `db.` 调用。
+3. `lorebookService.ts` 是核心 WorldBook Engine，但缺直接的 Engine test suite。
+4. Backup 只做浅层结构校验，尚未用 Zod 做字段与引用完整性验证。
+5. `database.ts` V1→V14 migration 缺独立回归测试。
+6. PromptDebugTrace 当前没有明确 `sourceMessageId`，精确回滚 Debug 仍受数据模型限制。
+7. 长消息列表缺分页 / 虚拟化；部分资源查询仍是全表扫描。
 
-- corrected selectiveLogic：0=AND ANY、1=NOT ALL、2=NOT ANY、3=AND ALL；
-- recursive scanning，支持 excludeRecursion / preventRecursion / delayUntilRecursion；
-- sticky / cooldown / delay 按“消息数”进入会话级生命周期；
-- inclusion group、多 group、groupWeight、groupOverride 与 useGroupScoring；
-- 仅在世界书明确设置 tokenBudget 时启用生成前硬预算，不用应用默认预算擅自裁掉作者设定；
-- position 0/1/4/5/6 路由，@D 按 role/depth 注入聊天历史；
-- position 7 Outlet 可被 Prompt Preset 的 `{{outlet::Name}}` 宏按名称大小写精确读取；
-- Prompt Debug 显示递归、Timed Effects、Group、预算与 @D 注入。
+## V0.5.0 下一批顺序
 
-仍需继续补齐：
+### alpha.3 验收
 
-- Author Note Top/Bottom 与 SillyTavern 原生“按频率注入”并非完全同构，目前映射到当前单-system Prompt 的近历史高影响区；
-- Min Activations / Max Depth / Max Recursion Steps 用户配置；
-- vectorized / embedding 触发；
-- 更完整的 outlet / decorators / automation 语义；
-- provider tokenizer 级精确预算（当前是生成前 Token 估算 + API usage 事后真实统计）。
+1. Windows 确认本地基线为 `0.5.0-alpha.2.1`；
+2. 覆盖 alpha.3 后运行 `npm run cleanup`；
+3. `npm test`，目标 **21/21 测试文件、155/155 用例**；
+4. `npm run build`；
+5. 专项回归：从用户消息重新回复、创建分支、切换 greeting、切自由开局、删除消息；
+6. 验证 branch 不出现节点后的 Memory/State 穿越。
 
-### Community UI
+### alpha.4
 
-- 未知第三方 JavaScript 不执行；
-- 复杂 JS UI 仍可能安全降级；
-- UI Compiler V2 尚未覆盖全部 HTML/DOM 模式。
+开始拆 `requestAssistantReply()`，优先抽两端：
 
-### Memory / Data
+```text
+Context Builder
+→ 现有 Provider / Streaming（暂留 ChatRoom）
+→ Response Persistence
+```
 
-- 核心检索仍是关键词/评分，不是完整向量数据库；
-- 图片 Data URL 会增加 IndexedDB 占用；
-- 无跨设备实时同步；
-- 长消息列表仍需分页/虚拟化。
+随后再逐步迁移：
 
-### Code
+```text
+Memory Retrieval
+→ WorldBook / Resource
+→ Prompt Build
+→ Provider / Streaming
+→ Regex / Community UI / Protocol
+→ Persistence
+→ State / Memory / Debug Update
+```
 
-`ChatRoom.vue` 仍然过大，需要继续拆 generation pipeline、branch runtime、presentation projection。
+目标：Generation 的跨表写入不再散落在 View，同时保持流式 UI 行为不变。
 
-## 下一里程碑
+### alpha.5
 
-1. 用真实社区 WorldBook 回归 V0.4.5.0 的 recursion / timed effects / group / budget / @D；
-2. WorldBook Engine V2 第二阶段：Author Note / Min Activations / vectorized / 更完整 position/outlet；
-3. Community UI Compiler V2 扩展；
-4. 把 Character Runtime / Conversation Runtime / App Surface 从 `ChatRoom.vue` 继续拆开；
-5. 建立“角色—NPC—群聊—地点—事件”的 Entity Graph 基础；
-6. 再进入群聊、朋友圈、日记、钱包、论坛/购物等上层 Phone OS 功能，并逐步引入 App read/write capability 权限。
-
-## 参考项目学习后的长期决策
-
-新一批公开参考项目（StoryPhone、Miya、InternalBeyond Mobile、Melt、Plume、汪汪机、FLOAT 等）只作为设计/工程参考，不代表本项目已经拥有它们的全部功能。当前吸收的长期原则：
-
-- **Character Runtime 是核心，App 是 Surface**：微信、论坛、日记、购物等未来不应继续堆进单个 ChatRoom。
-- **世界事实 / 通讯渠道 / 呈现方式三分离**：Presence 不等于微信，纯手机也不等于远程。
-- **同一角色多会话是基础能力**：角色身份、资源与多个剧情存档分开。
-- **上下文只装当前需要的内容**：WorldBook / Memory 都应“存很多、召回少量”，并可解释为什么命中/为什么没注入。
-- **主动消息也走完整 Runtime**：时间、关系、记忆、世界书、未完成事件共同决定，而不是定时器直接写台词。
-- **未来 App 引入能力权限**：读日历、写日历、发动态、查手机等 read/write capability 必须显式授权。
-- **Community UI 走安全能力编译**：尽量把常见 DOM/Tab/数据绑定转成受控能力，未知第三方 JS 不直接执行。
-- **本地优先继续保持**：IndexedDB + Backup + PWA 不推翻，未来同步是可选层，不成为角色运行时前提。
-
-详细来源与学习记录见 `DEVELOPMENT_LOG.md`。
-
-## 测试原则
-
-底层更新至少覆盖：
-
-- 简单纯文字卡；
-- 多 WorldBook；
-- Regex；
-- Regex → HTML；
-- 作者强制状态 UI；
-- 大型按需资源；
-- V3 / Depth Prompt；
-- Persona / `{{user}}`；
-- 多会话 / Branch；
-- 三种呈现方式。
-
-测试角色只能用于测试，不得进入生产条件分支。
+- Lorebook Engine 直接测试；
+- Backup Zod schema / 引用完整性；
+- Database migration tests；
+- SafeRichHtml / Community interaction security tests；
+- Provider / Character Card adapter 渐进拆分。

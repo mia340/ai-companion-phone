@@ -1,5 +1,56 @@
 # CHANGELOG
 
+## V0.5.0-alpha.3 · Conversation Runtime 第二刀
+
+- 新增 `conversationStateReplayService.ts`，把节点状态重建从 `ChatRoom.vue` 抽成可测试 Runtime；
+- 新增 `conversationBranchService.ts`，统一分支 Message / Settings / Memory / StateHistory / State / Music 的复制与 ID remap；
+- `conversationMutationService.ts` 新增 rewind truncate，用统一 plan 清理锚点旧派生数据、后续消息与 Prompt Debug；
+- 新增 `conversationOpeningService.ts`，统一 greeting / free opening 的跨表 reset/write；自由开局补齐 Prompt Debug 清理；
+- 修复 branch 可能继承分支节点之后 source-less StateHistory / automatic Memory 的时间穿越风险；
+- 新分支 reply reference / reply group 使用本分支新 ID，不再保留可避免的父会话内部引用；
+- `ChatRoom.vue` 降到 4,576 行，直接 `db.` 调用约 52 处；Generation Pipeline 尚未拆；
+- 新增 6 个 Runtime 测试，目标测试矩阵为 21 个文件 / 155 个用例；
+- IndexedDB V14 / Backup V9 不变。
+
+> alpha.3 的完整 Vitest/Build 仍以 Windows 验收为准；本地红灯时不要 commit。
+
+## V0.5.0-alpha.2.1 · scene-merged 多气泡边界回归修复
+
+- Windows alpha.2 全量测试从 7 个失败降到 1 个失败：18/19 测试文件、148/149 用例通过；
+- 修复 `scene-merged` 在 `multiBubble=true` + 隐藏协议时把 `scene_action + text + scene_action + text` 错拆成两个气泡的问题；
+- 新规则：**存在可见 `scene_action` 时优先执行 scene-merged 语义，把动作与对白合成剧情气泡；没有可见动作时才保留协议明确的多 `text` 消息边界**；
+- 不改 Character Card / WorldBook / Regex / Community UI / IndexedDB / Backup 语义；
+- alpha.3 的 Runtime 第二刀仍然推迟到 149/149 全绿之后。
+
+> 这是 alpha.2 的单点可靠性热修，不扩大重构范围。
+
+## V0.5.0-alpha.2 · 兼容层测试清零与 docs 真清理
+
+- 修复独立 WorldBook JSON 因顶层 `name` 被误识别为 community character 的问题；
+- 修复 Community UI HTML 模板提取标记过度贪婪，确保 Compiler V2 保留作者完整外层模板；
+- scene-merged 模式下，`multiBubble=true` 且隐藏协议明确多个 `text` 时保留模型消息边界；
+- Regex 增加旧社区“一层过度转义”兼容 fallback，仅在原表达式不匹配时尝试，不改原资源；
+- `normalizeRichHtml()` 兼容围栏边缘的字面 `\n`；
+- Tavo pipe-style 状态兼容字面 `\n` 行分隔；
+- 修正 World Info Regex 测试 fixture 同名造成的歧义断言，继续验证 display-only 不进入 Prompt；
+- 新增 `npm run cleanup`；`prebuild` 自动清理已归档的旧逐版本 Markdown / 旧社区审计 / 旧部署说明；
+- IndexedDB V14 / Backup V9 不变。
+
+> alpha.1 的 Windows 结果为 Build 通过、149 个测试中 7 个失败；alpha.2 的目标是先把这 7 个红灯按真实语义清零，再进入下一轮 Conversation Runtime 拆分。
+
+## V0.5.0-alpha.1 · Conversation Runtime 可靠性基线
+
+- 新增 `src/runtime/conversation/conversationMutationService.ts`，建立消息删除/会话重启的统一事务入口；
+- 删除消息同步处理自动记忆、状态历史和 reply 引用，并在 UI 侧重建当前 ConversationState；
+- “清空聊天记录”改为“重新开始当前聊天”：清消息、自动剧情记忆、StateHistory、Prompt Debug，保留手工/导入记忆与角色资源；
+- `loadConversation()` 增加 epoch guard，避免快速切换会话时旧异步结果覆盖当前聊天；
+- 新增 Conversation Mutation 纯规则测试；
+- GitHub Pages workflow 在 Build 前新增 `npm test`，测试失败不再继续部署；
+- docs 重新分层：当前文档、工程审查、参考项目、开发历史、Community Runtime 历史分开；
+- IndexedDB V14 / Backup V9 不变。
+
+> 本 alpha 基于用户上传的 V0.4.7.1 源码开始重构。若本地已有未上传的 V0.4.7.2+，不要直接覆盖。
+
 > 精简版本变化。完整逐版本说明见 `RELEASE_HISTORY.md`。
 
 ## V0.4.7.1 · Community UI / 编辑后重生成稳定补丁

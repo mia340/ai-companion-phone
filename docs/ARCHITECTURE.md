@@ -1,7 +1,7 @@
-# AI Companion Phone 当前架构
+﻿# AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.4.7.1**。  
-> V0.4.6.0 在现有 Runtime 上增加薄兼容层：角色卡字段语义优先跟随 V2/V3 与成熟社区生态，不通过大改数据库来重新定义角色卡。  
+> 当前文档版本：**V0.5.0-alpha.3**。
+> V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库仍保持 IndexedDB V14 / Backup V9。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
 ## 1. 总体边界
@@ -27,6 +27,77 @@ IndexedDB Persistence
 - Character 与 Conversation 分离；
 - Community Resource 使用共享资源本体 + ResourceBinding；
 - 不针对具体角色、作者、文件名写生产逻辑。
+
+### V0.5 Runtime 分层目标
+
+V0.5 不做大爆炸式目录搬迁，先增加 Application Runtime 层：
+
+```text
+UI
+views / components / composables
+        ↓
+Application Runtime
+src/runtime/conversation
+src/runtime/generation（后续）
+        ↓
+Domain / Services
+memory / worldbook / regex / protocol / card compatibility
+        ↓
+Infrastructure
+Dexie / Provider / Backup / Browser APIs
+```
+
+alpha.3 后 `src/runtime/conversation/` 已形成四个明确边界：
+
+- `conversationMutationService.ts`：删除、重启、rewind truncate 的派生数据一致性；
+- `conversationStateReplayService.ts`：按某个剧情节点重放 ConversationState；
+- `conversationBranchService.ts`：从选定消息创建独立会话分支；
+- `conversationOpeningService.ts`：greeting / free opening 的重置与落库事务。
+
+View 仍负责 greeting 的宏、Regex、Community UI 显示投影，以及 generation pipeline；但 destructive conversation lifecycle 不再散落维护。
+
+Conversation mutation 的目标边界：
+
+```text
+UI intent
+  ↓
+Conversation Mutation Runtime
+  ├─ Message
+  ├─ Automatic Memory
+  ├─ ConversationStateHistory
+  ├─ PromptDebugTrace（可精确关联时）
+  ├─ Reply Reference
+  └─ Conversation metadata
+  ↓
+Rebuild current ConversationState
+```
+
+`ChatRoom.vue` 目前仍保留 generation pipeline、Provider streaming、response projection 等大块编排；下一阶段重点转向 `requestAssistantReply()` / Generation Runtime。
+
+### Conversation point-in-time replay（V0.5.0-alpha.3）
+
+rewind 与 branch 都不能简单复制“当前最新 ConversationState”。Runtime 现在按目标节点重新构建：
+
+```text
+retained Message prefix
++ source-linked ConversationStateHistory
++ greeting seed facts
++ cutoff-safe ephemeral runtime (branch only)
+        ↓
+ConversationState snapshot
+```
+
+关键约束：
+
+- rewind 的锚点用户消息保留，但该消息旧版本产生的 Memory / StateHistory 与后续消息一起失效，随后重新应用当前锚点内容；
+- source-less StateHistory 只有在时间不晚于目标节点时才可重放，避免“未来状态”穿越回旧剧情；
+- branch 中 manual/imported memory 可持续继承；无 sourceMessageId 的 automatic memory 只有创建时间不晚于分支节点才继承；
+- reply reference / reply group 在新会话中重新映射 ID，避免新分支依赖父会话内部消息 ID；
+- thought / active resource / lorebook timed effect 只有在分支节点前已经成立时才可继承；rewind 一律先清掉再由后续生成重新建立。
+
+### 会话加载并发边界
+
+`loadConversation()` 使用递增 epoch 保护异步提交。旧路由加载即使更晚完成，也不能再覆盖当前 Conversation refs；组件卸载同样会使旧 epoch 失效。
 
 ## 1.0.1 Character Card Compatibility Layer（V0.4.6.0）
 

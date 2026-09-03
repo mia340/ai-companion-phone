@@ -156,7 +156,10 @@ function escapeRegex(value: string) {
 
 function extractBalancedHtmlTemplate(source: string) {
   if (!source) return ''
-  const marker = /(?:模板|格式|schema|template|format).{0,12}(?:如下|如下所示|below|following)?/i.exec(source)
+  // Do not let the marker's suffix consume the beginning of the HTML itself. The old
+  // `.{0,12}` was greedy enough to eat `<div><details...`, causing the compiler to
+  // capture only an inner placeholder div instead of the author's full outer shell.
+  const marker = /(?:模板|格式|schema|template|format)[^<\n]{0,12}(?:如下|如下所示|below|following)?/i.exec(source)
   const searchFrom = marker ? marker.index + marker[0].length : 0
   const tail = source.slice(searchFrom)
   const opening = /<(html|div|details|section|article|main|table)\b[^>]*>/i.exec(tail)

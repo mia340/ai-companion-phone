@@ -205,7 +205,7 @@ const emit = defineEmits<{
         </fieldset>
       </template>
 
-      <button class="danger-row" type="button" @click="emit('clearConversation')">清空聊天记录</button>
+      <button class="danger-row" type="button" @click="emit('clearConversation')">重新开始当前聊天</button>
     </div>
 
     <div v-else-if="tab === 'roleplay' && chatSettings" class="settings-content roleplay-content">

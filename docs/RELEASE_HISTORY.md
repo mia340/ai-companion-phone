@@ -1,5 +1,21 @@
 # 发布历史归档
 
+## V0.5.0-alpha.3｜Conversation Runtime 第二刀
+
+把 rewind/truncate、branch、greeting/free-opening reset 与节点状态重放迁入 `src/runtime/conversation/`。新分支不再直接复制当前最新状态，而是按目标消息前缀 + StateHistory + 时间 cutoff 重建；source-less automatic memory/history 也必须满足节点时间边界，避免未来剧情穿越。新增 6 个 Runtime 测试，目标矩阵 21/155。IndexedDB V14 / Backup V9 不变。
+
+## V0.5.0-alpha.2.1｜scene-merged 消息边界热修
+
+alpha.2 在 Windows 全量测试达到 148/149，仅剩 Interaction Protocol 一处回归：为了保留隐藏协议的显式多 `text` 边界，条件设置过宽，导致含可见 `scene_action` 的 scene-merged 回复被拆成多气泡。alpha.2.1 将两种语义分开：有可见场景动作时优先 scene-merged 合并；无可见场景动作时继续尊重 multiBubble 的显式文本边界。IndexedDB V14 / Backup V9 不变。
+
+## V0.5.0-alpha.2｜兼容层测试清零与文档退休清理
+
+alpha.1 在 Windows 实机完成 Build 后暴露 7 个既有兼容层测试红灯。alpha.2 不扩大 Generation/Conversation 重构面，先逐项修复资源识别、Community UI HTML 外壳提取、多气泡边界、旧 Regex 过度转义、Rich HTML 围栏、Tavo pipe 状态解析；同时修正一个测试 fixture 同名导致的歧义断言。新增 `npm run cleanup`，让 `robocopy /E` 保留下来的逐版本旧 Markdown 真正从工作区退休。IndexedDB V14 / Backup V9 不变。
+
+## V0.5.0-alpha.1｜Conversation Runtime 可靠性基线
+
+V0.5 开始从“功能稳定补丁”转入“架构与可靠性”阶段。本 alpha 建立 Conversation Mutation Runtime、删除/重置数据一致性和 Chat load epoch guard，并完成 docs 分层。IndexedDB V14 / Backup V9 不变。详细当前状态见 `PROJECT_STATUS.md`，工程证据与路线图见 `ENGINEERING_AUDIT.md`。
+
 > 本文件用于保存已经发布过的逐版本说明。  
 > 当前使用说明请看 `README.md`，当前状态请看 `PROJECT_STATUS.md`，当前架构请看 `ARCHITECTURE.md`。  
 > 这里的旧版本描述保持历史语境，不代表当前运行状态；数据库版本、限制和实现边界以当前文档为准。

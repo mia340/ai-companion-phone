@@ -499,6 +499,27 @@ function parseCharacterBook(value: unknown) {
   }
 }
 
+function looksLikeStandaloneLorebook(record: Record<string, unknown>) {
+  const entries = record.entries
+  if (!(Array.isArray(entries) || (entries && typeof entries === 'object'))) return false
+
+  const data = asRecord(record.data)
+  const explicitCharacterSpec = /chara_card_v[23]/i.test(asText(record.spec))
+  if (explicitCharacterSpec) return false
+
+  // `name + entries` is a very common standalone WorldBook shape. A role card may have
+  // a top-level name, but its lorebook belongs under character_book/world_book instead.
+  // Requiring an actual character field here avoids misclassifying a named lorebook as
+  // a permissive community character JSON.
+  const characterFields = [
+    record.description, record.personality, record.scenario, record.first_mes, record.firstMessage,
+    record.character_name, record.characterName,
+    data.description, data.personality, data.scenario, data.first_mes, data.firstMessage,
+    data.character_name, data.characterName
+  ]
+  return !characterFields.some(value => Boolean(asText(value)))
+}
+
 export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   let root: unknown
   try {
@@ -512,6 +533,9 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   }
 
   const record = root as Record<string, unknown>
+  if (looksLikeStandaloneLorebook(record)) {
+    throw new Error('检测到这是世界书 JSON，不是角色卡。请到世界书页面导入。')
+  }
   const format = inferFormat(record)
 
   if (format === 'legacy-json') {

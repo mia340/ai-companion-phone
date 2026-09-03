@@ -636,22 +636,38 @@ function expandInlineActions(actions: CompanionActionMessage[]) {
   return result
 }
 
-function mergeTogetherActions(actions: CompanionActionMessage[], showSceneActions: boolean) {
+function mergeTogetherActions(
+  actions: CompanionActionMessage[],
+  showSceneActions: boolean,
+  preserveExplicitTextBoundaries = false
+) {
   const result: CompanionActionMessage[] = []
   let buffer: string[] = []
   let firstDelay: number | undefined
+  let bufferedText = false
   const flush = () => {
     if (!buffer.length) return
     result.push({ kind: 'text', content: buffer.join('').trim(), delayMs: firstDelay })
     buffer = []
     firstDelay = undefined
+    bufferedText = false
   }
 
   for (const action of actions) {
-    if (action.kind === 'typing_pause') continue
+    if (action.kind === 'typing_pause') {
+      if (preserveExplicitTextBoundaries) flush()
+      continue
+    }
     if (action.kind === 'text') {
+      // scene-merged means “merge action + dialogue”, not “erase model-authored message
+      // boundaries”. When companion_packet explicitly contains multiple text rows and
+      // multiBubble is enabled, each text row remains its own message.
+      if (preserveExplicitTextBoundaries && bufferedText) flush()
       if (!firstDelay && action.delayMs) firstDelay = action.delayMs
-      if (action.content.trim()) buffer.push(action.content.trim())
+      if (action.content.trim()) {
+        buffer.push(action.content.trim())
+        bufferedText = true
+      }
       continue
     }
     if (action.kind === 'scene_action') {
@@ -679,7 +695,17 @@ export function shapeCompanionActions(
   const expanded = expandInlineActions(actions)
 
   if (presentationMode === 'scene-merged') {
-    return mergeTogetherActions(expanded, showSceneActions)
+    // 显式多气泡只在“没有可见场景动作需要并入剧情气泡”时保留。
+    // 一旦当前轮存在可见 scene_action，scene-merged 的产品语义优先：
+    // 将动作与相邻对白合并为一个剧情气泡；否则会把旧有的
+    // action + text + action + text 场景错误拆成多个气泡。
+    const hasVisibleSceneAction = showSceneActions && expanded.some(action =>
+      action.kind === 'scene_action' && action.content.trim()
+    )
+    const preserveExplicitTextBoundaries = Boolean(
+      _hadProtocol && settings.multiBubble && !hasVisibleSceneAction
+    )
+    return mergeTogetherActions(expanded, showSceneActions, preserveExplicitTextBoundaries)
   }
 
   // 纯手机消息：最终可见层只有角色本人真正发送的文字。

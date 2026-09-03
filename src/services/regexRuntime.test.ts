@@ -166,9 +166,9 @@ describe('Regex Pipeline V2 ephemerality', () => {
   })
 
   it('applies persistent and prompt-affecting World Info regex only during prompt assembly', () => {
-    const persistent = makeScript({ placement: [5] })
-    const prompt = makeScript({ id: 'wi-prompt', placement: [5], promptOnly: true })
-    const displayOnly = makeScript({ id: 'wi-display', placement: [5], markdownOnly: true })
+    const persistent = makeScript({ id: 'wi-persistent', name: 'wi-persistent', placement: [5] })
+    const prompt = makeScript({ id: 'wi-prompt', name: 'wi-prompt', placement: [5], promptOnly: true })
+    const displayOnly = makeScript({ id: 'wi-display', name: 'wi-display', placement: [5], markdownOnly: true })
     const result = applyRegexStage('SECRET', [persistent, prompt, displayOnly], { source: 'world-info', phase: 'outgoing-prompt' })
     expect(result.applied).toContain(persistent.name)
     expect(result.applied).not.toContain(displayOnly.name)

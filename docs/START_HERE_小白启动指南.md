@@ -1,93 +1,107 @@
 # 从这里开始
 
+当前开发线：**V0.5.0-alpha.3**。
+
+如果你只是想把我给你的新源码更新到 Git 仓库，直接先看：`部署与更新.md`。
+
 ## 环境
 
-Node.js 20+，VS Code 打开完整项目目录。
+建议：
+
+```text
+Node.js 20+
+npm
+Windows PowerShell
+Git
+```
 
 ## 第一次运行
 
-```bash
-npm install
+```powershell
+cd "D:\ai\ai-companion-phone-git-clean"
+npm ci
 npm run dev
 ```
 
-## 更新源码
+浏览器打开终端给出的本地地址。
 
-完整流程见 `部署与更新.md`：
+## 每次收到新源码后的固定顺序
+
+不要上来就 commit。固定执行：
 
 ```text
-解压
-→ robocopy
-→ 检查版本
+确认基线版本
+→ 覆盖源码
+→ npm run cleanup
+→ npm test
 → npm run build
-→ 测试
-→ git commit
-→ git push
+→ 专项真机测试
+→ git diff --check
+→ git add / commit / push
 ```
+
+完整 PowerShell 命令见 `部署与更新.md`。
+
+## 当前 V0.5 重点
+
+V0.5 不是继续堆新 App，而是把已有功能收敛成稳定 Runtime。alpha.3 当前重点：
+
+- delete / reset / rewind / branch / opening reset 使用统一 Conversation Runtime；
+- 从旧消息建立分支时按目标时间点重放状态，避免未来 Memory / State 穿越；
+- greeting / free opening 的跨表清理不再由 ChatRoom 手写；
+- 测试矩阵目标升级为 21 个测试文件 / 155 个用例；
+- alpha.3 全绿后再开始拆 Generation Orchestrator。
+
+项目全貌看 `PROJECT_STATUS.md`，为什么这么改看 `ENGINEERING_AUDIT.md`。
 
 ## Build
 
-```bash
+```powershell
+npm test
 npm run build
 ```
 
-看到 `built in` 与 `dist/sw.js` 表示构建完成；出现 `error TSxxxx` 时先停止提交。
+如果出现 `TSxxxx` 或测试 `FAIL`，不要急着改代码，把完整日志发出来。
 
 ## 手机测试
 
-```bash
-npm run dev -- --host 0.0.0.0
-```
+优先测真实角色卡，不要求你手工构造协议数据。每次底层更新至少回归：
 
-手机与电脑同一 Wi‑Fi，打开终端给出的局域网地址。
+- 普通纯文字角色；
+- WorldBook；
+- Regex / HTML；
+- Persona；
+- 多聊天 / Branch / Rewind；
+- 三种聊天呈现方式。
 
 ## 图片理解
 
-```text
-设置 → API 与模型 → 图片理解
-```
+图片理解依赖当前 Provider / 模型是否支持视觉。失败时请同时提供：
+
+- 模型名；
+- Provider；
+- 页面提示；
+- 浏览器控制台 / Network 中的关键错误。
+
+不要发送 API Key。
 
 ## 记忆管理
 
-```text
-聊天页 → 右上角 ··· → 记忆 → 打开完整记忆管理
-```
+记忆分为自动、手工、导入等来源。V0.5 的 Conversation Mutation 原则是：
 
-## 当前版本
-
-```text
-V0.4.7.1
-IndexedDB V14
-Backup V9
-```
-
-本版本重点是稳定 Community UI、纯手机/动作分离呈现，以及用户消息编辑后的重新回复；Character Card / WorldBook / Regex 底层继续沿用 V0.4.7.0。继续开发前建议阅读：
-
-1. `PROJECT_STATUS.md`
-2. `ARCHITECTURE.md`
-3. `COMMUNITY_RUNTIME.md`
-
-
-## 测试分工说明
-
-普通使用者不需要手工创建 Selective Logic / Recursion / Sticky / Cooldown / @D / Outlet 测试数据。
-这些属于协议级开发测试，由项目测试代码与开发回归负责。
-
-你更新后只需要做真实使用验收：
-
-1. 打开带作者状态栏/旧 Rich 开场的真实卡：开场应有稳定承载背景，后续 `【状态栏】` 数据应能恢复成作者 HTML；
-2. 切纯手机模式连续聊两轮：模型可返回一条或多条 text，但多条必须共同承接最新用户消息，不应是应用按句号机械切；
-3. 切动作/台词分开：有自然动作时应看到独立动作；远程动作只能写角色自己一端，Presence 不应因此变同场；
-4. 编辑一条用户消息，选择/确认“从这条消息重新回复”：旧后续应移除，并从编辑后的消息重新生成；
-5. 再快速检查论坛/微信 Resource Session、资源库移动端宽度和多聊天。
+- 删除/回滚旧剧情可以清理失效的**自动记忆**；
+- 手工 / 导入记忆不能因为普通消息删除被误删；
+- 真正“清空全部记忆”仍由记忆管理中的专门操作负责。
 
 ## 角色卡兼容问题怎么反馈
 
-遇到角色卡不按作者设定、开场、世界书或 UI 工作时，不需要手工造 Selective Logic 测试。请提供：
+最有效的信息：
 
-1. 角色卡本身（可分享时）；
-2. 实际操作步骤；
-3. 截图；
-4. Prompt Debug。
+1. 角色卡格式（JSON / PNG / V2 / V3）；
+2. 哪个开场/哪条消息触发问题；
+3. 期望结果 vs 实际结果；
+4. Prompt Debug；
+5. 如果是 UI 问题，提供截图；
+6. 如果 Build 失败，提供完整终端日志。
 
-V0.4.7.0 起 Prompt Debug 的 `Character Card Runtime` 会显示卡版本、`{{char}}` 宏名、system prompt 模式、creator_notes 是否进 Prompt；协议级组合由开发回归负责。
+生产逻辑禁止为了单个测试角色增加角色名、作者名、卡 ID、文件名特判。

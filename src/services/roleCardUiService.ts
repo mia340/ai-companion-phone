@@ -24,6 +24,17 @@ function clean(value: unknown): string {
     .trim()
 }
 
+function normalizeRoleCardLineBreaks(value: string) {
+  const normalized = value.replace(/\r\n/g, '\n')
+  // JSON normally decodes `\n` for us, but some community wrappers store the
+  // backslash characters literally. Only reinterpret them when the payload has no
+  // real line break, which avoids changing ordinary prose that happens to contain `\n`.
+  if (!normalized.includes('\n') && /\\(?:r\n|n|r)/.test(normalized)) {
+    return normalized.replace(/\\r\n|\\n|\\r/g, '\n')
+  }
+  return normalized
+}
+
 function parseTodos(value: unknown): string[] {
   const source = clean(value)
   if (!source) return []
@@ -45,7 +56,7 @@ export interface PresenceResolution {
 }
 
 export function parseRoleCardUi(text: string): { content: string; ui?: RoleCardUiState } {
-  let working = text.replace(/\r\n/g, '\n')
+  let working = normalizeRoleCardLineBreaks(text)
   const ui: RoleCardUiState = {}
   let found = 0
 
@@ -91,7 +102,7 @@ export function extractRoleCardUiHints(text: string): RoleCardUiState | undefine
   const parsed = parseRoleCardUi(text)
   if (parsed.ui) return parsed.ui
 
-  const source = text.replace(/\r\n/g, '\n').replace(/<br\s*\/?\s*>/gi, '\n')
+  const source = normalizeRoleCardLineBreaks(text).replace(/<br\s*\/?\s*>/gi, '\n')
   const ui: RoleCardUiState = {}
   let found = 0
   const linePattern = /^\s*(?:[^\p{L}\p{N}\n]{0,3})?(日期|时间|地点|内心|心声|周围|待办|人物|在场人物|在场角色|相对位置|衣着|穿着)\s*[|：:∶﹕︰]\s*(.+?)\s*$/gmu

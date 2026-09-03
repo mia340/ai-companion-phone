@@ -17,6 +17,10 @@ import { useChatScroll, type ChatMessageListHandle } from '../composables/useCha
 import { useChatSpeech } from '../composables/useChatSpeech'
 
 import { db } from '../db/database'
+import { deleteConversationMessagesConsistently, resetConversationRuntime, truncateConversationAfterMessage } from '../runtime/conversation/conversationMutationService'
+import { createConversationBranch } from '../runtime/conversation/conversationBranchService'
+import { installConversationGreeting, switchConversationToFreeOpening } from '../runtime/conversation/conversationOpeningService'
+import { rebuildAndPersistConversationState } from '../runtime/conversation/conversationStateReplayService'
 import {
   isTokenLimitError,
   isVisionUnsupportedError,
@@ -85,7 +89,6 @@ import type {
   ChatSettings,
   Conversation,
   ConversationState,
-  LorebookRuntimeState,
   Message,
   MessageReplyReference,
   PromptDebugTrace,
@@ -147,6 +150,7 @@ let streamPersistTimer: number | undefined
 let streamScrollFrame: number | undefined
 let localAudioObjectUrl = ''
 let lastMusicSaveSecond = -1
+let conversationLoadEpoch = 0
 
 const title = computed(() => character.value?.name || conversation.value?.title || '聊天')
 const displayedConversationState = computed<ConversationState | undefined>(() => {
@@ -642,6 +646,9 @@ async function normalizeLegacySceneActionMessages(
 }
 
 async function loadConversation(conversationId: string) {
+  const loadEpoch = ++conversationLoadEpoch
+  const isCurrentLoad = () => loadEpoch === conversationLoadEpoch && String(route.params.id || '') === conversationId
+
   errorMessage.value = ''
   pendingImages.value = []
   failedImages.value = []
@@ -651,6 +658,7 @@ async function loadConversation(conversationId: string) {
 
   try {
     const conversationRow = await db.conversations.get(conversationId)
+    if (!isCurrentLoad()) return
 
     if (!conversationRow) {
       conversation.value = undefined
@@ -686,45 +694,26 @@ async function loadConversation(conversationId: string) {
       getModelSettings(),
       listPersonas()
     ])
+    if (!isCurrentLoad()) return
 
     const legacyPlainNormalized = await normalizeLegacyCommunityPlainMessages(messageRows)
+    if (!isCurrentLoad()) return
     const withoutSyntheticPhoneActions = await removeLegacySyntheticPhoneActions(legacyPlainNormalized)
+    if (!isCurrentLoad()) return
     const legacySceneNormalized = await normalizeLegacySceneActionMessages(withoutSyntheticPhoneActions, conversationId, characterRow, settingsRow, stateRow)
+    if (!isCurrentLoad()) return
     const effectiveStateRow = legacySceneNormalized.state || stateRow
-    const recoveredMessageRows =
-      await recoverInterruptedMessages(legacySceneNormalized.rows)
+    const recoveredMessageRows = await recoverInterruptedMessages(legacySceneNormalized.rows)
+    if (!isCurrentLoad()) return
+
     const loadedRuntimeProfile = characterRow
       ? resolveCharacterRuntimeProfile({ character: characterRow, settings: settingsRow })
       : undefined
     const visibleMessageRows = recoveredMessageRows.map(row =>
       loadedRuntimeProfile?.preserveCardOutput && row.roleCardUi ? { ...row, roleCardUi: undefined } : row
     )
-
-    conversation.value = conversationRow
-    messages.value = visibleMessageRows
-    character.value = characterRow
-    userProfile.value = profileRow
-    chatSettings.value = settingsRow
-    conversationState.value = effectiveStateRow
-    musicState.value = musicRow
-    memories.value = memoryRows
-    modelSettings.value = modelRow
-    personas.value = personaRows.filter(item => !item.boundCharacterId || item.boundCharacterId === characterRow?.id)
-    activePersona.value = await getPersonaForChat(settingsRow)
-    draft.value = localStorage.getItem(draftStorageKey(conversationId)) ?? ''
-
-    if (musicRow.sourceType === 'local') {
-      musicState.value = {
-        ...musicRow,
-        audioUrl: '',
-        isPlaying: false
-      }
-    }
-
-    if (conversationRow.unread > 0) {
-      await db.conversations.update(conversationRow.id, { unread: 0 })
-      conversation.value = { ...conversationRow, unread: 0 }
-    }
+    const activePersonaRow = await getPersonaForChat(settingsRow)
+    if (!isCurrentLoad()) return
 
     const proactivePlan = characterRow && loadedRuntimeProfile?.compatibilityMode === 'phone-enhanced'
       ? await planProactiveMessage({
@@ -741,27 +730,54 @@ async function loadConversation(conversationId: string) {
         state: effectiveStateRow
       })
       : null
+    if (!isCurrentLoad()) return
+
+    conversation.value = conversationRow
+    messages.value = visibleMessageRows
+    character.value = characterRow
+    userProfile.value = profileRow
+    chatSettings.value = settingsRow
+    conversationState.value = effectiveStateRow
+    musicState.value = musicRow.sourceType === 'local'
+      ? { ...musicRow, audioUrl: '', isPlaying: false }
+      : musicRow
+    memories.value = memoryRows
+    modelSettings.value = modelRow
+    personas.value = personaRows.filter(item => !item.boundCharacterId || item.boundCharacterId === characterRow?.id)
+    activePersona.value = activePersonaRow
+    draft.value = localStorage.getItem(draftStorageKey(conversationId)) ?? ''
+
+    if (conversationRow.unread > 0) {
+      await db.conversations.update(conversationRow.id, { unread: 0 })
+      if (!isCurrentLoad()) return
+      conversation.value = { ...conversationRow, unread: 0 }
+    }
 
     await restoreScrollPosition(conversationId)
+    if (!isCurrentLoad()) return
     await nextTick()
+    if (!isCurrentLoad()) return
+
     const greetingRows = collectCharacterGreetings(characterRow?.firstMessage, characterRow?.alternateGreetings)
     const hasUserHistory = recoveredMessageRows.some(item => item.senderId === 'user')
     if (conversationRow.openingMode === 'pending' && !hasUserHistory) {
       if (greetingRows.length) activePanel.value = 'greeting'
       else {
         await db.conversations.update(conversationRow.id, { openingMode: 'free' })
+        if (!isCurrentLoad()) return
         conversation.value = { ...conversationRow, openingMode: 'free' }
       }
     } else if (!conversationRow.openingMode && greetingRows.length > 1 && recoveredMessageRows.length <= 1 && !hasUserHistory) {
       // 旧版多开场会话继续兼容原逻辑。
       activePanel.value = 'greeting'
     }
+
     chatComposerRef.value?.resize()
     updateScrollButton()
     applyAudioState()
     if (proactivePlan && characterRow) {
       window.setTimeout(() => {
-        if (conversation.value?.id !== conversationId || isSending.value) return
+        if (!isCurrentLoad() || isSending.value) return
         void requestAssistantReply({
           proactivePrompt: proactivePlan.instruction,
           proactiveSource: proactivePlan.source
@@ -769,6 +785,7 @@ async function loadConversation(conversationId: string) {
       }, 0)
     }
   } catch (error) {
+    if (!isCurrentLoad()) return
     console.error('读取聊天失败：', error)
     errorMessage.value = error instanceof Error
       ? `聊天加载失败：${error.message}`
@@ -2667,26 +2684,18 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
     updatedAt: now
   }
 
-  await db.transaction(
-    'rw',
-    [db.messages, db.memories, db.conversationStates, db.conversationStateHistory, db.promptDebugTraces, db.conversations, db.characters],
-    async () => {
-      if (resetNeeded) {
-        await db.messages.where('conversationId').equals(conversationId).delete()
-        await db.memories.where('conversationId').equals(conversationId).delete()
-        await db.conversationStateHistory.where('conversationId').equals(conversationId).delete()
-        await db.promptDebugTraces.where('conversationId').equals(conversationId).delete()
-      }
-      await db.conversationStates.put(nextState)
-      await db.messages.add(message)
-      await db.conversations.update(conversationId, { openingMode: 'greeting', greetingIndex, updatedAt: now })
-      await db.characters.update(character.value!.id, {
-        activity: greetingActivity,
-        ...(greetingRelationship ? { relationship: greetingRelationship } : {}),
-        updatedAt: now
-      })
-    }
-  )
+  await installConversationGreeting({
+    conversationId,
+    characterId: character.value.id,
+    greetingIndex,
+    message,
+    state: nextState,
+    characterPatch: {
+      activity: greetingActivity,
+      ...(greetingRelationship ? { relationship: greetingRelationship } : {})
+    },
+    resetExisting: resetNeeded
+  })
 
   messages.value = [message]
   memories.value = []
@@ -2712,18 +2721,11 @@ async function useFreeOpening() {
   const hasHistory = messages.value.some(item => item.senderId === 'user') || messages.value.some(item => !item.isGreetingSeed)
   if (hasHistory && !window.confirm('切换到自由开局会清空当前聊天、本会话记忆和剧情状态，但不会删除角色卡、Persona、世界书或 Regex。\n\n确定继续吗？')) return
   const id = conversation.value.id
-  const now = new Date().toISOString()
-  await db.transaction('rw', db.messages, db.memories, db.conversationStates, db.conversationStateHistory, db.conversations, async () => {
-    await db.messages.where('conversationId').equals(id).delete()
-    await db.memories.where('conversationId').equals(id).delete()
-    await db.conversationStateHistory.where('conversationId').equals(id).delete()
-    await db.conversationStates.delete(id)
-    await db.conversations.update(id, { openingMode: 'free', greetingIndex: undefined, updatedAt: now })
-  })
+  const result = await switchConversationToFreeOpening(id)
   messages.value = []
   memories.value = []
-  conversationState.value = createDefaultConversationState(id)
-  conversation.value = { ...conversation.value, openingMode: 'free', greetingIndex: undefined, updatedAt: now }
+  conversationState.value = result.state
+  conversation.value = { ...conversation.value, openingMode: 'free', greetingIndex: undefined, updatedAt: result.updatedAt }
   activePanel.value = null
   noticeMessage.value = '已切换为自由开局。角色卡与共享资源仍然正常使用，从你的下一条消息建立当前场景。'
 }
@@ -2809,27 +2811,34 @@ async function clearAllMemories() {
 
 async function clearConversationMessages() {
   if (!conversation.value) return
-  if (!window.confirm('确定清空当前聊天记录吗？此操作无法撤销。')) return
+  if (!window.confirm(
+    `确定重新开始当前聊天吗？\n\n会删除当前聊天记录、自动生成的剧情记忆、状态历史和 Prompt Debug；手工/导入记忆、角色卡、Persona、世界书和 Regex 会保留。此操作无法撤销。`
+  )) return
 
-  await db.messages
-    .where('conversationId')
-    .equals(conversation.value.id)
-    .delete()
+  const id = conversation.value.id
+  const nextOpeningMode = availableGreetings.value.length ? 'pending' : 'free'
+  const result = await resetConversationRuntime({
+    conversationId: id,
+    openingMode: nextOpeningMode,
+    greetingIndex: undefined,
+    memoryPolicy: 'automatic'
+  })
 
   messages.value = []
-  conversationState.value = await patchConversationState(
-    conversation.value.id,
-    {
-      summary: '',
-      summaryMessageCount: 0,
-      lastTechnicalError: '',
-      lastProviderNotice: ''
-    }
-  )
-  const nextOpeningMode = availableGreetings.value.length ? 'pending' : 'free'
-  await db.conversations.update(conversation.value.id, { openingMode: nextOpeningMode, greetingIndex: undefined, updatedAt: new Date().toISOString() })
-  conversation.value = { ...conversation.value, openingMode: nextOpeningMode, greetingIndex: undefined }
+  conversationState.value = result.state
+  memories.value = await listMemories(id)
+  conversation.value = {
+    ...conversation.value,
+    openingMode: nextOpeningMode,
+    greetingIndex: undefined,
+    updatedAt: result.updatedAt
+  }
+  replyTarget.value = undefined
+  selectedMessage.value = undefined
   activePanel.value = nextOpeningMode === 'pending' ? 'greeting' : null
+  noticeMessage.value = result.deletedMemoryIds.length
+    ? `已重新开始聊天，并清理 ${result.deletedMemoryIds.length} 条自动剧情记忆。`
+    : '已重新开始聊天。'
 }
 
 
@@ -2913,132 +2922,17 @@ async function continueSelectedReply() {
 async function branchFromSelectedMessage() {
   const message = selectedMessage.value
   const activeConversation = conversation.value
-  if (!message || !activeConversation || !character.value) return
+  if (!message || !activeConversation) return
 
-  const messageIndex = messages.value.findIndex(item => item.id === message.id)
-  if (messageIndex < 0) return
-
-  const now = new Date().toISOString()
-  const newConversationId = crypto.randomUUID()
-  const idMap = new Map<string, string>()
-  const sourceRows = messages.value.slice(0, messageIndex + 1)
-  for (const row of sourceRows) idMap.set(row.id, crypto.randomUUID())
-
-  const copiedMessages: Message[] = sourceRows.map(row => ({
-    ...row,
-    id: idMap.get(row.id) || crypto.randomUUID(),
-    conversationId: newConversationId,
-    replyGroupId: row.replyGroupId ? `${row.replyGroupId}-${newConversationId}` : undefined,
-    replyTo: row.replyTo
-      ? {
-        ...row.replyTo,
-        messageId: idMap.get(row.replyTo.messageId) || row.replyTo.messageId
-      }
-      : undefined
-  }))
-
-  const [sourceMemories, sourceHistory, sourceMusic] = await Promise.all([
-    db.memories.where('conversationId').equals(activeConversation.id).toArray(),
-    db.conversationStateHistory.where('conversationId').equals(activeConversation.id).toArray(),
-    db.musicStates.get(activeConversation.id)
-  ])
-  const copiedMemories = sourceMemories
-    .filter(row => !row.sourceMessageId || idMap.has(row.sourceMessageId))
-    .map(row => ({
-      ...row,
-      id: crypto.randomUUID(),
-      conversationId: newConversationId,
-      sourceMessageId: row.sourceMessageId ? idMap.get(row.sourceMessageId) : undefined,
-      createdAt: row.createdAt,
-      updatedAt: now
-    }))
-  const copiedHistory = sourceHistory
-    .filter(row => !row.sourceMessageId || idMap.has(row.sourceMessageId))
-    .map(row => ({
-      ...row,
-      id: crypto.randomUUID(),
-      conversationId: newConversationId,
-      sourceMessageId: row.sourceMessageId ? idMap.get(row.sourceMessageId) : undefined
-    }))
-
-  const selectedCreatedAt = message.createdAt
-  const relevantHistory = sourceHistory
-    .filter(row => !row.sourceMessageId || idMap.has(row.sourceMessageId))
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  const branchState: ConversationState = createDefaultConversationState(newConversationId)
-  for (const row of relevantHistory) {
-    if (row.field === 'location') branchState.location = row.nextValue
-    else if (row.field === 'presence' && (row.nextValue === 'together' || row.nextValue === 'remote')) branchState.presence = row.nextValue
-    else if (row.field === 'timePeriod') branchState.timePeriod = row.nextValue
-    else if (row.field === 'energy') branchState.energy = row.nextValue
-    else if (row.field === 'mood') branchState.innerMood = row.nextValue
-    else if (row.field === 'activity') branchState.innerActivity = row.nextValue
-    else if (row.field === 'relationship') branchState.relationshipNote = row.nextValue
-    else if (row.field === 'topic') branchState.unresolvedTopics = Array.from(new Set([...(branchState.unresolvedTopics || []), row.nextValue])).slice(-6)
-    else if (row.field === 'goal') branchState.shortTermGoals = Array.from(new Set([...(branchState.shortTermGoals || []), row.nextValue])).slice(-6)
-    else if (row.field === 'event' && row.label === '等待中的事件') branchState.pendingEvents = Array.from(new Set([...(branchState.pendingEvents || []), row.nextValue])).slice(-6)
-    else if (row.field === 'event') branchState.lastCompletedEvent = row.nextValue
-  }
-  if (conversationState.value?.activeResourceEntryId && conversationState.value.activeResourceUpdatedAt && conversationState.value.activeResourceUpdatedAt <= selectedCreatedAt) {
-    branchState.activeResourceEntryId = conversationState.value.activeResourceEntryId
-    branchState.activeResourceTitle = conversationState.value.activeResourceTitle
-    branchState.activeResourceUpdatedAt = conversationState.value.activeResourceUpdatedAt
-  }
-  if (conversationState.value?.thoughtUpdatedAt && conversationState.value.thoughtUpdatedAt <= selectedCreatedAt) {
-    branchState.innerThought = conversationState.value.innerThought
-    branchState.thoughtUpdatedAt = conversationState.value.thoughtUpdatedAt
-  }
-  if (conversationState.value?.lorebookRuntime) {
-    const branchMessageCount = copiedMessages.filter(row => !row.recalledAt).length
-    const inheritedRuntime: LorebookRuntimeState = Object.fromEntries(Object.entries(conversationState.value.lorebookRuntime).flatMap(([entryId, state]) => {
-      const mappedMessageId = state.activatedAtMessageId ? idMap.get(state.activatedAtMessageId) : undefined
-      const activatedBeforeBranch = state.activatedAtMessageId ? Boolean(mappedMessageId) : state.activatedAt <= selectedCreatedAt
-      const effectUntil = Math.max(state.stickyUntilMessageCount ?? -1, state.cooldownUntilMessageCount ?? -1)
-      if (!activatedBeforeBranch || effectUntil < branchMessageCount) return []
-      return [[entryId, { ...state, activatedAtMessageId: mappedMessageId }]]
-    }))
-    branchState.lorebookRuntime = inheritedRuntime
-  }
-  branchState.summary = ''
-  branchState.summaryMessageCount = 0
-  branchState.presenceResolutionSource = 'unknown'
-  branchState.presenceResolutionReason = '由分支节点之前的状态历史重建；后续场景从该节点继续判断。'
-  branchState.updatedAt = now
-
-  const rootConversationId = activeConversation.rootConversationId || activeConversation.id
-  const branchConversation: Conversation = {
-    ...activeConversation,
-    id: newConversationId,
-    title: `${activeConversation.title.replace(/ · 分支(?: \d+)?$/, '')} · 分支`,
-    pinned: false,
-    unread: 0,
-    parentConversationId: activeConversation.id,
-    rootConversationId,
-    branchFromMessageId: message.id,
-    createdAt: now,
-    updatedAt: now
-  }
-
-  await db.transaction('rw', [db.conversations, db.messages, db.chatSettings, db.conversationStates, db.memories, db.conversationStateHistory, db.musicStates], async () => {
-    await db.conversations.add(branchConversation)
-    if (copiedMessages.length) await db.messages.bulkAdd(copiedMessages)
-    if (chatSettings.value) {
-      await db.chatSettings.put({
-        ...chatSettings.value,
-        id: newConversationId,
-        conversationId: newConversationId,
-        updatedAt: now
-      })
-    }
-    await db.conversationStates.put(branchState)
-    if (copiedMemories.length) await db.memories.bulkAdd(copiedMemories)
-    if (copiedHistory.length) await db.conversationStateHistory.bulkAdd(copiedHistory)
-    if (sourceMusic && sourceMusic.updatedAt <= selectedCreatedAt) await db.musicStates.put({ ...sourceMusic, id: newConversationId, isPlaying: false, updatedAt: now })
+  const plan = await createConversationBranch({
+    conversationId: activeConversation.id,
+    selectedMessageId: message.id,
+    personaName: activePersona.value?.name?.trim() || '你'
   })
 
   activePanel.value = null
   noticeMessage.value = '聊天分支已创建，正在进入新的独立剧情。'
-  await router.push(`/chat/${newConversationId}`)
+  await router.push(`/chat/${plan.conversation.id}`)
 }
 
 function replyToSelectedMessage() {
@@ -3054,19 +2948,39 @@ function cancelReply() {
 
 async function deleteSelectedMessage() {
   const message = selectedMessage.value
-  if (!message) return
+  if (!message || !conversation.value) return
 
   const ids = message.replyGroupId
     ? messages.value
       .filter(item => item.replyGroupId === message.replyGroupId)
       .map(item => item.id)
     : [message.id]
+  const affectedRows = messages.value.filter(item => ids.includes(item.id))
+  const affectedCreatedAt = affectedRows
+    .map(item => item.createdAt)
+    .sort((a, b) => a.localeCompare(b))[0] || message.createdAt
 
-  await db.messages.bulkDelete(ids)
-  messages.value = messages.value.filter(item => !ids.includes(item.id))
+  await deleteConversationMessagesConsistently({
+    conversationId: conversation.value.id,
+    messageIds: ids,
+    affectedCreatedAt
+  })
+  messages.value = messages.value.map(item =>
+    item.replyTo?.messageId && ids.includes(item.replyTo.messageId)
+      ? { ...item, replyTo: undefined }
+      : item
+  ).filter(item => !ids.includes(item.id))
+  conversationState.value = await rebuildAndPersistConversationState({
+    conversationId: conversation.value.id,
+    retainedMessages: messages.value,
+    personaName: activePersona.value?.name?.trim() || '你'
+  })
+  await refreshMemoryList()
+
   if (replyTarget.value && ids.includes(replyTarget.value.id)) {
     replyTarget.value = undefined
   }
+  selectedMessage.value = undefined
   activePanel.value = null
 }
 
@@ -3082,63 +2996,6 @@ function sourceMessageBefore(message: Message) {
   return undefined
 }
 
-async function rebuildConversationStateBeforeUserMessage(message: Message) {
-  if (!conversation.value || !character.value) return createDefaultConversationState(message.conversationId)
-  const selectedIndex = messages.value.findIndex(item => item.id === message.id)
-  const retained = selectedIndex > 0 ? messages.value.slice(0, selectedIndex) : []
-  const retainedIds = new Set(retained.map(item => item.id))
-  const personaName = activePersona.value?.name?.trim() || '你'
-  const state = createDefaultConversationState(conversation.value.id)
-
-  // 先恢复真实开场已经建立的场景事实，再重放该节点之前的状态历史。
-  const greeting = retained.find(item => item.isGreetingSeed && item.senderId !== 'user')
-  if (greeting) {
-    const source = greeting.rawContent || greeting.content
-    const plain = normalizeCommunityPlainText(source)
-    const ui = greeting.roleCardUi || extractRoleCardUiHints(plain)
-    const patch = roleCardUiToConversationPatch(plain, ui, [personaName])
-    const presence = resolvePresenceFromRoleCardScene(source, ui, undefined, [personaName]).resolvedPresence
-    Object.assign(state, patch)
-    if (presence) state.presence = presence
-    state.innerActivity = inferCardInitialActivity(source) || state.innerActivity
-    state.relationshipNote = inferCardInitialRelationship(source) || state.relationshipNote
-  }
-
-  const history = await db.conversationStateHistory.where('conversationId').equals(conversation.value.id).toArray()
-  const relevant = history
-    .filter(row => row.createdAt < message.createdAt)
-    .filter(row => !row.sourceMessageId || retainedIds.has(row.sourceMessageId))
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  for (const row of relevant) {
-    if (row.field === 'location') state.location = row.nextValue
-    else if (row.field === 'presence' && (row.nextValue === 'together' || row.nextValue === 'remote')) state.presence = row.nextValue
-    else if (row.field === 'timePeriod') state.timePeriod = row.nextValue
-    else if (row.field === 'energy') state.energy = row.nextValue
-    else if (row.field === 'mood') state.innerMood = row.nextValue
-    else if (row.field === 'activity') state.innerActivity = row.nextValue
-    else if (row.field === 'relationship') state.relationshipNote = row.nextValue
-    else if (row.field === 'topic') state.unresolvedTopics = Array.from(new Set([...(state.unresolvedTopics || []), row.nextValue])).slice(-6)
-    else if (row.field === 'goal') state.shortTermGoals = Array.from(new Set([...(state.shortTermGoals || []), row.nextValue])).slice(-6)
-    else if (row.field === 'event' && row.label === '等待中的事件') state.pendingEvents = Array.from(new Set([...(state.pendingEvents || []), row.nextValue])).slice(-6)
-    else if (row.field === 'event') state.lastCompletedEvent = row.nextValue
-  }
-
-  state.summary = ''
-  state.summaryMessageCount = 0
-  state.innerThought = ''
-  state.thoughtUpdatedAt = undefined
-  state.activeResourceEntryId = undefined
-  state.activeResourceTitle = undefined
-  state.activeResourceUpdatedAt = undefined
-  state.lorebookRuntime = {}
-  state.lastActionSummary = ''
-  state.lastTechnicalError = ''
-  state.lastProviderNotice = ''
-  state.updatedAt = new Date().toISOString()
-  await db.conversationStates.put(state)
-  conversationState.value = state
-  return state
-}
 
 async function applyEditedUserMessageRuntimeEffects(message: Message) {
   if (!conversation.value || !character.value || !chatSettings.value || !message.content.trim()) return
@@ -3191,45 +3048,17 @@ async function regenerateFromUserMessage(message: Message, confirmTruncate = tru
     if (!confirmed) return
   }
 
-  const affectedIds = new Set([message.id, ...descendants.map(item => item.id)])
-  const [memoryRows, historyRows, debugRows] = await Promise.all([
-    db.memories.where('conversationId').equals(conversation.value.id).toArray(),
-    db.conversationStateHistory.where('conversationId').equals(conversation.value.id).toArray(),
-    db.promptDebugTraces.where('conversationId').equals(conversation.value.id).toArray()
-  ])
-  const now = new Date().toISOString()
-  const automaticMemories = memoryRows.filter(row =>
-    (row.sourceType === 'automatic' || (!row.sourceType && Boolean(row.sourceMessageId))) &&
-    row.sourceMessageId &&
-    affectedIds.has(row.sourceMessageId)
-  )
-  // 只删除由当前分支新建的自动记忆；如果一条旧自动记忆只是后来被当前分支合并过，保留旧内容并移除失效来源。
-  const memoryIds = automaticMemories
-    .filter(row => row.createdAt >= message.createdAt)
-    .map(row => row.id)
-  const memoryPatches = automaticMemories
-    .filter(row => row.createdAt < message.createdAt)
-    .map(row => ({
-      id: row.id,
-      sourceMessageId: undefined,
-      mergedFrom: (row.mergedFrom || []).filter(id => !affectedIds.has(id)),
-      updatedAt: now
-    }))
-  const historyIds = historyRows.filter(row => row.sourceMessageId && affectedIds.has(row.sourceMessageId)).map(row => row.id)
-  const debugIds = debugRows.filter(row => row.createdAt >= message.createdAt).map(row => row.id)
-  const descendantIds = descendants.map(item => item.id)
-
-  await db.transaction('rw', [db.messages, db.memories, db.conversationStateHistory, db.promptDebugTraces, db.conversations], async () => {
-    if (descendantIds.length) await db.messages.bulkDelete(descendantIds)
-    if (memoryIds.length) await db.memories.bulkDelete(memoryIds)
-    for (const { id, ...changes } of memoryPatches) await db.memories.update(id, changes)
-    if (historyIds.length) await db.conversationStateHistory.bulkDelete(historyIds)
-    if (debugIds.length) await db.promptDebugTraces.bulkDelete(debugIds)
-    await db.conversations.update(conversation.value!.id, { updatedAt: now })
+  await truncateConversationAfterMessage({
+    conversationId: conversation.value.id,
+    anchorMessageId: message.id
   })
 
   messages.value = messages.value.slice(0, index + 1)
-  await rebuildConversationStateBeforeUserMessage(message)
+  conversationState.value = await rebuildAndPersistConversationState({
+    conversationId: conversation.value.id,
+    retainedMessages: messages.value.slice(0, index),
+    personaName: activePersona.value?.name?.trim() || '你'
+  })
   await applyEditedUserMessageRuntimeEffects(message)
   await updateUserMessageState(message.id, 'delivered')
   activePanel.value = null
@@ -3509,6 +3338,7 @@ watch(draft, value => {
 })
 
 onUnmounted(() => {
+  conversationLoadEpoch += 1
   rememberScrollPosition()
   abortController?.abort()
   clearStreamTimers()

@@ -151,16 +151,29 @@ export function applyRegexScript(text: string, script: RegexScript, macros?: { u
   const patternSource = substituteMacros(script.findRegex, script, macros)
   const replacement = substituteReplacementMacros(script.replaceString || '', macros)
 
+  const patternSources = [patternSource]
+  // A few old community exports serialized the regex source one level too deeply
+  // (`\\[` instead of `\[`). Never mutate the stored author Regex: only try a
+  // one-pass de-escaped fallback when the original expression does not match.
+  if (patternSource.includes('\\')) {
+    const onePass = patternSource.replace(/\\\\/g, '\\')
+    if (onePass !== patternSource) patternSources.push(onePass)
+  }
+
   const replaceWithPattern = (input: string) => {
-    const pattern = parsePattern(patternSource)
-    if (!pattern) return input
-    return input.replace(pattern, (...args: unknown[]) => {
-      const match = String(args[0] ?? '')
-      const groupCount = Math.max(0, args.length - 3)
-      const groups = args.slice(1, 1 + groupCount).map(value => String(value ?? ''))
-      const trimmed = (script.trimStrings || []).reduce((current, item) => item ? current.split(item).join('') : current, match)
-      return expandReplacement(replacement, trimmed, groups)
-    })
+    for (const source of patternSources) {
+      const pattern = parsePattern(source)
+      if (!pattern) continue
+      const output = input.replace(pattern, (...args: unknown[]) => {
+        const match = String(args[0] ?? '')
+        const groupCount = Math.max(0, args.length - 3)
+        const groups = args.slice(1, 1 + groupCount).map(value => String(value ?? ''))
+        const trimmed = (script.trimStrings || []).reduce((current, item) => item ? current.split(item).join('') : current, match)
+        return expandReplacement(replacement, trimmed, groups)
+      })
+      if (output !== input) return output
+    }
+    return input
   }
 
   const direct = replaceWithPattern(text)
@@ -320,7 +333,16 @@ export async function listActiveRegexScripts(characterId: string, target: RegexT
 export function normalizeRichHtml(value: string) {
   const trimmed = value.trim()
   const fullyFenced = trimmed.match(/^```(?:html)?\s*([\s\S]*?)\s*```$/i)
-  let source = (fullyFenced?.[1] || trimmed).trim()
+  let fencedBody = fullyFenced?.[1] || ''
+  if (fullyFenced) {
+    // Some JSON/community payloads preserve the first/last newline as the two
+    // characters `\\n`. Treat only fence-edge escapes as formatting whitespace;
+    // do not reinterpret arbitrary escaped text inside the author's HTML.
+    fencedBody = fencedBody
+      .replace(/^(?:(?:\\r)?\\n)+/, '')
+      .replace(/(?:(?:\\r)?\\n)+$/, '')
+  }
+  let source = (fullyFenced ? fencedBody : trimmed).trim()
 
   source = source.replace(/```html\s*([\s\S]*?)\s*```/gi, (_whole, body: string) => String(body).trim())
 

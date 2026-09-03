@@ -1,65 +1,73 @@
 # AI Companion Phone Docs
 
-当前文档版本：**V0.4.7.1**
+当前开发线：**V0.5.0-alpha.3（Conversation Runtime 第二刀）**
 
 ```text
-应用：V0.4.7.1
+应用：0.5.0-alpha.3
 IndexedDB：V14
 Backup：V9
+原始审查基线：用户上传 V0.4.7.1
+当前升级基线：V0.5.0-alpha.2.1
 ```
 
-V0.4.7.1 是 **Community UI / 呈现协议稳定补丁**：不改变 V0.4.7.0 的 Regex Pipeline V2 架构，修复作者状态栏 HTML 本地恢复、旧开场透明承载与 Markdown 图片、纯手机多气泡上下文连续性、动作/台词分开缺少动作，以及用户消息编辑后无法从该节点重新回复的问题。数据库版本保持 IndexedDB V14 / Backup V9。
+> 重要：alpha.3 以 `0.5.0-alpha.2.1` 为直接基线。alpha.2.1 的最终 149/149 Windows 日志尚未回传，因此 alpha.3 仍按“先 npm test，再 Build，再人工回归”的门禁验收；不要在红灯状态 commit。
 
-## 文档怎么读
+## 文档入口
 
-运行 / 更新：
+### 第一次运行 / 更新
 
-1. `START_HERE_小白启动指南.md`
-2. `部署与更新.md`
+1. `START_HERE_小白启动指南.md`：第一次启动、Build、反馈问题。
+2. `部署与更新.md`：Windows PowerShell 覆盖、Build、Git 提交的标准流程。
 
-继续开发：
+### 当前开发
 
-1. `PROJECT_STATUS.md`
-2. `ARCHITECTURE.md`
-3. `COMMUNITY_RUNTIME.md`
-4. `DEVELOPMENT_LOG.md`
+1. `PROJECT_STATUS.md`：唯一的“现在做到哪里 / 下一步做什么”。
+2. `ENGINEERING_AUDIT.md`：目录级代码审查、技术债、潜在 Bug、测试缺口和 V0.5 路线图。
+3. `ARCHITECTURE.md`：当前架构与 V0.5 Runtime 目标边界。
+4. `COMMUNITY_RUNTIME.md`：Character Card / WorldBook / Regex / Community UI 当前语义。
+5. `DEVELOPMENT_LOG.md`：最近开发决策和本轮实际修改。
+6. `REFERENCE_PROJECTS.md`：公开“小手机”与工具样本、学习原则。
 
-历史：
+### 历史归档
 
-- `CHANGELOG.md`：精简版本变化；
-- `RELEASE_HISTORY.md`：旧逐版本说明完整合并。
+- `CHANGELOG.md`：每个版本/预发布版的精简变化。
+- `RELEASE_HISTORY.md`：旧版本长篇发布说明。
+- `DEVELOPMENT_HISTORY.md`：较早开发日志。
+- `COMMUNITY_RUNTIME_HISTORY.md`：早期社区兼容审计。
 
-论文：
+### 毕业设计
 
-- `毕业设计与论文素材.md`
+- `毕业设计与论文素材.md`：论文题目、研究问题、创新点、实验方案和开发案例。
 
 ## docs 结构
 
 ```text
 docs/
-├─ README.md
-├─ START_HERE_小白启动指南.md
-├─ PROJECT_STATUS.md
-├─ ARCHITECTURE.md
-├─ COMMUNITY_RUNTIME.md
-├─ CHANGELOG.md
-├─ RELEASE_HISTORY.md
-├─ DEVELOPMENT_LOG.md
-├─ 部署与更新.md
-└─ 毕业设计与论文素材.md
+├─ README.md                         # 文档总入口
+├─ START_HERE_小白启动指南.md         # 第一次运行
+├─ 部署与更新.md                     # 更新 / Build / Git
+├─ PROJECT_STATUS.md                 # 当前状态（只写现在）
+├─ ENGINEERING_AUDIT.md              # 工程审查 + V0.5 路线图
+├─ ARCHITECTURE.md                   # 架构单一事实源
+├─ COMMUNITY_RUNTIME.md              # 当前社区 Runtime 语义
+├─ REFERENCE_PROJECTS.md             # 参考项目学习库
+├─ DEVELOPMENT_LOG.md                # 最近开发记录
+├─ CHANGELOG.md                      # 精简版本变化
+├─ RELEASE_HISTORY.md                # 发布历史归档
+├─ DEVELOPMENT_HISTORY.md            # 旧开发日志归档
+├─ COMMUNITY_RUNTIME_HISTORY.md       # 旧社区兼容审计归档
+└─ 毕业设计与论文素材.md              # 论文 / 答辩素材
 ```
 
 ## 维护规则
 
-普通代码更新至少维护：
+每次代码交付至少维护：
 
-- `PROJECT_STATUS.md`
-- `CHANGELOG.md`
-- `DEVELOPMENT_LOG.md`
+- `package.json` / `package-lock.json` 版本；
+- `PROJECT_STATUS.md`；
+- `CHANGELOG.md`；
+- `DEVELOPMENT_LOG.md`。
 
-架构变化再维护：
+发生架构边界变化时再维护 `ARCHITECTURE.md`；Character Card / WorldBook / Regex / Community UI 语义变化时再维护 `COMMUNITY_RUNTIME.md`。代码审查结论或重构优先级发生实质变化时更新 `ENGINEERING_AUDIT.md`。
 
-- `ARCHITECTURE.md`
-- `COMMUNITY_RUNTIME.md`（社区协议变化时）
-
-以后不再为每个小版本创建独立 `Vx.x.x_*.md`。需要长篇发布说明时，直接追加到 `RELEASE_HISTORY.md` 最上方。
+历史内容不要继续堆进 `PROJECT_STATUS.md`。旧说明进入对应 `*_HISTORY.md` 或 `RELEASE_HISTORY.md`。通过 `npm run cleanup` 清理已经完成归档的旧 Markdown；不要手工删除当前 14 份长期文档。
