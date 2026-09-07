@@ -1,50 +1,86 @@
 # AI Companion Phone 工程审查与 V0.5.0 重构路线图
 
-> 原始审查基线是用户上传的 V0.4.7.1。alpha.1 建立 Conversation Mutation / Restart / stale-load guard；alpha.2 将兼容层红灯从 7 个压到 1 个；alpha.2.1 修最后一个 scene-merged 回归；alpha.3 开始把 rewind / branch / opening reset 与状态重放正式迁入 Conversation Runtime。
+## 0.0.1 V0.5.0-alpha.3.2.1 热修结论
+
+alpha.3.2 的 11 个海龟汤失败并非 11 个独立缺陷，而是 `turtleSoupService.ts` 漏导入 Presentation Policy 两个符号造成的单点 `ReferenceError`。本版补齐静态 import；不改业务逻辑。
+
+> 原始审查基线是用户上传的 V0.4.7.1。alpha.1 建立 Conversation Mutation / Restart / stale-load guard；alpha.2 将兼容层红灯从 7 个压到 1 个；alpha.2.1 修最后一个 scene-merged 回归；alpha.3 开始把 rewind / branch / opening reset 与状态重放正式迁入 Conversation Runtime；alpha.3.1 对用户新增的朋友圈/音乐/海龟汤做代码审查、可靠性修复和视觉收口；alpha.3.1.1 根据 Windows 全量测试修正自主朋友圈 3 小时补发边界；alpha.3.2 收敛 Chat / Native App Presentation 边界并统一清新淡蓝视觉。
 
 审查基线：用户上传 `ai-companion-phone-v0.4.7.1(1).zip`，`package.json` 版本 `0.4.7.1`。
 
-> 说明：最初目录/依赖结论来自静态代码审查；构建/测试状态以后续 Windows 真实日志为准。alpha.3 新增 6 个 Runtime 用例，当前目标矩阵为 21 个测试文件、155 个用例。alpha.2.1 的最终 149/149 日志未回传，因此 alpha.3 仍必须从 `npm test` 开始验收。
+> 说明：最初目录/依赖结论来自静态代码审查。当前源码定义 27 个测试文件 / 256 个 `it/test` 用例；alpha.3.2 容器完成 TS/Vue script 语法转译检查，完整 Vitest/Build 继续以 Windows 为准。
+
+## 0.0 V0.5.0-alpha.3.2 呈现层审查结论
+
+真实截图暴露的主要视觉回归不是“配色不好看”，而是 **Presentation ownership 不清楚**：Rich HTML 因作者 UI 自带 Surface 而让整个外层透明，导致同一回复里的普通剧情正文也直接铺在聊天背景上；同时独立 App 又各自让 AI 输出接近聊天卡片的内容，形成 UI 套 UI。
+
+alpha.3.2 将责任重新分层：
+
+- Chat Renderer 拥有标准白/蓝气泡，同时保留 Community UI 作者 Surface；
+- `SafeRichHtml` 负责 Mixed Content 分离，不让普通正文失去阅读容器；
+- `appPresentationPolicy` 负责原生 App 的 AI 输出边界；
+- Moments / Music / Turtle Soup 的 Vue 页面拥有全部按钮、卡片、状态、选择器与布局；
+- 当前生产规模约 **34,793 行**，比用户新增功能初版减少明显，新增 App 仍应继续抽共享 Surface，而不是复制新主题 CSS。
+
+## 0. V0.5.0-alpha.3.1 新功能审查结论
+
+本轮检查用户新增功能后，没有把问题归因于“UI 不够好看”就直接重写，而是先处理会真实破坏数据或产生费用的边界：
+
+- **Seed 生命周期**：`characters.count() === 0` 不能代表“第一次安装”；否则用户删光角色后 demo 会复活。改为仅在启动前连 World 都不存在的全新库播种。
+- **Dexie 索引契约**：`momentComments` schema 没有 `authorId` 索引，不能对它使用 `.where('authorId')`；不为一个删除分支贸然升 DB V16，而采用 collection filter。
+- **Prompt 去重**：海龟汤 UI 先 push 当前问题再读取 history，会让 service 再追加一次当前问题；现在先 snapshot history。
+- **付费副作用**：朋友圈自动角色活动默认关闭、降低频率、前台/在线运行且 loop 不可重入；这是产品安全边界，不只是性能优化。
+- **Provider 兼容**：`thinking` 属于非标准扩展，只对内置 DeepSeek 发；通用 OpenAI-compatible 保持标准请求体。
+- **首屏性能**：新增 App 采用 route-level lazy import；下一阶段再根据 Windows Build chunk 输出决定是否继续拆 vendor/manualChunks。
+- **PWA 子路径**：GitHub Pages 使用 `/ai-companion-phone/`，manifest 的 start_url/scope/icon 必须与 base 对齐。
+
+新页面尺寸仍较大（Moments / Music / Turtle Soup 两页均接近或超过 1k 行），但当前优先是功能稳定；后续应先抽共享 `AppSurfaceShell / CharacterPicker / CompanionChatPanel`，不要复制四套卡片/聊天 CSS。
+
+
+### alpha.3.1.1 测试反馈闭环
+
+Windows 对 alpha.3.1 的真实全量结果为 **25/26 test files、243/244 tests**。唯一失败由 `autoPostCountDue()` 的边界定义造成：实现把 3 小时窗口从“最小间隔之后”再起算，导致精确 3 小时只返回 1；测试/产品语义则把“总离线达到一个完整 3 小时窗口”视为 2 条。alpha.3.1.1 采用后者，并继续使用 `AUTO_MAX_BACKFILL=2` 作为费用硬上限。
 
 ## 1. 审查摘要
 
-- 当前 TS/Vue 源码继续处于约 3 万行规模；alpha.3 重点是迁移应用编排，而不是追求总行数下降。
+- alpha.3.1 当前生产 TS/Vue 约 **36,555 行**，测试代码约 **3,200 行**；新增 App 让总规模继续增长，因此下一阶段必须以“复用边界”而不是单纯堆页面为指标。
 - 原 V0.4.7.1 审查时生产 TS/Vue 约 28,231 行；V0.5 重构期间以趋势而非绝对行数作为指标。
-- 当前测试定义：21 个测试文件、155 个 `it/test` 用例；alpha.3 新增 rewind / branch / point-in-time state replay 6 个用例。
+- 当前测试定义：26 个测试文件、244 个 `it/test` 用例；除 Conversation Runtime 外，朋友圈、音乐、海龟汤和 Provider 也已有纯规则/请求体回归测试。
 - `ChatRoom.vue`：alpha.3 为 4,576 行，仍是最大架构热点；Conversation lifecycle 已继续外移，但 generation 仍未大拆。
-- 依赖图没有检测到 TS/Vue 模块循环依赖，这是当前代码结构的明显优点。
+- 静态依赖扫描覆盖 **99 个生产 TS/Vue 文件**，仍未检测到模块循环依赖，这是当前代码结构的明显优点。
 - 最大风险不是“缺功能”，而是 Conversation/Generation/Persistence 逻辑仍集中在 View，导致删除、回滚、分支、流式生成、状态/记忆等操作难以保持事务一致性。
 
 ## 2. 目录级审查
 
 ### `src/views`
 
-约 12,469 行。承担了过多应用编排和数据库事务。
+当前约 **17,645 行**。新增 Moments / Music / Turtle Soup 后，View 层增长明显，仍承担了较多应用编排和数据库访问。
 
 重点：
 - `ChatRoom.vue`：聊天 UI + 会话加载 + 旧数据清理 + Prompt 编排 + Provider 请求 + Streaming + Regex + WorldBook + Memory + State + Branch/Rewind + 音乐/语音/图片。
 - `CharacterCreate.vue`：表单 UI + 角色卡导入 + 头像处理 + 重复检测 + 资源落库 + Persona/Conversation 创建事务。
-- `ModelSettingsView.vue`、`CharacterEditView.vue` 也偏大。
-- 13 个 View 直接 import `db`，UI 层与持久化层耦合较高。
+- 新增热点：`MomentsView.vue` 1,347 行、`TurtleSoupHostView.vue` 1,242 行、`MusicAppView.vue` 1,108 行、`TurtleSoupView.vue` 1,103 行；下一阶段应抽共享 AppSurfaceShell / CharacterPicker / CompanionChatPanel。
+- `ModelSettingsView.vue` 976 行、`CharacterEditView.vue` 881 行，也偏大。
+- 当前有 **17 个 View** 直接 import `db`，新增 App 进一步放大了 UI 层与持久化层耦合。
 
 ### `src/services`
 
-约 13,080 行，是项目逻辑主体。方向正确，但“纯规则 / 用例编排 / IndexedDB I/O / 外部 HTTP”混在同一目录。
+当前约 **13,049 行**，仍是项目逻辑主体。方向正确，但“纯规则 / 用例编排 / IndexedDB I/O / 外部 HTTP”混在同一目录。
 
 重点热点：
 - `ai/provider.ts` 1012 行：HTTP、SSE、错误分类、模型列表、文本提取混合。
-- `characterCardImportService.ts` 968 行：JSON/V2/V3 映射、PNG metadata、Persona 推断、导入/导出混合。
+- `characterCardImportService.ts` 992 行：JSON/V2/V3 映射、PNG metadata、Persona 推断、导入/导出混合。
 - `lorebookService.ts` 823 行：WorldBook Engine 核心，但没有直接测试文件。
 - `interactionProtocol.ts` 792 行：较大，但已有 28 个测试，风险相对可控。
 - `memoryService.ts` 685 行：核心长期记忆逻辑，已有基础测试但覆盖仍偏少。
 
 ### `src/db`
 
-`database.ts` 831 行，集中维护 V1→V14 全部 Dexie schema/migration。历史兼容做得认真，但没有 migration test，属于高风险基础设施。
+`database.ts` 864 行，集中维护 V1→V15 全部 Dexie schema/migration。历史兼容做得认真，但没有 migration test，属于高风险基础设施。
 
 ### `src/types`
 
-`domain.ts` 697 行，被至少 62 个内部模块引用，是全项目最高 fan-in。继续扩展 App/Runtime 时会成为“任何类型改动都影响全局”的中心文件。
+`domain.ts` 739 行，仍是全项目最高 fan-in 类型中心之一。继续扩展 App/Runtime 时会成为“任何类型改动都影响全局”的中心文件。
 
 ### `src/components` / `src/composables`
 
@@ -172,7 +208,7 @@ Vite `base` 为 `/ai-companion-phone/`，manifest 中显式设置 `start_url: '/
 
 ## 7. 测试缺口
 
-现状：alpha.3 源码定义 21 个测试文件、155 个用例。Regex / Interaction / Community UI 与 Conversation Runtime 都已有基础行为测试，但 Lorebook 主引擎、Backup schema、DB migration、安全渲染仍是最大缺口。
+现状：alpha.3.1 源码定义 26 个测试文件、244 个用例。Regex / Interaction / Community UI 与 Conversation Runtime 都已有基础行为测试，但 Lorebook 主引擎、Backup schema、DB migration、安全渲染仍是最大缺口。
 
 ### V0.5.0 P0 测试
 

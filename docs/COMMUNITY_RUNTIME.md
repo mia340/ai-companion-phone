@@ -1,6 +1,6 @@
 # Community Runtime｜社区资源兼容运行时
 
-> V0.5.0-alpha.2 不改变 Character Card / WorldBook / Regex 的标准语义，但修复了 3 个兼容层实现问题：独立 WorldBook JSON 资源识别、作者 HTML 外壳提取、旧社区 Regex 一层过度转义 fallback。所有 fallback 都以“不改作者原资源、不执行未知脚本”为边界。
+> V0.5.0-alpha.3.2 明确 Presentation 边界：**Chat 继续完整承载 Character Card / WorldBook / Regex / Community UI；朋友圈、音乐、海龟汤等原生 App 不执行或展示模型生成的第二层 UI**。旧兼容 fallback 仍以“不改作者原资源、不执行未知脚本”为边界。
 
 > 当前文档只描述通用协议与运行边界。测试角色卡只能作为回归样本，生产逻辑禁止按角色名、作者名、卡 ID 或文件名特判。
 
@@ -80,6 +80,17 @@ V3 `use_regex` 有自己的 key matcher 语义。若条目存在 regex keys，�
 Rich HTML 的宿主表面按内容能力判定：作者 HTML 自带 background/border/shadow 时不套额外气泡；只有旧社区 `<details>/<br>` 等没有视觉表面的开场才提供中性承载背景。HTML 中混用的 `![](https://...)` Markdown 图片会转换成静态 `<img>`，之后仍由 SafeRichHtml 执行 URL/DOM 安全清洗。
 
 三种呈现继续独立于 Presence：纯手机多条 text 必须共同回应最新用户消息；动作/台词分开模式可在远程场景展示角色自己一端的自然 `scene_action`，但不能暗示用户物理可见，也不能本地生成动作。
+
+## 1.4 Chat-only Community Presentation（V0.5.0-alpha.3.2）
+
+社区资源的 UI 能力不被全局禁用，而是限定在合适的 Surface：
+
+- 聊天中的普通自然语言：本地白色 / 浅蓝气泡；
+- 聊天中的作者状态栏、Regex UI、HTML 卡片：继续进入 `SafeRichHtml`；
+- 一条 Rich 回复同时含普通正文和作者 UI：正文由 `SafeRichHtml` 的 local narrative wrapper 恢复白色气泡，作者 UI 不再被第二层外壳包住；
+- 朋友圈 / 音乐 / 海龟汤：即便模型误输出 `<div>`, `<style>`, `<script>` 或 Markdown UI，`appPresentationPolicy` 也只保留自然语言内容，由 App 自己渲染。
+
+这不是降低社区兼容，而是避免把“Chat 的作者 Presentation 能力”错误扩散到每一个 App Surface。
 
 ## 2. 核心原则
 

@@ -23,6 +23,12 @@ import PromptDebugView from '../views/PromptDebugView.vue'
 import MemoryManagerView from '../views/MemoryManagerView.vue'
 import PlaceholderApp from '../views/PlaceholderApp.vue'
 
+// 新增的重交互 App 按路由懒加载，避免朋友圈/音乐/海龟汤全部挤进首屏主包。
+const MomentsView = () => import('../views/MomentsView.vue')
+const TurtleSoupView = () => import('../views/TurtleSoupView.vue')
+const TurtleSoupHostView = () => import('../views/TurtleSoupHostView.vue')
+const MusicAppView = () => import('../views/MusicAppView.vue')
+
 export const router = createRouter({
   history: createWebHashHistory(),
 
@@ -101,6 +107,22 @@ export const router = createRouter({
     {
       path: '/settings',
       component: SettingsView
+    },
+    {
+      path: '/app/朋友圈',
+      component: MomentsView
+    },
+    {
+      path: '/app/海龟汤',
+      component: TurtleSoupView
+    },
+    {
+      path: '/app/海龟汤/主持',
+      component: TurtleSoupHostView
+    },
+    {
+      path: '/app/音乐',
+      component: MusicAppView
     },
     {
       path: '/app/:name',

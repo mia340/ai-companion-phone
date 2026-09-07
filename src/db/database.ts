@@ -11,6 +11,8 @@ import type {
   ConversationState,
   ConversationStateHistory,
   Message,
+  MomentComment,
+  MomentPost,
   MusicState,
   UserProfile,
   UserPersona,
@@ -47,6 +49,8 @@ export class CompanionDatabase extends Dexie {
   communityResourceArchives!: EntityTable<CommunityResourceArchive, 'id'>
   promptDebugTraces!: EntityTable<PromptDebugTrace, 'id'>
   conversationStateHistory!: EntityTable<ConversationStateHistory, 'id'>
+  momentPosts!: EntityTable<MomentPost, 'id'>
+  momentComments!: EntityTable<MomentComment, 'id'>
 
   constructor() {
     super('companion-world-v1')
@@ -823,6 +827,35 @@ export class CompanionDatabase extends Dexie {
           })
         }
       }
+    })
+
+    // V15：朋友圈。momentPosts / momentComments 是独立 App Surface，
+    // 只按世界/作者/时间索引；没有任何本地关系积分语义。
+    this.version(15).stores({
+      worlds: 'id, createdAt',
+      characters: 'id, worldId, name, *groups, createdAt',
+      contactGroups: 'id, worldId, order',
+      conversations: 'id, worldId, type, updatedAt, pinned',
+      messages: 'id, worldId, conversationId, createdAt, status, type, proactiveSource',
+      userProfiles: 'id, updatedAt',
+      modelSettings: 'id, provider, updatedAt',
+      chatSettings: 'id, conversationId, updatedAt',
+      memories: 'id, conversationId, characterId, importance, layer, status, topicKey, dueAt, updatedAt',
+      conversationStates: 'id, updatedAt',
+      conversationStateHistory: 'id, conversationId, characterId, field, createdAt',
+      musicStates: 'id, updatedAt',
+      relationships: null,
+      relationshipEvents: null,
+      personas: 'id, isDefault, updatedAt',
+      lorebookEntries: 'id, worldId, lorebookId, characterId, enabled, priority, updatedAt',
+      lorebooks: 'id, worldId, characterId, name, updatedAt',
+      promptPresets: 'id, worldId, name, updatedAt',
+      regexScripts: 'id, worldId, characterId, enabled, name, updatedAt',
+      resourceBindings: 'id, worldId, characterId, scope, scopeId, resourceType, resourceId, enabled, updatedAt',
+      communityResourceArchives: 'id, worldId, kind, characterId, name, fileName, createdAt, updatedAt',
+      promptDebugTraces: 'id, conversationId, characterId, createdAt',
+      momentPosts: 'id, worldId, authorType, authorId, conversationId, createdAt, updatedAt',
+      momentComments: 'id, worldId, momentId, createdAt'
     })
 
   }

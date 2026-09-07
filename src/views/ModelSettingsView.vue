@@ -36,7 +36,8 @@ const form = ref<ModelSettings>({
   apiKey: '',
   model: 'deepseek-v4-flash',
   temperature: 0.8,
-  maxTokens: 2048,
+  maxTokens: 4000,
+  thinkingEnabled: false,
   availableModels: ['deepseek-v4-flash', 'deepseek-v4-pro'],
   visionMode: 'auto',
   updatedAt: new Date().toISOString()
@@ -536,10 +537,28 @@ async function testVision() {
             v-model.number="form.maxTokens"
             type="number"
             min="64"
-            max="8192"
+            max="4000"
             step="64"
           />
-          <small>建议 2048 起。若模型返回“达到最大输出 Token”，本轮会停止并删除不完整回复，不会用本地文案续写。</small>
+          <small>
+            默认 4000。触顶时会保留已生成的内容，不再报“超长”错；
+            改小可以更快、改大可以更完整。旧值会自动收敛到 4000 以内。
+          </small>
+        </label>
+
+        <label class="thinking-toggle">
+          <span>
+            <b>思考推理（reasoning）</b>
+            <small>
+              默认关闭：更快更稳，回复不会被模型“隐藏思考”占掉字数而变短或变空
+              （当前网关模型 deepseek-v4-flash 自带思考，易把 4000 上限吃光）。
+              若当前模型需要显式 reasoning，可在这里开启；不同兼容网关支持情况可能不同。
+            </small>
+          </span>
+          <input
+            v-model="form.thinkingEnabled"
+            type="checkbox"
+          />
         </label>
 
       </section>
@@ -774,6 +793,66 @@ small {
 .switch-row input {
   width: 22px;
   height: 22px;
+}
+
+.thinking-toggle {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 15px;
+  background: #f6fbff;
+}
+
+.thinking-toggle > span {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+
+.thinking-toggle input {
+  position: relative;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 26px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: #dfe8f0;
+  box-shadow: inset 0 0 0 1px rgba(80, 110, 138, 0.08);
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.thinking-toggle input::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(50, 74, 98, 0.25);
+  transition: transform 0.2s ease;
+}
+
+.thinking-toggle input:checked {
+  background: linear-gradient(135deg, #93bff0, #7d7be8);
+  box-shadow: inset 0 0 0 1px rgba(86, 83, 190, 0.16);
+}
+
+.thinking-toggle input:checked::after {
+  transform: translateX(20px);
+}
+
+.thinking-toggle input:focus-visible {
+  outline: 3px solid rgba(123, 132, 231, 0.22);
+  outline-offset: 3px;
 }
 
 .security-notice,

@@ -98,6 +98,11 @@ export interface OpenAICompatibleProviderOptions {
   apiKey: string
   model: string
   maxTokens?: number
+  /**
+   * false → 内置 DeepSeek provider 请求带 thinking:{type:"disabled"}，跳过推理模型的隐藏思考链。
+   * 任意 OpenAI-compatible provider 不注入非标准字段，避免兼容网关 400。缺省按 true（不干预）。
+   */
+  thinkingEnabled?: boolean
 }
 
 interface OpenAIChatCompletionResponse {
@@ -202,7 +207,6 @@ function tokenErrorKind(message: string): TokenLimitError['kind'] | undefined {
   const source = message.toLowerCase()
   if (/(insufficient[_ -]?quota|quota exceeded|billing|credit balance|account balance|余额不足|额度不足|配额不足)/i.test(source)) return 'quota'
   if (/(context[_ -]?length|maximum context|context window|too many tokens|prompt is too long|input tokens|上下文.{0,8}(超|过|不足)|输入.{0,8}token)/i.test(source)) return 'context'
-  if (/(max[_ -]?tokens|token limit|output tokens|completion tokens|达到.{0,8}token|输出.{0,8}token)/i.test(source)) return 'output'
   return undefined
 }
 
@@ -210,7 +214,7 @@ function tokenLimitMessage(kind: TokenLimitError['kind'], detail = '') {
   const suffix = detail ? `：${detail}` : ''
   if (kind === 'quota') return `API Token/额度不足，无法继续生成。请补充额度或更换可用接口后重试${suffix}`
   if (kind === 'context') return `上下文 Token 已超过模型可用窗口，无法继续生成。请缩短上下文、压缩记忆或更换更大上下文模型后重试${suffix}`
-  return `本轮回复达到最大输出 Token，无法保证内容完整，因此本轮不会保存。请提高“最大输出长度”后重试${suffix}`
+  return `回复达到输出上限被截断，已为你保留生成出来的部分。${suffix}`
 }
 
 function tokenErrorFromMessage(message: string) {
@@ -218,26 +222,10 @@ function tokenErrorFromMessage(message: string) {
   return kind ? new TokenLimitError(kind, tokenLimitMessage(kind, message)) : undefined
 }
 
-function assertCompletionFinished(finishReason?: string | null) {
-  if (!finishReason) return
-  const normalized = finishReason.toLowerCase()
-  if (normalized === 'length' || normalized === 'max_tokens') {
-    throw new TokenLimitError('output', tokenLimitMessage('output'))
-  }
-}
-
-function assertOutputBudget(
-  usage: ChatResponse['usage'] | undefined,
-  finishReason: string | undefined,
-  maxTokens: number
-) {
-  // 少数 OpenAI-compatible 接口不返回 finish_reason。若输出恰好打满请求上限，
-  // 宁可视为可能截断并停止，也不把半句话保存成角色回复。
-  if (finishReason || !usage?.completionTokens) return
-  if (usage.completionTokens >= maxTokens) {
-    throw new TokenLimitError('output', tokenLimitMessage('output'))
-  }
-}
+// 说明（2026-09 策略调整）：输出触到 max_tokens 不再当作失败——
+// 直接保留生成出来的内容（截断就截断，整句尽量完整由上层 sanitize 处理），
+// 也绝不再弹“超过最大输出长度”错误。因此这里没有 assert*：finishReason=length
+// 只是“可能没说完”的信号，内容照常可用。只有 额度不足 / 上下文超窗 两类仍按失败处理。
 
 export class ProviderHttpError extends Error {
   readonly status: number
@@ -564,8 +552,7 @@ async function emitStreamText(
 
 async function readEventStream(
   response: Response,
-  handlers: ChatStreamHandlers | undefined,
-  maxTokens: number
+  handlers: ChatStreamHandlers | undefined
 ): Promise<ChatResponse> {
   if (!response.body) {
     throw new Error('当前浏览器无法读取流式回复。')
@@ -665,9 +652,6 @@ async function readEventStream(
     throw new Error('模型没有返回有效的流式回复。')
   }
 
-  assertCompletionFinished(finishReason)
-  assertOutputBudget(usage, finishReason, maxTokens)
-
   return {
     text: text.trim(),
     finishReason,
@@ -693,6 +677,7 @@ implements ModelProvider {
   private readonly apiKey: string
   private readonly model: string
   private readonly maxTokens: number
+  private readonly thinkingEnabled: boolean
 
   constructor(
     options: OpenAICompatibleProviderOptions
@@ -704,7 +689,11 @@ implements ModelProvider {
     )
     this.apiKey = options.apiKey.trim()
     this.model = options.model.trim()
-    this.maxTokens = options.maxTokens ?? 2048
+    // maxTokens<=0（含缺省外的显式 0）= 不设上限：不发 max_tokens，让模型自带上限接管。
+    const cap = options.maxTokens ?? 2048
+    this.maxTokens = cap > 0 ? Math.floor(cap) : 0
+    // 只有显式 false 才发 thinking 关闭参数；缺省不干预（老行为）。
+    this.thinkingEnabled = options.thinkingEnabled !== false
   }
 
   private validateEndpointConfig() {
@@ -725,6 +714,16 @@ implements ModelProvider {
         '请选择或手动填写模型名称。'
       )
     }
+  }
+
+  /**
+   * `thinking` 不是 OpenAI Chat Completions 标准字段。
+   * 只在内置 DeepSeek provider 上发送，避免任意 OpenAI-compatible 网关因未知字段直接 400。
+   */
+  private thinkingOverride() {
+    return this.id === 'deepseek' && this.thinkingEnabled === false
+      ? { thinking: { type: 'disabled' } }
+      : {}
   }
 
   async chat(
@@ -753,7 +752,10 @@ implements ModelProvider {
             messages: request.messages,
             temperature:
               request.temperature ?? 0.8,
-            max_tokens: this.maxTokens,
+            ...(this.maxTokens > 0
+              ? { max_tokens: this.maxTokens }
+              : {}),
+            ...this.thinkingOverride(),
             stream: false
           }),
           signal: request.signal
@@ -791,8 +793,6 @@ implements ModelProvider {
       completionTokens: data.usage?.completion_tokens,
       totalTokens: data.usage?.total_tokens
     }
-    assertCompletionFinished(finishReason)
-    assertOutputBudget(usage, finishReason, this.maxTokens)
 
     const text = extractAssistantText(
       data.choices?.[0]?.message?.content
@@ -838,7 +838,10 @@ implements ModelProvider {
             messages: request.messages,
             temperature:
               request.temperature ?? 0.8,
-            max_tokens: this.maxTokens,
+            ...(this.maxTokens > 0
+              ? { max_tokens: this.maxTokens }
+              : {}),
+            ...this.thinkingOverride(),
             stream: true
           }),
           signal: request.signal
@@ -886,8 +889,6 @@ implements ModelProvider {
         completionTokens: data.usage?.completion_tokens,
         totalTokens: data.usage?.total_tokens
       }
-      assertCompletionFinished(finishReason)
-      assertOutputBudget(usage, finishReason, this.maxTokens)
 
       const text = extractAssistantText(
         data.choices?.[0]?.message?.content
@@ -913,8 +914,7 @@ implements ModelProvider {
 
     return readEventStream(
       response,
-      handlers,
-      this.maxTokens
+      handlers
     )
   }
 

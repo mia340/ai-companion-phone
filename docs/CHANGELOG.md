@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## V0.5.0-alpha.3.2.1 · 海龟汤 Presentation Policy 引用热修
+
+- 修复 `turtleSoupService.ts` 使用 `NATIVE_APP_TEXT_ONLY_RULE` / `sanitizeNativeAppText` 却遗漏从 `appPresentationPolicy.ts` 导入，导致 Windows 全量测试中海龟汤 11 个用例统一报 `ReferenceError`。
+- 不改 Presentation Policy 语义：聊天继续允许 Community UI；朋友圈 / 音乐 / 海龟汤仍只让 AI 生成内容，由本地 Vue Surface 负责 UI。
+- IndexedDB 仍为 **V15**，Backup 仍为 **V10**；这是单点导入热修，不改业务数据。
+- alpha.3.2 Windows 实测基线：**26/27 test files、245/256 tests**；本热修目标恢复到 **27/27、256/256**。
+
+## V0.5.0-alpha.3.2 · 清新原生视觉与 Presentation Policy
+
+- 聊天恢复为淡蓝背景 + **白色 AI 气泡 / 浅蓝用户气泡**，统一圆角、边界、阴影、顶栏和输入区，整体向 iOS / 微信式克制层级靠拢，不再使用暖粉/夜紫等割裂主题。
+- 修复“普通剧情正文 + 作者 Community UI”混排时正文裸贴聊天背景：`SafeRichHtml` 仅把 UI 外的顶层自然语言包成白色叙事气泡，作者 HTML / Regex / Community UI 仍保持独立 Surface，不二次套卡。
+- 建立 `appPresentationPolicy.ts`：**Chat 允许角色卡作者接管 Presentation；朋友圈 / 音乐 / 海龟汤等独立 App 只让 AI 生成内容，本地 Vue Surface 负责 UI**。模型误输出 HTML/XML/CSS/代码围栏时会降级为自然语言。
+- 朋友圈改为更接近微信的信息流：白底、蓝色作者名、轻分隔、灰底评论区；“自主动态 / 回复热度”默认折叠到 `•••` 设置，顶部只保留发布与好友动态入口。
+- 朋友圈手动动态支持最多 4 张本地图片；图片先走现有压缩/校验，再以静态 data URL 入库。文字与图片可二选一，不升级 IndexedDB。
+- 音乐、海龟汤两种玩法的 AI 对话改为**非气泡文字记录**；游戏允许极短动作/神态/心理描写，但禁止 AI 再生成第二层 UI。海龟汤题面 JSON 同样清理误生成的 HTML/CSS。
+- 新增 Presentation Policy / 朋友圈图片 / 原生 App 输出边界回归测试；当前源码定义 **27 个测试文件 / 256 个用例**。
+- IndexedDB 保持 **V15**，Backup 保持 **V10**。
+
+## V0.5.0-alpha.3.1.1 · 自主朋友圈补发边界热修
+
+- Windows 全量测试确认 alpha.3.1 为 **25/26 test files、243/244 tests**，唯一红灯来自 `autoPostCountDue()` 的 3 小时补发边界。
+- 统一产品语义：30 分钟最小间隔只控制“是否允许发第一条”；后续补发按**总离线时长跨过的完整 3 小时窗口**计算，因此 30m~<3h 为 1 条，>=3h 为 2 条，并继续受 `AUTO_MAX_BACKFILL=2` 限制。
+- 增加“长时间离线仍最多补 2 条”回归用例，避免未来调整窗口时突破费用上限。
+- 不改朋友圈 DB V15 / Backup V10，不改角色自主活动的显式 opt-in、前台/在线和单请求链安全边界。
+
+
+## V0.5.0-alpha.3.1 · 新 App 稳定化与视觉收口
+
+- 接收并审查用户新增的 **朋友圈 / 音乐 / 海龟汤（猜题+反向主持）** 三类 App Surface；保留原功能设计，不回退已有 Conversation Runtime。
+- 修复示例角色“删光后重启会复活”：demo 角色/示例朋友圈只在真正首次空库初始化，不再以 `characters.count() === 0` 作为播种条件。
+- 修复删除角色时，`momentComments.authorId` 未建索引却使用 Dexie `.where('authorId')` 可能触发 `SchemaError`；改为 collection filter，**不升级 IndexedDB**。
+- 修复海龟汤提问把“当前问题”同时放进 history 和 current question，导致主持模型每轮看到同一句两次。
+- 朋友圈自主活动改为**显式开启**：默认关闭；最小自动发布间隔由 3 分钟调到 30 分钟，补发窗口改为 3 小时；只在前台/在线运行，同一时间最多一个自动 AI 请求链，减少隐性 API 消耗与定时器重入。
+- OpenAI-compatible Provider 不再注入非标准 `thinking` 字段；只有内置 DeepSeek provider 在关闭思考时发送 `thinking:{type:"disabled"}`，降低第三方兼容网关 400 风险；新增 2 个 Provider 回归用例。
+- 朋友圈 / 音乐 / 海龟汤三个重交互入口改为路由懒加载；PWA `start_url / scope / icon` 修正为 GitHub Pages 子路径，并统一深蓝紫主题色。
+- 首页在“已有角色但尚无会话”时回退展示最近角色，不再错误提示“还没有联系人”。
+- 美化四个新增页面：朋友圈使用暖粉玻璃卡片；音乐使用夜紫唱片房；海龟汤玩家页使用薄荷+琥珀；主持页使用暖珊瑚+琥珀，并补齐 focus-visible / active 反馈；模型设置的 reasoning checkbox 改为移动端开关。
+- 当前源码定义 **26 个测试文件 / 244 个 `it/test` 用例**；本环境 `vue-tsc -b` 已通过。完整 Vitest / Vite Build 仍以 Windows 工作区验收为准。
+- IndexedDB 保持 **V15**，Backup 保持 **V10**。
+
 ## V0.5.0-alpha.3 · Conversation Runtime 第二刀
 
 - 新增 `conversationStateReplayService.ts`，把节点状态重建从 `ChatRoom.vue` 抽成可测试 Runtime；

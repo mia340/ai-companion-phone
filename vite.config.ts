@@ -13,13 +13,14 @@ export default defineConfig({
         name: '虚拟手机 · AI 陪伴世界',
         short_name: '陪伴世界',
         description: '多角色 AI 陪伴与独立世界模拟 PWA',
-        theme_color: '#dceef8',
-        background_color: '#f7fbfe',
+        theme_color: '#26345f',
+        background_color: '#1d2b55',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/',
+        start_url: '/ai-companion-phone/',
+        scope: '/ai-companion-phone/',
         icons: [
-          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }
+          { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }
         ]
       }
     })

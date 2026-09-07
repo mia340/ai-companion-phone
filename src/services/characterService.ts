@@ -1,4 +1,5 @@
 import { db } from '../db/database'
+import { deleteMomentsByAuthor } from './momentService'
 
 import type {
   Character,
@@ -380,6 +381,9 @@ export async function deleteCharacterSafely(
         .toCollection()
         .filter(archive => archive.characterId === characterId)
         .delete()
+
+      // V0.5.0：朋友圈跟随角色来源——删掉它发布过的动态与它写过的评论（含它动态下的全部评论）。
+      await deleteMomentsByAuthor(characterId)
 
       await db.characters.delete(characterId)
     }

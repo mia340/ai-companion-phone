@@ -1,8 +1,55 @@
-﻿# AI Companion Phone 当前架构
+# AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.3**。
-> V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库仍保持 IndexedDB V14 / Backup V9。
+> 当前文档版本：**V0.5.0-alpha.3.2.1**。
+> V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V15 / Backup V10（朋友圈两表已纳入备份）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
+
+## V0.5.0-alpha.3.1 App Surface 边界
+
+用户新增的朋友圈、音乐、海龟汤不直接进入 Conversation Runtime，而作为独立 App Surface 使用各自 service：
+
+```text
+Home / Router
+  ├─ MomentsView -> momentService / momentGeneration / autoActivity
+  ├─ MusicAppView -> musicCompanionService -> Provider
+  └─ TurtleSoupView / HostView -> turtleSoupService -> Provider
+```
+
+本轮明确三个约束：
+
+- 重交互 App 使用 route-level lazy import，避免它们全部进入首屏主包；
+- 后台/自动 AI 行为必须显式 opt-in、前台运行且禁止重入，不能静默制造持续费用；
+- UI 页面只负责展示与交互，AI prompt / 解析继续留在 service，后续可再迁入 `runtime/`，但不把新逻辑塞回 `ChatRoom.vue`。
+
+## V0.5.0-alpha.3.2 Presentation Policy
+
+“AI 输出什么”与“页面怎么长”正式拆开：
+
+```text
+Chat Surface
+  AI / Character Card / WorldBook / Regex
+        ↓
+  text + structured/community presentation
+        ↓
+  ChatMessageItem / SafeRichHtml
+  （允许作者 UI，但未知 JS 仍禁止执行）
+
+Native App Surface
+  Moments / Music / Turtle Soup / future apps
+        ↓
+  AI = natural-language content / business data only
+        ↓
+  deterministic sanitizer
+        ↓
+  local Vue renderer owns layout + controls + state UI
+```
+
+关键规则：
+
+- **Chat 有 UI**：普通回复使用本地白色/浅蓝气泡；作者明确声明的 Community UI / Regex HTML 可作为特殊消息 Surface。
+- **Native App 不让模型造 UI**：App 本身已经是界面，模型只产文字、图片引用或结构化业务数据，避免 UI 套 UI、Token 浪费和脚本风险。
+- `appPresentationPolicy.ts` 提供统一 Prompt 规则与输出清洗；未来新增 Diary / Forum / Calendar 等 App 必须复用，不再各写一份“禁止 HTML”逻辑。
+- `SafeRichHtml` 只属于 Chat / Community Renderer。它会把“普通剧情正文 + 作者 UI”中的 loose narrative 包成白色叙事气泡，同时保留作者 UI 的独立 Surface。
 
 ## 1. 总体边界
 

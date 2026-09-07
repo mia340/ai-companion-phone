@@ -141,6 +141,67 @@ function compileStructuredStatus(root: HTMLElement) {
   return compiled
 }
 
+
+function looksLikeTopLevelUiSurface(node: HTMLElement) {
+  const tag = node.tagName.toLowerCase()
+  if (tag === 'style') return true
+  if (['details', 'table', 'figure', 'svg', 'canvas', 'video', 'audio'].includes(tag)) return true
+  if (node.id || node.className || node.hasAttribute('style')) {
+    if (['div', 'section', 'article', 'aside', 'main', 'nav', 'header', 'footer'].includes(tag)) return true
+  }
+  return Boolean(node.querySelector('[id], [class], [style], details, table, svg, canvas'))
+}
+
+/**
+ * 社区回复经常是“普通剧情正文 + 一个作者 UI”。外层 RichHtml 为了不二次套卡会保持透明，
+ * 如果不处理，正文就会直接铺在聊天背景上。这里只把 UI 之外的顶层自然语言包成白色聊天气泡；
+ * 作者自己的 HTML/CSS 仍保持独立 Surface。
+ */
+function wrapLooseNarrative(root: HTMLElement) {
+  const children = [...root.childNodes]
+  const hasUiSurface = children.some(node => node instanceof HTMLElement && looksLikeTopLevelUiSurface(node))
+  if (!hasUiSurface) return 0
+
+  const doc = root.ownerDocument
+  let bucket: Node[] = []
+  let wrapped = 0
+
+  const isNarrativeElement = (element: HTMLElement) => {
+    const tag = element.tagName.toLowerCase()
+    if (['p', 'span', 'strong', 'b', 'em', 'i', 'br'].includes(tag)) return true
+    return !element.id && !element.className && !element.hasAttribute('style') && !element.querySelector('[id], [class], [style]')
+  }
+
+  const flush = () => {
+    const meaningful = bucket.some(node => (node.textContent || '').trim() || (node instanceof HTMLElement && node.tagName === 'BR'))
+    if (!meaningful) {
+      bucket = []
+      return
+    }
+    const wrapper = doc.createElement('div')
+    wrapper.className = 'safe-rich-narrative'
+    const first = bucket[0]
+    root.insertBefore(wrapper, first)
+    for (const node of bucket) wrapper.appendChild(node)
+    bucket = []
+    wrapped += 1
+  }
+
+  for (const node of children) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if ((node.textContent || '').trim()) bucket.push(node)
+      continue
+    }
+    if (node instanceof HTMLElement && isNarrativeElement(node) && !looksLikeTopLevelUiSurface(node)) {
+      bucket.push(node)
+      continue
+    }
+    flush()
+  }
+  flush()
+  return wrapped
+}
+
 function compileFallbackForScriptData(root: HTMLElement, hadScripts: boolean, compiledCount: number) {
   if (!hadScripts || compiledCount > 0) return 0
   const source = [...root.querySelectorAll<HTMLElement>('[id*="data-container"], [class*="data-container"], [style*="display:none"], [style*="display: none"]')]
@@ -168,6 +229,7 @@ function sanitize(html: string) {
   let compiledCount = compileSimpleDataContainer(root)
   compiledCount += compileStructuredStatus(root)
   compiledCount += compileFallbackForScriptData(root, hadScripts, compiledCount)
+  wrapLooseNarrative(root)
 
   root.querySelectorAll('script,iframe,object,embed,link,meta,base,form,input,textarea,select').forEach(node => node.remove())
   root.querySelectorAll('*').forEach(node => {
@@ -321,7 +383,7 @@ function bindSafeInteractions() {
 function render() {
   if (!host.value) return
   shadow ||= host.value.attachShadow({ mode: 'open' })
-  shadow.innerHTML = `<style>:host{display:block;width:100%;max-width:100%;min-width:0;font:inherit;color:inherit;white-space:normal}*,*::before,*::after{box-sizing:border-box}img,video,canvas,svg{max-width:100%;height:auto}audio{max-width:100%}details,table{max-width:100%}a{color:inherit}.safe-ui-fallback{margin:10px 0;padding:10px;border:1px dashed rgba(120,90,105,.25);border-radius:10px}.safe-ui-fallback summary{cursor:pointer;font-size:12px}.safe-ui-fallback pre,.safe-compiled-raw-data{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:inherit;font-size:12px;line-height:1.6}</style>${sanitize(props.html)}`
+  shadow.innerHTML = `<style>:host{display:block;width:100%;max-width:100%;min-width:0;font:inherit;color:inherit;white-space:normal}*,*::before,*::after{box-sizing:border-box}img,video,canvas,svg{max-width:100%;height:auto}audio{max-width:100%}details,table{max-width:100%}a{color:inherit}.safe-rich-narrative{margin:0 0 10px;padding:11px 14px;border:1px solid rgba(46,78,105,.07);border-radius:18px 18px 18px 6px;background:#fff;color:#263b4d;box-shadow:0 1px 3px rgba(43,72,98,.06);font-size:15px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}.safe-rich-narrative:last-child{margin-bottom:0}.safe-ui-fallback{margin:10px 0;padding:10px;border:1px dashed rgba(90,116,138,.24);border-radius:12px;background:rgba(255,255,255,.72)}.safe-ui-fallback summary{cursor:pointer;font-size:12px}.safe-ui-fallback pre,.safe-compiled-raw-data{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:inherit;font-size:12px;line-height:1.6}</style>${sanitize(props.html)}`
   bindSafeInteractions()
 }
 

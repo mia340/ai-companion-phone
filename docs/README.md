@@ -1,16 +1,16 @@
 # AI Companion Phone Docs
 
-当前开发线：**V0.5.0-alpha.3（Conversation Runtime 第二刀）**
+当前开发线：**V0.5.0-alpha.3.2.1（Presentation Policy 引用热修）**
 
 ```text
-应用：0.5.0-alpha.3
-IndexedDB：V14
-Backup：V9
-原始审查基线：用户上传 V0.4.7.1
-当前升级基线：V0.5.0-alpha.2.1
+应用：0.5.0-alpha.3.2.1
+IndexedDB：V15
+Backup：V10
+本轮输入基线：用户上传的 alpha.3 RAR（含朋友圈 / 音乐 / 海龟汤等新增功能）
+自动化定义：27 个测试文件 / 256 个用例
 ```
 
-> 重要：alpha.3 以 `0.5.0-alpha.2.1` 为直接基线。alpha.2.1 的最终 149/149 Windows 日志尚未回传，因此 alpha.3 仍按“先 npm test，再 Build，再人工回归”的门禁验收；不要在红灯状态 commit。
+> 重要：alpha.3.2 不删除聊天 Community UI。相反，Chat 是唯一允许角色卡作者接管 Presentation 的主要 Surface；朋友圈、音乐、海龟汤等原生 App 只让 AI 生成内容，由本地 Vue 负责 UI。
 
 ## 文档入口
 

@@ -1,4 +1,23 @@
+## V0.5.0-alpha.3.2.1｜海龟汤 Presentation Policy 引用热修
+
+- `turtleSoupService.ts` 补齐 `NATIVE_APP_TEXT_ONLY_RULE` 与 `sanitizeNativeAppText` 的静态导入。
+- 解决 alpha.3.2 Windows 测试中 11 个海龟汤用例因未定义标识符同时失败的问题。
+- 不改海龟汤玩法、Prompt 规则、朋友圈/音乐逻辑、DB V15 或 Backup V10。
+
 # 发布历史归档
+
+## V0.5.0-alpha.3.2｜清新原生视觉与 Presentation Policy
+
+根据真实聊天截图回收视觉：聊天使用淡蓝背景、白色 AI 气泡、浅蓝用户气泡，并修复“正文 + 作者 UI”混排时正文失去气泡的问题。新增 Native App Presentation Policy：Chat 继续完整兼容 Community UI / Regex / 作者 HTML；朋友圈、音乐、海龟汤由模型只输出内容，本地 Vue 负责界面。朋友圈改为微信式扁平信息流并支持最多 4 张手动图片，音乐/海龟汤改为非气泡 transcript。DB V15 / Backup V10 不变，源码定义 27 个测试文件 / 256 个用例。
+
+## V0.5.0-alpha.3.1.1｜自主朋友圈补发边界热修
+
+Windows 完整测试发现 alpha.3.1 仅剩 `autoPostCountDue()` 一处红灯：精确离线 3 小时时实现返回 1，产品测试期望达到一个完整 backfill window 后返回 2。新版将最小 30 分钟视为第一条门槛、3 小时窗口按总离线时长计算额外补发，并新增长离线仍最多 2 条的费用上限回归。DB V15 / Backup V10 不变。
+
+
+## V0.5.0-alpha.3.1｜新增 App 稳定化与视觉收口
+
+在用户自行加入朋友圈、音乐、海龟汤双模式、模型 reasoning 等功能后做整包审查。修复 demo 复活、Moment 评论非索引删除、海龟汤 Prompt 重复、自动朋友圈隐性高频 AI 调用、PWA 子路径和 OpenAI-compatible `thinking` 兼容风险；四个新页面完成局部主题美化，新 App 路由懒加载。IndexedDB V15 / Backup V10 不变；源码 26 个测试文件 / 244 个用例，容器 typecheck 通过，完整测试/Build 待 Windows 验收。
 
 ## V0.5.0-alpha.3｜Conversation Runtime 第二刀
 
@@ -16,8 +35,8 @@ alpha.1 在 Windows 实机完成 Build 后暴露 7 个既有兼容层测试红�
 
 V0.5 开始从“功能稳定补丁”转入“架构与可靠性”阶段。本 alpha 建立 Conversation Mutation Runtime、删除/重置数据一致性和 Chat load epoch guard，并完成 docs 分层。IndexedDB V14 / Backup V9 不变。详细当前状态见 `PROJECT_STATUS.md`，工程证据与路线图见 `ENGINEERING_AUDIT.md`。
 
-> 本文件用于保存已经发布过的逐版本说明。  
-> 当前使用说明请看 `README.md`，当前状态请看 `PROJECT_STATUS.md`，当前架构请看 `ARCHITECTURE.md`。  
+> 本文件用于保存已经发布过的逐版本说明。
+> 当前使用说明请看 `README.md`，当前状态请看 `PROJECT_STATUS.md`，当前架构请看 `ARCHITECTURE.md`。
 > 这里的旧版本描述保持历史语境，不代表当前运行状态；数据库版本、限制和实现边界以当前文档为准。
 
 ## V0.4.7.1｜Community UI / 编辑后重生成稳定补丁

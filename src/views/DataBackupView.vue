@@ -300,6 +300,16 @@ async function importData() {
             <b>{{ summary.communityResourceArchives }}</b>
             份社区资源归档
           </span>
+
+          <span>
+            <b>{{ summary.momentPosts }}</b>
+            条朋友圈动态
+          </span>
+
+          <span>
+            <b>{{ summary.momentComments }}</b>
+            条朋友圈评论
+          </span>
         </div>
 
         <p class="export-time">

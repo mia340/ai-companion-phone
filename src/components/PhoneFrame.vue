@@ -11,6 +11,8 @@ const slots = useSlots()
 defineProps<{
   title?: string
   showBack?: boolean
+  /** 状态栏文字深浅：锁屏等深色壁纸页用 'light'。 */
+  statusTone?: 'dark' | 'light'
 }>()
 
 function syncViewportHeight() {
@@ -40,7 +42,7 @@ onUnmounted(() => {
     <section class="phone-frame">
       <div class="speaker"></div>
 
-      <StatusBar />
+      <StatusBar :tone="statusTone ?? 'dark'" />
 
       <div
         v-if="slots.header"

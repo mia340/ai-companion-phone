@@ -695,3 +695,45 @@ export interface PromptDebugTrace {
   }
   naturalnessWarnings?: string[]
 }
+
+export type MomentAuthorType = 'character' | 'user'
+export type MomentSource = 'ai' | 'manual'
+
+export interface MomentPostImage {
+  dataUrl?: string
+  name?: string
+  width?: number
+  height?: number
+  bytes?: number
+}
+
+export interface MomentPost {
+  id: UUID
+  worldId: UUID
+  /** character 时为对应角色 id；user 为“我”（当前默认 Persona）。 */
+  authorType: MomentAuthorType
+  authorId: UUID | 'user'
+  content: string
+  images?: MomentPostImage[]
+  location?: string
+  likeCount: number
+  likedByMe: boolean
+  pinned?: boolean
+  /** 可选：动态来源会话。点卡片可跳回该聊天继续聊。 */
+  conversationId?: UUID
+  source: MomentSource
+  aiModel?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MomentComment {
+  id: UUID
+  worldId: UUID
+  momentId: UUID
+  authorType: MomentAuthorType
+  authorId: UUID | 'user'
+  content: string
+  source: MomentSource
+  createdAt: string
+}

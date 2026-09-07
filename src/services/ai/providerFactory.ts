@@ -22,6 +22,8 @@ export function createProvider(
     baseUrl: settings.baseUrl,
     apiKey: settings.apiKey,
     model: settings.model,
-    maxTokens: settings.maxTokens
+    maxTokens: settings.maxTokens,
+    // 只有显式 true 才允许思考链；旧记录/缺省一律关（当前网关推理模型一思考就吃满上限）。
+    thinkingEnabled: settings.thinkingEnabled === true
   })
 }

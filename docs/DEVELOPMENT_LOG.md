@@ -1,5 +1,67 @@
 # 开发记录
 
+## 2026-09-07 · V0.5.0-alpha.3.2.1｜海龟汤引用热修
+
+Windows 全量测试确认 alpha.3.2 的其余 26 个测试文件全部通过，唯一失败文件为 `turtleSoupService.test.ts`。11 个失败共享同一根因：`turtleSoupService.ts` 已开始调用 `appPresentationPolicy.ts` 的 `NATIVE_APP_TEXT_ONLY_RULE` / `sanitizeNativeAppText`，但漏写静态 import。
+
+本版只补齐导入并同步版本文档，不扩大功能范围。目标测试矩阵保持 27 个文件 / 256 个用例。
+
+## 2026-09-07 · V0.5.0-alpha.3.2｜聊天视觉回归与原生 App 呈现边界
+
+### 用户反馈
+
+用户明确要求两条视觉规则：第一，**聊天必须有 UI**，包括白色普通气泡与角色卡作者的 Community UI；第二，朋友圈、音乐、海龟汤等独立 App 已经有自己的页面，因此 AI 只产内容，不再在页面里生成一层 HTML/状态卡。整体风格回到淡蓝、白色、清新、简约，接近熟悉的 iOS / 微信层级。
+
+### 实际修改
+
+1. `ChatMessageItem.vue`：普通 AI 统一白色气泡，用户统一浅蓝气泡；降低边框/阴影强度，保留图片、语音、音乐、reply quote 等特殊消息语义。
+2. `SafeRichHtml.vue`：新增 loose narrative 包装。富文本若同时包含作者 UI 与普通剧情正文，只给正文生成本地白色叙事气泡，作者 Surface 保持透明宿主，解决长剧情文字裸贴背景。
+3. `ChatComposer.vue` / `ChatHeader.vue` / `main.css`：输入区、顶栏、Phone Shell 统一冷淡蓝 + 乳白体系，使用系统字体栈与半透明材质，减少装饰色。
+4. 新增 `appPresentationPolicy.ts`：Native App 的模型输出禁止 HTML/XML/CSS/Markdown UI/按钮/状态栏/代码围栏，并提供确定性清洗 fallback。
+5. 朋友圈：改成白底扁平信息流；行为设置折叠到 `•••`；手动动态支持最多 4 张本地图；AI 动态/评论仍只存自然语言。
+6. 音乐 / 海龟汤：AI 内容改为名字 + 正文的 transcript，不使用聊天气泡；游戏允许一处短动作/心理，但 UI 永远由 Vue 页面负责。
+7. 海龟汤 scenario JSON 的 title/situation/solution/hint 也经过原生 App 文本清洗，避免模型偶发 HTML 被展示成第二层界面。
+
+### 验证
+
+- TypeScript transpile/syntax：126 个 TS/Vue script 文件无语法错误；
+- 当前静态规模：100 个生产 TS/Vue 文件，约 34,793 行；27 个测试文件，约 3,341 行；
+- 当前测试定义：**256 个**；
+- 由于容器 npm 依赖安装超时，本轮不伪称完整 Vitest / Vite Build 已通过，最终以 Windows `npm test` + `npm run build` 为准。
+
+## 2026-09-05 · V0.5.0-alpha.3.1.1｜自主朋友圈补发边界热修
+
+Windows 首次完整验收 alpha.3.1 得到 26 个测试文件中 25 个通过、244 个用例中 243 个通过。唯一失败位于 `autoPostCountDue()`：默认 `AUTO_MIN_INTERVAL_MS=30m`、`AUTO_BACKFILL_WINDOW_MS=3h` 时，精确离线 3 小时实现返回 1，但测试和产品文案都把“一个完整补发窗口”理解为应补 2 条。
+
+修复策略不改 AI 调用频率安全边界：30 分钟仍只决定是否允许本轮产生第一条；额外补发按**总 gap / 3h** 的完整窗口数计算，最后继续被 `AUTO_MAX_BACKFILL=2` 截断。新增 12 小时离线仍最多补 2 条的回归用例，确保不会因为时间很长而产生无限补发/API 费用。
+
+
+## 2026-09-04 · V0.5.0-alpha.3.1｜用户新增 App 审查、稳定化与视觉收口
+
+### 输入
+
+用户上传 alpha.3 RAR，新增朋友圈、一起听歌、海龟汤双模式、首页/锁屏视觉、模型 reasoning/maxTokens 等功能。本轮以这份用户源码为准做合并审查，不回退新增功能。
+
+### 代码级问题与处理
+
+1. `seedDatabase()` 把“角色数为 0”当成“新安装”，删光角色后会复活 4 个 demo；改为只对启动前连 World 都不存在的全新库播种。
+2. `deleteMomentsByAuthor()` 在 `momentComments` 没有 `authorId` 索引时调用 `.where('authorId')`；改为 collection filter，DB 继续 V15。
+3. `TurtleSoupView.sendQuestion()` push 当前 question 后再构造 history，导致 service 看到当前问题两次；改为先 snapshot history。
+4. 自动朋友圈原本默认启用、最短 3 分钟、45 秒巡逻且无 in-flight guard；改成显式 opt-in、30 分钟最小间隔、3 小时 backfill、前台/在线、单请求链。
+5. OpenAI-compatible 不再发送 DeepSeek 风格 `thinking` 扩展；DeepSeek provider 仍可显式关闭 reasoning。新增 2 个 Provider 测试。
+6. 新增四个重页面改 route lazy import；PWA manifest 修正 GitHub Pages 子路径；首页无会话时回退展示已有角色。
+
+### 美化
+
+不重写模板，只在 scoped CSS 内建立主题层：朋友圈暖粉玻璃、音乐夜紫唱片、海龟汤玩家薄荷琥珀、主持页暖珊瑚；按钮补 active/focus-visible，reasoning checkbox 改移动端 switch。这样视觉有区分，但不会把样式耦合到全局 PhoneFrame。
+
+### 验证
+
+- `vue-tsc -b --pretty false`：通过。
+- 当前源码：26 个测试文件 / 244 个用例定义。
+- 容器里的依赖来自 Windows RAR，Rollup 缺 Linux native optional package，因此这里不伪称完整 Vitest/Vite Build 已跑过；Windows 必须再跑 `npm test`、`npm run build`。
+
+
 ## 2026-09-03 · V0.5.0-alpha.3｜Conversation Runtime 第二刀
 
 ### 本轮目标

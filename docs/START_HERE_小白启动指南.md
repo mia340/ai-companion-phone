@@ -1,6 +1,6 @@
 # 从这里开始
 
-当前开发线：**V0.5.0-alpha.3**。
+当前开发线：**V0.5.0-alpha.3.1**。
 
 如果你只是想把我给你的新源码更新到 Git 仓库，直接先看：`部署与更新.md`。
 
@@ -44,13 +44,13 @@ npm run dev
 
 ## 当前 V0.5 重点
 
-V0.5 不是继续堆新 App，而是把已有功能收敛成稳定 Runtime。alpha.3 当前重点：
+V0.5 仍以稳定 Runtime 为主；用户新增朋友圈 / 音乐 / 海龟汤后，alpha.3.1 先把这些 App 纳入可靠性门禁：
 
 - delete / reset / rewind / branch / opening reset 使用统一 Conversation Runtime；
 - 从旧消息建立分支时按目标时间点重放状态，避免未来 Memory / State 穿越；
 - greeting / free opening 的跨表清理不再由 ChatRoom 手写；
-- 测试矩阵目标升级为 21 个测试文件 / 155 个用例；
-- alpha.3 全绿后再开始拆 Generation Orchestrator。
+- 当前源码测试矩阵为 26 个测试文件 / 244 个用例；
+- 新增 App 全绿后，再继续拆 Generation Orchestrator；不要在红灯时继续加功能。
 
 项目全貌看 `PROJECT_STATUS.md`，为什么这么改看 `ENGINEERING_AUDIT.md`。
 

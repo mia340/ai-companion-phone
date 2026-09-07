@@ -5,6 +5,10 @@ import type {
   ProviderType
 } from '../types/modelSettings'
 
+/** 单次回复输出 token 的统一硬上限：触顶就截断保留已生成内容，不再报“超长”。 */
+export const MAX_OUTPUT_TOKENS = 4000
+export const MIN_OUTPUT_TOKENS = 64
+
 export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   id: 'default',
   provider: 'deepseek',
@@ -12,7 +16,8 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   apiKey: '',
   model: 'deepseek-v4-flash',
   temperature: 0.8,
-  maxTokens: 2048,
+  maxTokens: MAX_OUTPUT_TOKENS,
+  thinkingEnabled: false,
   availableModels: ['deepseek-v4-flash', 'deepseek-v4-pro'],
   visionMode: 'auto',
   visionSupported: false,
@@ -82,6 +87,13 @@ export function modelVisionSignature(
     normalizeApiBaseUrl(settings.baseUrl).toLowerCase(),
     settings.model.trim().toLowerCase()
   ].join('|')
+}
+
+/** 保存前把 maxTokens 收敛到 [64, 4000]：<=0（含旧的 0=不设上限）一律按新默认。 */
+function normalizeOutputTokens(value: number | undefined): number {
+  const raw = Number.isFinite(value) ? Math.round(value as number) : 0
+  if (raw <= 0) return DEFAULT_MODEL_SETTINGS.maxTokens
+  return Math.min(MAX_OUTPUT_TOKENS, Math.max(MIN_OUTPUT_TOKENS, raw))
 }
 
 export function getVisionCapability(
@@ -165,11 +177,16 @@ Promise<ModelSettings> {
     ...defaults.models
   ])
 
-  // 576/600 是早期版本的低默认值，长角色卡 + companion_packet 很容易被截断。
-  // 只迁移这两个历史默认值；用户主动设置的其它长度保持不变。
-  const migratedMaxTokens = [576, 600].includes(Math.round(saved.maxTokens ?? 0))
-    ? 2048
-    : saved.maxTokens
+  // 576/600/2048/8192 是早期版本的系统默认值，8192 是上一版默认；0 是旧的“不设上限”。
+  // 新策略：输出统一压到 4000 以内（触顶截断保留，不再报超长）。
+  // 因此历史默认、旧 0 值、以及任何超出 4000 的旧值，都收敛到新默认 4000；
+  // 只有用户主动设过的 [64, 4000] 区间内的值保持不变。
+  const rawMaxTokens = Math.round(saved.maxTokens ?? 0)
+  const migratedMaxTokens = rawMaxTokens === 0 ||
+    [576, 600, 2048, 8192].includes(rawMaxTokens) ||
+    rawMaxTokens > MAX_OUTPUT_TOKENS
+    ? DEFAULT_MODEL_SETTINGS.maxTokens
+    : normalizeOutputTokens(saved.maxTokens)
 
   const normalized: ModelSettings = {
     ...DEFAULT_MODEL_SETTINGS,
@@ -222,10 +239,8 @@ export async function saveModelSettings(
       2,
       Math.max(0, settings.temperature)
     ),
-    maxTokens: Math.min(
-      8192,
-      Math.max(64, Math.round(settings.maxTokens))
-    ),
+    // 统一收敛到 [64, 4000]：0 / 负数 / 空值都按新默认，不再有“不设上限”分支。
+    maxTokens: normalizeOutputTokens(settings.maxTokens),
     availableModels,
     visionMode: settings.visionMode ?? 'auto',
     visionSupported: capabilityChanged

@@ -12,6 +12,8 @@ import type {
   ConversationStateHistory,
   Message,
   MessageImage,
+  MomentComment,
+  MomentPost,
   MusicState,
   UserProfile,
   UserPersona,
@@ -56,7 +58,7 @@ interface LegacyRelationshipEvent {
 
 export interface CompanionBackup {
   format: 'ai-companion-phone-backup'
-  version: 9
+  version: 10
   exportedAt: string
 
   data: {
@@ -80,6 +82,9 @@ export interface CompanionBackup {
     resourceBindings: ResourceBinding[]
     communityResourceArchives: CommunityResourceArchive[]
     conversationStateHistory: ConversationStateHistory[]
+    // Backup V10：朋友圈动态与评论。
+    momentPosts: MomentPost[]
+    momentComments: MomentComment[]
   }
 }
 
@@ -101,6 +106,8 @@ export interface BackupSummary {
   resourceBindings: number
   communityResourceArchives: number
   stateHistory: number
+  momentPosts: number
+  momentComments: number
   images: number
   imageBytes: number
 }
@@ -136,7 +143,9 @@ export async function createBackup(options?: {
     regexScripts,
     resourceBindings,
     communityResourceArchives,
-    conversationStateHistory
+    conversationStateHistory,
+    momentPosts,
+    momentComments
   ] = await Promise.all([
     db.worlds.toArray(),
     db.characters.toArray(),
@@ -155,7 +164,9 @@ export async function createBackup(options?: {
     db.regexScripts.toArray(),
     db.resourceBindings.toArray(),
     db.communityResourceArchives.toArray(),
-    db.conversationStateHistory.toArray()
+    db.conversationStateHistory.toArray(),
+    db.momentPosts.toArray(),
+    db.momentComments.toArray()
   ])
 
   // Backup V9 兼容字段继续保留，但 V13 起不再有本地关系积分 stores。
@@ -174,7 +185,7 @@ export async function createBackup(options?: {
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 9,
+    version: 10,
     exportedAt: new Date().toISOString(),
     data: {
       worlds,
@@ -196,7 +207,9 @@ export async function createBackup(options?: {
       regexScripts,
       resourceBindings,
       communityResourceArchives,
-      conversationStateHistory
+      conversationStateHistory,
+      momentPosts,
+      momentComments
     }
   }
 }
@@ -222,6 +235,8 @@ export function getBackupSummary(
     resourceBindings: backup.data.resourceBindings.length,
     communityResourceArchives: backup.data.communityResourceArchives.length,
     stateHistory: backup.data.conversationStateHistory.length,
+    momentPosts: backup.data.momentPosts.length,
+    momentComments: backup.data.momentComments.length,
     images: backup.data.messages.reduce(
       (total, message) => total + getMessageImages(message).filter(image => Boolean(image.dataUrl)).length,
       0
@@ -286,7 +301,7 @@ export async function parseBackupFile(
     throw new Error('这不是 AI Companion Phone 备份文件。')
   }
 
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(Number(parsed.version))) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(Number(parsed.version))) {
     throw new Error('当前版本暂不支持此备份版本。')
   }
 
@@ -315,7 +330,7 @@ export async function parseBackupFile(
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 9,
+    version: 10,
     exportedAt:
       typeof parsed.exportedAt === 'string'
         ? parsed.exportedAt
@@ -340,7 +355,9 @@ export async function parseBackupFile(
       regexScripts: optionalArray('regexScripts') as RegexScript[],
       resourceBindings: optionalArray('resourceBindings') as ResourceBinding[],
       communityResourceArchives: optionalArray('communityResourceArchives') as CommunityResourceArchive[],
-      conversationStateHistory: optionalArray('conversationStateHistory') as ConversationStateHistory[]
+      conversationStateHistory: optionalArray('conversationStateHistory') as ConversationStateHistory[],
+      momentPosts: optionalArray('momentPosts') as MomentPost[],
+      momentComments: optionalArray('momentComments') as MomentComment[]
     }
   }
 }
@@ -351,6 +368,10 @@ export async function restoreBackup(
   const plainBackup = JSON.parse(
     JSON.stringify(backup)
   ) as CompanionBackup
+
+  // V9 及更早备份不含朋友圈数据；兜底成空数组再统一写回。
+  plainBackup.data.momentPosts = plainBackup.data.momentPosts || []
+  plainBackup.data.momentComments = plainBackup.data.momentComments || []
 
   // Backup V9 仍能读取旧结构，但恢复到 V0.4.4.2 时立即按 V14 规则归一：
   // 通讯录不再恢复分组；世界书 / Regex 变成共享资源本体，角色使用关系只通过 ResourceBinding 表达。
@@ -488,6 +509,8 @@ export async function restoreBackup(
     await db.resourceBindings.clear()
     await db.communityResourceArchives.clear()
     await db.conversationStateHistory.clear()
+    await db.momentPosts.clear()
+    await db.momentComments.clear()
     await db.promptDebugTraces.clear()
 
     if (plainBackup.data.worlds.length) {
@@ -532,6 +555,12 @@ export async function restoreBackup(
     if (plainBackup.data.communityResourceArchives.length) await db.communityResourceArchives.bulkPut(plainBackup.data.communityResourceArchives)
     if (plainBackup.data.conversationStateHistory.length) {
       await db.conversationStateHistory.bulkPut(plainBackup.data.conversationStateHistory)
+    }
+    if (plainBackup.data.momentPosts.length) {
+      await db.momentPosts.bulkPut(plainBackup.data.momentPosts)
+    }
+    if (plainBackup.data.momentComments.length) {
+      await db.momentComments.bulkPut(plainBackup.data.momentComments)
     }
   })
 }

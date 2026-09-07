@@ -3,11 +3,11 @@
 ## 当前版本
 
 ```text
-开发线：V0.5.0-alpha.3
-IndexedDB：V14
-Backup：V9
+开发线：V0.5.0-alpha.3.2.1
+IndexedDB：V15（新增 momentPosts / momentComments）
+Backup：V10（含朋友圈动态与评论）
 原始审查基线：用户上传 V0.4.7.1
-当前升级基线：V0.5.0-alpha.2.1
+本轮输入基线：用户上传 alpha.3 RAR（已包含朋友圈 / 音乐 / 海龟汤）
 ```
 
 V0.5.0 不以继续堆 Phone App 为主，而是把 V0.4.x 已有功能收敛成**稳定、可测试、可解释的 AI Companion Runtime**。
@@ -22,6 +22,67 @@ V0.5.0 不以继续堆 Phone App 为主，而是把 V0.4.x 已有功能收敛成
 稳定性 > 可测试性 > 架构清晰度 > 论文价值 > 新功能数量
 ```
 
+
+
+## V0.5.0-alpha.3.2.1 当前状态
+
+alpha.3.2 的 Windows 全量测试结果为 **26/27 test files、245/256 tests**。失败全部集中在海龟汤，11 个用例均为同一 `ReferenceError`：Presentation Policy 的两个导出被调用但未导入。alpha.3.2.1 仅补齐该静态 import，不改变业务语义；目标恢复到 **27/27、256/256**。
+
+## V0.5.0-alpha.3.2 当前状态
+
+### Presentation Policy 已确定
+
+```text
+Chat
+→ 标准白/蓝聊天气泡
+→ Community UI / Regex / 作者 HTML 允许作为特殊 Surface
+
+Moments / Music / Turtle Soup / future native apps
+→ AI 只生成自然语言 / 结构化业务数据
+→ Vue App Surface 负责布局、按钮、状态和交互
+```
+
+当前视觉统一为淡蓝、白色、深蓝灰文字的清新体系。朋友圈不再采用暖粉玻璃卡片，音乐/海龟汤也不再各自使用夜紫、薄荷、珊瑚主题；它们共享同一手机视觉语言，但保留业务自己的信息结构。
+
+### 本轮落地
+
+- 聊天普通 AI 消息恢复白色气泡，用户消息浅蓝气泡；
+- `SafeRichHtml` 能把社区富文本中的 loose narrative 与作者 UI 分离，避免正文裸贴背景；
+- 朋友圈改为微信式白底信息流，最多 4 张本地图片；自主动态/回复热度折叠进设置；
+- 音乐 / 海龟汤 AI 对话使用 plain transcript，不生成 AI UI；
+- 游戏允许短动作、神态或心理描写，但状态/按钮/布局由 App 自己渲染；
+- `appPresentationPolicy.ts` 作为后续所有独立 App 的统一输出边界。
+
+当前静态规模：**100 个生产 TS/Vue 文件 / 34,793 行；27 个测试文件 / 256 个用例定义**。DB V15 / Backup V10 不变。
+
+## V0.5.0-alpha.3.1.1 当前状态
+
+Windows 实测 alpha.3.1 已达到 **25/26 测试文件、243/244 用例通过**。唯一失败不是朋友圈业务本体，而是自主补发边界定义与测试预期不一致：默认 3 小时窗口在精确 3 小时时实现只算 1 条、测试要求 2 条。alpha.3.1.1 将语义收敛为“最小间隔控制第一条，完整补发窗口按总离线时长计算”，并新增长离线仍受 2 条上限保护的回归用例。
+
+## V0.5.0-alpha.3.1 当前状态
+
+### 用户新增 App 已纳入稳定化
+
+- **朋友圈**：动态/评论、角色 AI 发布与回评、回复热度、角色自主动态；DB V15 / Backup V10。
+- **音乐**：识别网易云歌曲链接/分享文本，选择角色一起听并围绕歌曲聊天；实际播放跳转网易云，陪伴会话本地持久化。
+- **海龟汤**：角色/默认主持人出题、提问、提示、猜汤底，以及“我当主持人、角色来猜”的反向模式。
+- **模型设置**：最大输出统一 4000，输出触顶保留已有文本；reasoning 可选，第三方 OpenAI-compatible 不再强塞非标准 `thinking` 字段。
+
+### 本轮审查已修复
+
+1. demo 角色删除后重启复活；
+2. 角色无动态但有评论时，按未建索引 `authorId` 删除评论会触发 Dexie SchemaError；
+3. 海龟汤当前问题重复进入 Prompt；
+4. 朋友圈自主发帖默认开启、3 分钟级调用过于激进且可能定时器重入；
+5. GitHub Pages PWA `start_url` / icon 使用根路径；
+6. 新增 4 个大页面静态 import 继续推高首屏包；
+7. 新库已有 demo 角色但首页无会话时仍提示“还没有联系人”。
+
+### 视觉与交互
+
+朋友圈、音乐、海龟汤玩家页、海龟汤主持页已分别建立独立主题；模型设置 reasoning 改为移动端 switch。未改 Character Card / WorldBook / Regex / Conversation Runtime 语义。
+
+当前源码定义 **26 个测试文件 / 244 个用例**。容器内 `vue-tsc -b` 已通过；Windows 仍需跑完整 `npm test` + `npm run build`。
 
 ## V0.5.0-alpha.3 已完成
 
@@ -58,6 +119,18 @@ src/runtime/conversation/
 - branch 只继承节点前有效的临时 Runtime。
 
 当前测试文件数 **21**，用例数 **155**。最终是否 155/155 仍以 Windows `npm test` 为准。
+
+### 朋友圈 v1（第一块从占位符落地的 App Surface）
+
+桌面 App「朋友圈」不再是 PlaceholderApp，已实现为 `MomentsView.vue` + 朋友圈服务层：
+
+- **数据模型**：`MomentPost` / `MomentComment` 入库；IndexedDB 升 **V15**，新增 `momentPosts / momentComments` 两表；备份格式升 **V10**，导出/解析/恢复/摘要预览均包含两张新表，V9 及更早旧备份照常读取并兜底空数组。
+- **发布**：我发一条（以当前默认 Persona 身份、source=manual）；叫角色发一条（AI 按角色 persona / 心情 / 在做的事以第一人称写短朋友圈，source=ai 并记录所用模型）；若该角色已有单聊，动态绑定到那份聊天，卡片可一键「去聊聊」。
+- **互动**：点赞/取消点赞（确定性计数翻转）；评论；我评论某角色动态后，TA 用 AI 按人设回评一条（未配置 AI 时给出明确提示并跳「API 与模型」）。
+- **一致性**：删除我的动态同步删其下评论；删除角色时由其删除事务连带清掉 TA 发的动态、TA 写的评论及其动态下所有评论（`deleteMomentsByAuthor`）。
+- **可测性**：纯函数抽到 `momentService.ts` / `momentGenerationService.ts`（正文/评论归一化与限长、点赞翻转、倒序、prompt 构建、模型输出净化、断句截断），单测 30 个用例全部覆盖；数据库/UI 行为仍按项目约定走人工验收。
+
+朋友圈初版之后又加入 Music / Turtle Soup / Auto Activity 等测试；当前统一以 alpha.3.1 的 **26 文件 / 244 用例**为准。
 
 ## V0.5.0-alpha.1 已完成
 
@@ -213,7 +286,7 @@ Windows alpha.1 验收暴露 7 个既有兼容层测试失败；alpha.2 逐项�
 
 1. Windows 确认本地基线为 `0.5.0-alpha.2.1`；
 2. 覆盖 alpha.3 后运行 `npm run cleanup`；
-3. `npm test`，目标 **21/21 测试文件、155/155 用例**；
+3. `npm test`，目标 **26/26 测试文件、244/244 用例**；
 4. `npm run build`；
 5. 专项回归：从用户消息重新回复、创建分支、切换 greeting、切自由开局、删除消息；
 6. 验证 branch 不出现节点后的 Memory/State 穿越。
