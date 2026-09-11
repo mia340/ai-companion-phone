@@ -11,8 +11,7 @@ import {
   DOCK_APPS,
   HOME_APPS,
   listAppCustomizations,
-  type HomeAppDefinition,
-  type HomeAppKey
+  type HomeAppDefinition
 } from '../services/appCustomizationService'
 
 const router = useRouter()

@@ -57,7 +57,6 @@ import {
   buildMemoryPrompt,
   clearMemories,
   createLocalSummary,
-  listMemories,
   listConversationMemoryContext,
   rememberCharacterObservation,
   rememberFromMessageDetailed,
@@ -2816,7 +2815,7 @@ async function clearAllMemories() {
 }
 
 async function clearConversationMessages() {
-  if (!conversation.value) return
+  if (!conversation.value || !character.value) return
   if (!window.confirm(
     `确定重新开始当前聊天吗？\n\n会删除当前聊天记录、自动生成的剧情记忆、状态历史和 Prompt Debug；手工/导入记忆、角色卡、Persona、世界书和 Regex 会保留。此操作无法撤销。`
   )) return
