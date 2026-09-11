@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  applyExternalLike,
   applyLikeToggle,
   isValidMomentContent,
   normalizeMomentContent,
@@ -89,6 +90,20 @@ describe('normalizeMomentImages', () => {
     ])).toEqual([
       { dataUrl: 'data:image/jpeg;base64,abc', name: undefined, width: 10, height: 21, bytes: undefined }
     ])
+  })
+})
+
+describe('applyExternalLike', () => {
+  it('角色点赞只增加总赞数，不改变我自己的点赞状态', () => {
+    const post = makePost({ likeCount: 2, likedByMe: false })
+    const next = applyExternalLike(post)
+    expect(next.likeCount).toBe(3)
+    expect(next.likedByMe).toBe(false)
+  })
+
+  it('异常负数不会把赞数扣回去', () => {
+    const post = makePost({ likeCount: 2 })
+    expect(applyExternalLike(post, -3).likeCount).toBe(2)
   })
 })
 

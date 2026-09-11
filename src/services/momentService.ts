@@ -94,6 +94,14 @@ export function applyLikeToggle(post: MomentPost): MomentPost {
   }
 }
 
+/** 记录来自角色/外部参与者的点赞；不改变“我是否点赞”的状态。 */
+export function applyExternalLike(post: MomentPost, amount = 1): MomentPost {
+  return {
+    ...post,
+    likeCount: Math.max(0, post.likeCount + Math.max(0, Math.floor(amount)))
+  }
+}
+
 /** 按发布时间倒序，不修改入参数组。 */
 export function sortMomentPostsDesc(posts: MomentPost[]): MomentPost[] {
   return [...posts].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -288,6 +296,17 @@ export async function toggleMomentLike(postId: string): Promise<MomentPost> {
   const next = applyLikeToggle(post)
   await db.momentPosts.update(postId, {
     likedByMe: next.likedByMe,
+    likeCount: next.likeCount,
+    updatedAt: new Date().toISOString()
+  })
+  return next
+}
+
+export async function addMomentExternalLike(postId: string, amount = 1): Promise<MomentPost> {
+  const post = await db.momentPosts.get(postId)
+  if (!post) throw new Error('这条动态已经不存在。')
+  const next = applyExternalLike(post, amount)
+  await db.momentPosts.update(postId, {
     likeCount: next.likeCount,
     updatedAt: new Date().toISOString()
   })

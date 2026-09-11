@@ -9,6 +9,7 @@ import type {
   MusicState
 } from '../../types/domain'
 import { buildConversationStateSnapshot } from './conversationStateReplayService'
+import { memoryScopeFor } from '../../services/memoryService'
 
 export interface ConversationBranchPlan {
   conversation: Conversation
@@ -76,6 +77,7 @@ export function buildConversationBranchPlan(options: {
   })
 
   const copiedMemories = options.sourceMemories
+    .filter(row => memoryScopeFor(row) === 'conversation')
     .filter(row => {
       if (row.sourceMessageId) return messageIdMap.has(row.sourceMessageId)
       if (row.sourceType === 'automatic') return row.createdAt <= selectedMessage.createdAt

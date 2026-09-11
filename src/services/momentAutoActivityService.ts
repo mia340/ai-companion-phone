@@ -2,6 +2,7 @@ import { db } from '../db/database'
 import { getModelSettings } from './modelSettings'
 import { createCharacterMoment, getActiveWorldId } from './momentService'
 import { generateCharacterPost } from './momentGenerationService'
+import { listCharacterSharedMemories } from './memoryService'
 import type { Character, MomentPost } from '../types/domain'
 
 /**
@@ -148,9 +149,10 @@ const REPLY_HEAT_RULES: Record<
   { chance: number; extraChance: number; max: number }
 > = {
   quiet: { chance: 0.12, extraChance: 0, max: 1 },
-  mild: { chance: 0.5, extraChance: 0.15, max: 2 },
-  lively: { chance: 0.8, extraChance: 0.35, max: 2 },
-  party: { chance: 0.97, extraChance: 0.8, max: 3 }
+  mild: { chance: 0.68, extraChance: 0.15, max: 2 },
+  // 默认档：用户主动发朋友圈时至少有一位好友回应，避免‘功能像坏了’。
+  lively: { chance: 1, extraChance: 0.35, max: 2 },
+  party: { chance: 1, extraChance: 0.8, max: 3 }
 }
 
 export function getReplyHeat(): MomentReplyHeat {
@@ -175,7 +177,10 @@ export function planReplyCount(
 ): number {
   if (candidateCount <= 0) return 0
   const rule = REPLY_HEAT_RULES[heat]
-  if (rand() >= rule.chance) return 0
+  // chance === 1 表示产品语义上的“保证至少一位回应”。
+  // Math.random() 本身不会返回 1，但测试/自定义随机源可能返回边界值 1；
+  // 因此只在概率小于 1 时进行冷场判定，避免把“必来”误判成 0 人。
+  if (rule.chance < 1 && rand() >= rule.chance) return 0
 
   const cap = Math.min(rule.max, candidateCount)
   let count = 1
@@ -252,9 +257,13 @@ export async function runAutoActivityOnce(): Promise<AutoActivityOutcome | null>
   for (let i = 0; i < count; i += 1) {
     const author = pickAutoAuthor(posters, avoidId)
     try {
+      const sharedMemories = await listCharacterSharedMemories(author.id)
       const generated = await generateCharacterPost(
         author as Character,
-        { contextLabel: formatNowLabel() }
+        {
+          contextLabel: formatNowLabel(),
+          memoryHints: sharedMemories.map(memory => memory.content)
+        }
       )
       const post = await createCharacterMoment({
         characterId: author.id,

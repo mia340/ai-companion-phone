@@ -1,5 +1,16 @@
 # AI Companion Phone 工程审查与 V0.5.0 重构路线图
 
+## 0.0.3 V0.5.0-alpha.3.4 展示层收敛结论
+
+本轮是低风险 Presentation 重构：主要修改 scoped CSS / 页面布局与通讯录搜索，不改变 IndexedDB、Backup、Conversation Runtime 或 Provider。下一阶段仍应优先做 Character Shared Memory，再进入 Generation Runtime。
+
+
+## 0.0.2 V0.5.0-alpha.3.3 交互审查结论
+
+本轮问题不是 Runtime 可靠性回退，而是 Web 控件泄漏进“手机”体验：浏览器 `prompt()`、被工具按钮压窄的 textarea、页面级浮动大卡、以及安全诊断直接占据聊天消息。alpha.3.3 把这些高频操作重新收进 Phone/App Surface：编辑用本地 bottom sheet，输入优先占宽，状态/警告降到调试层；同时修复朋友圈“互动依赖自主发帖开关”的产品语义耦合。
+
+> 这轮继续遵守 Presentation ownership：聊天可承载 Community UI；原生 App 自己画 UI。DB V15 / Backup V10 不变。
+
 ## 0.0.1 V0.5.0-alpha.3.2.1 热修结论
 
 alpha.3.2 的 11 个海龟汤失败并非 11 个独立缺陷，而是 `turtleSoupService.ts` 漏导入 Presentation Policy 两个符号造成的单点 `ReferenceError`。本版补齐静态 import；不改业务逻辑。

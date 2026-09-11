@@ -1,5 +1,13 @@
 export type UUID = string
 
+export interface AppCustomization {
+  id: UUID
+  worldId: UUID
+  appKey: string
+  iconDataUrl?: string
+  updatedAt: string
+}
+
 export interface World {
   id: UUID
   name: string
@@ -24,6 +32,7 @@ export type ProactiveFrequency = 'low' | 'natural' | 'high'
 export type ProactiveSource = 'continue-topic' | 'promise-reminder' | 'daily-share' | 'care' | 'story-event'
 export type MemoryLayer = 'fact' | 'subjective' | 'shared' | 'promise' | 'relationship' | 'story'
 export type MemoryStatus = 'active' | 'conflict' | 'invalid'
+export type MemoryScope = 'conversation' | 'character'
 
 export interface CharacterExampleDialogue {
   id: UUID
@@ -502,6 +511,8 @@ export interface CharacterMemory {
   id: UUID
   conversationId: UUID
   characterId: UUID
+  /** conversation = 当前剧情线；character = 跨聊天共享的稳定记忆。 */
+  scope?: MemoryScope
   category:
     | 'profile'
     | 'preference'

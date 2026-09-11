@@ -23,7 +23,8 @@ import type {
   RegexScript,
   ResourceBinding,
   CommunityResourceArchive,
-  World
+  World,
+  AppCustomization
 } from '../types/domain'
 
 
@@ -58,7 +59,7 @@ interface LegacyRelationshipEvent {
 
 export interface CompanionBackup {
   format: 'ai-companion-phone-backup'
-  version: 10
+  version: 11
   exportedAt: string
 
   data: {
@@ -85,6 +86,7 @@ export interface CompanionBackup {
     // Backup V10：朋友圈动态与评论。
     momentPosts: MomentPost[]
     momentComments: MomentComment[]
+    appCustomizations: AppCustomization[]
   }
 }
 
@@ -108,6 +110,7 @@ export interface BackupSummary {
   stateHistory: number
   momentPosts: number
   momentComments: number
+  appCustomizations: number
   images: number
   imageBytes: number
 }
@@ -145,7 +148,8 @@ export async function createBackup(options?: {
     communityResourceArchives,
     conversationStateHistory,
     momentPosts,
-    momentComments
+    momentComments,
+    appCustomizations
   ] = await Promise.all([
     db.worlds.toArray(),
     db.characters.toArray(),
@@ -166,7 +170,8 @@ export async function createBackup(options?: {
     db.communityResourceArchives.toArray(),
     db.conversationStateHistory.toArray(),
     db.momentPosts.toArray(),
-    db.momentComments.toArray()
+    db.momentComments.toArray(),
+    db.appCustomizations.toArray()
   ])
 
   // Backup V9 兼容字段继续保留，但 V13 起不再有本地关系积分 stores。
@@ -185,7 +190,7 @@ export async function createBackup(options?: {
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 10,
+    version: 11,
     exportedAt: new Date().toISOString(),
     data: {
       worlds,
@@ -209,7 +214,8 @@ export async function createBackup(options?: {
       communityResourceArchives,
       conversationStateHistory,
       momentPosts,
-      momentComments
+      momentComments,
+      appCustomizations
     }
   }
 }
@@ -237,6 +243,7 @@ export function getBackupSummary(
     stateHistory: backup.data.conversationStateHistory.length,
     momentPosts: backup.data.momentPosts.length,
     momentComments: backup.data.momentComments.length,
+    appCustomizations: backup.data.appCustomizations.length,
     images: backup.data.messages.reduce(
       (total, message) => total + getMessageImages(message).filter(image => Boolean(image.dataUrl)).length,
       0
@@ -301,7 +308,7 @@ export async function parseBackupFile(
     throw new Error('这不是 AI Companion Phone 备份文件。')
   }
 
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(Number(parsed.version))) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(Number(parsed.version))) {
     throw new Error('当前版本暂不支持此备份版本。')
   }
 
@@ -330,7 +337,7 @@ export async function parseBackupFile(
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 10,
+    version: 11,
     exportedAt:
       typeof parsed.exportedAt === 'string'
         ? parsed.exportedAt
@@ -357,7 +364,8 @@ export async function parseBackupFile(
       communityResourceArchives: optionalArray('communityResourceArchives') as CommunityResourceArchive[],
       conversationStateHistory: optionalArray('conversationStateHistory') as ConversationStateHistory[],
       momentPosts: optionalArray('momentPosts') as MomentPost[],
-      momentComments: optionalArray('momentComments') as MomentComment[]
+      momentComments: optionalArray('momentComments') as MomentComment[],
+      appCustomizations: optionalArray('appCustomizations') as AppCustomization[]
     }
   }
 }
@@ -511,6 +519,7 @@ export async function restoreBackup(
     await db.conversationStateHistory.clear()
     await db.momentPosts.clear()
     await db.momentComments.clear()
+    await db.appCustomizations.clear()
     await db.promptDebugTraces.clear()
 
     if (plainBackup.data.worlds.length) {
@@ -561,6 +570,9 @@ export async function restoreBackup(
     }
     if (plainBackup.data.momentComments.length) {
       await db.momentComments.bulkPut(plainBackup.data.momentComments)
+    }
+    if (plainBackup.data.appCustomizations.length) {
+      await db.appCustomizations.bulkPut(plainBackup.data.appCustomizations)
     }
   })
 }

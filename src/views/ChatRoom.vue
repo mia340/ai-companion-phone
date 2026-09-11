@@ -6,6 +6,7 @@ import PhoneFrame from '../components/PhoneFrame.vue'
 import ChatComposer from '../components/chat/ChatComposer.vue'
 import ChatHeader from '../components/chat/ChatHeader.vue'
 import ChatMessageList from '../components/chat/ChatMessageList.vue'
+import ChatMessageEditor from '../components/chat/ChatMessageEditor.vue'
 import ChatSettingsPanel from '../components/chat/ChatSettingsPanel.vue'
 import ChatActionSheet from '../components/chat/ChatActionSheet.vue'
 import ChatImagePreview from '../components/chat/ChatImagePreview.vue'
@@ -57,6 +58,7 @@ import {
   clearMemories,
   createLocalSummary,
   listMemories,
+  listConversationMemoryContext,
   rememberCharacterObservation,
   rememberFromMessageDetailed,
   buildMemoryWriteNotice,
@@ -120,8 +122,10 @@ const errorMessage = ref('')
 const noticeMessage = ref('')
 const newMemoryText = ref('')
 const settingsTab = ref<'chat' | 'roleplay' | 'memory' | 'advanced'>('chat')
-const activePanel = ref<'thought' | 'music' | 'settings' | 'message' | 'greeting' | null>(null)
+const activePanel = ref<'thought' | 'music' | 'settings' | 'message' | 'editor' | 'greeting' | null>(null)
 const selectedMessage = ref<Message>()
+const editMessageDraft = ref('')
+const isSavingMessageEdit = ref(false)
 const replyTarget = ref<Message>()
 const previewImages = ref<string[]>([])
 const previewImageIndex = ref(0)
@@ -690,7 +694,7 @@ async function loadConversation(conversationId: string) {
       getChatSettings(conversationId),
       getConversationState(conversationId),
       getMusicState(conversationId),
-      listMemories(conversationId),
+      listConversationMemoryContext(conversationId, conversationRow.memberIds[0] || ''),
       getModelSettings(),
       listPersonas()
     ])
@@ -795,7 +799,7 @@ async function loadConversation(conversationId: string) {
 
 async function refreshMemoryList() {
   if (!conversation.value) return
-  memories.value = await listMemories(conversation.value.id)
+  memories.value = await listConversationMemoryContext(conversation.value.id, character.value?.id || '')
 }
 
 async function updateSummaryIfNeeded() {
@@ -2698,7 +2702,9 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
   })
 
   messages.value = [message]
-  memories.value = []
+  memories.value = character.value
+    ? await listConversationMemoryContext(conversationId, character.value.id)
+    : []
   conversationState.value = nextState
   conversation.value = { ...conversation.value, openingMode: 'greeting', greetingIndex, updatedAt: now }
   character.value = {
@@ -2723,7 +2729,7 @@ async function useFreeOpening() {
   const id = conversation.value.id
   const result = await switchConversationToFreeOpening(id)
   messages.value = []
-  memories.value = []
+  memories.value = await listConversationMemoryContext(id, character.value.id)
   conversationState.value = result.state
   conversation.value = { ...conversation.value, openingMode: 'free', greetingIndex: undefined, updatedAt: result.updatedAt }
   activePanel.value = null
@@ -2826,7 +2832,7 @@ async function clearConversationMessages() {
 
   messages.value = []
   conversationState.value = result.state
-  memories.value = await listMemories(id)
+  memories.value = await listConversationMemoryContext(id, character.value.id)
   conversation.value = {
     ...conversation.value,
     openingMode: nextOpeningMode,
@@ -2849,64 +2855,79 @@ async function copySelectedMessage() {
   activePanel.value = null
 }
 
-async function editSelectedMessage() {
+function openSelectedMessageEditor() {
   const message = selectedMessage.value
-  if (!message || !character.value || !chatSettings.value) return
-  const editableSource = message.type === 'rich' ? (message.rawContent || message.content) : message.content
-  const next = window.prompt('编辑这条消息', editableSource)
-  if (next === null) return
-  const rawEdited = next.trim()
-  if (!rawEdited && message.type !== 'image') return
+  if (!message) return
+  editMessageDraft.value = message.type === 'rich'
+    ? (message.rawContent || message.content)
+    : message.content
+  activePanel.value = 'editor'
+}
 
-  const persona = activePersona.value ?? await getPersonaForChat(chatSettings.value)
-  activePersona.value = persona
-  const source = message.senderId === 'user' ? 'user-input' as const : 'assistant-output' as const
-  const scripts = await listActiveRegexScripts(character.value.id, source)
-  const regexView = compileIncomingMessageRegex({
-    rawText: rawEdited,
-    source,
-    scripts,
-    depth: 0,
-    event: 'edit',
-    macros: { user: persona.name, char: characterMacroName(character.value) }
-  })
-  const isRichEdit = message.senderId !== 'user' && regexView.rich && looksLikeRichHtml(regexView.displayText)
-  const displayProjection = !isRichEdit && regexView.displayText !== regexView.canonicalText
-    ? regexView.displayText
-    : undefined
-  const patch: Partial<Message> = {
-    type: isRichEdit ? 'rich' : (message.type === 'rich' ? 'text' : message.type),
-    content: isRichEdit
-      ? (regexView.displayText.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500) || '互动卡片')
-      : regexView.canonicalText,
-    rawContent: isRichEdit ? regexView.canonicalText : (rawEdited !== regexView.canonicalText ? rawEdited : undefined),
-    displayContent: displayProjection,
-    richHtml: isRichEdit ? normalizeRichHtml(regexView.displayText) : undefined,
-    richSource: isRichEdit ? 'regex' : undefined,
-    regexPipelineVersion: scripts.length ? 2 : message.regexPipelineVersion,
-    regexApplied: scripts.length ? { storage: regexView.storageApplied, display: regexView.displayApplied } : undefined,
-    alternatives: message.senderId === 'user' ? undefined : [regexView.canonicalText],
-    activeAlternativeIndex: message.senderId === 'user' ? undefined : 0,
-    editedAt: new Date().toISOString()
-  }
-  await db.messages.update(message.id, patch)
-  const index = messages.value.findIndex(item => item.id === message.id)
-  if (index >= 0) messages.value[index] = { ...messages.value[index], ...patch }
-  selectedMessage.value = index >= 0 ? messages.value[index] : undefined
-  const updatedMessage = index >= 0 ? messages.value[index] : undefined
-  activePanel.value = null
+async function saveSelectedMessageEdit() {
+  const message = selectedMessage.value
+  if (!message || !character.value || !chatSettings.value || isSavingMessageEdit.value) return
 
-  if (updatedMessage?.senderId === 'user') {
-    noticeMessage.value = scripts.some(item => item.runOnEdit)
-      ? '用户消息已编辑；已按作者 runOnEdit Regex 更新。可从这条消息重新生成后续回复。'
-      : '用户消息已编辑。可从这条消息重新生成后续回复。'
-    await regenerateFromUserMessage(updatedMessage, true)
+  const rawEdited = editMessageDraft.value.trim()
+  if (!rawEdited && message.type !== 'image') {
+    noticeMessage.value = '消息内容不能为空。'
     return
   }
 
-  noticeMessage.value = scripts.some(item => item.runOnEdit)
-    ? '角色消息已编辑；仅执行了作者标记为 runOnEdit 的 Regex。'
-    : '角色消息已编辑。当前 Regex 没有启用 runOnEdit。'
+  isSavingMessageEdit.value = true
+  try {
+    const persona = activePersona.value ?? await getPersonaForChat(chatSettings.value)
+    activePersona.value = persona
+    const source = message.senderId === 'user' ? 'user-input' as const : 'assistant-output' as const
+    const scripts = await listActiveRegexScripts(character.value.id, source)
+    const regexView = compileIncomingMessageRegex({
+      rawText: rawEdited,
+      source,
+      scripts,
+      depth: 0,
+      event: 'edit',
+      macros: { user: persona.name, char: characterMacroName(character.value) }
+    })
+    const isRichEdit = message.senderId !== 'user' && regexView.rich && looksLikeRichHtml(regexView.displayText)
+    const displayProjection = !isRichEdit && regexView.displayText !== regexView.canonicalText
+      ? regexView.displayText
+      : undefined
+    const patch: Partial<Message> = {
+      type: isRichEdit ? 'rich' : (message.type === 'rich' ? 'text' : message.type),
+      content: isRichEdit
+        ? (regexView.displayText.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500) || '互动卡片')
+        : regexView.canonicalText,
+      rawContent: isRichEdit ? regexView.canonicalText : (rawEdited !== regexView.canonicalText ? rawEdited : undefined),
+      displayContent: displayProjection,
+      richHtml: isRichEdit ? normalizeRichHtml(regexView.displayText) : undefined,
+      richSource: isRichEdit ? 'regex' : undefined,
+      regexPipelineVersion: scripts.length ? 2 : message.regexPipelineVersion,
+      regexApplied: scripts.length ? { storage: regexView.storageApplied, display: regexView.displayApplied } : undefined,
+      alternatives: message.senderId === 'user' ? undefined : [regexView.canonicalText],
+      activeAlternativeIndex: message.senderId === 'user' ? undefined : 0,
+      editedAt: new Date().toISOString()
+    }
+    await db.messages.update(message.id, patch)
+    const index = messages.value.findIndex(item => item.id === message.id)
+    if (index >= 0) messages.value[index] = { ...messages.value[index], ...patch }
+    selectedMessage.value = index >= 0 ? messages.value[index] : undefined
+    const updatedMessage = index >= 0 ? messages.value[index] : undefined
+    activePanel.value = null
+
+    if (updatedMessage?.senderId === 'user') {
+      noticeMessage.value = scripts.some(item => item.runOnEdit)
+        ? '用户消息已编辑；已按作者 runOnEdit Regex 更新。正在从这条消息重新回复。'
+        : '用户消息已编辑。正在从这条消息重新回复。'
+      await regenerateFromUserMessage(updatedMessage, true)
+      return
+    }
+
+    noticeMessage.value = scripts.some(item => item.runOnEdit)
+      ? '角色消息已编辑；仅执行了作者标记为 runOnEdit 的 Regex。'
+      : '角色消息已编辑。'
+  } finally {
+    isSavingMessageEdit.value = false
+  }
 }
 
 async function continueSelectedReply() {
@@ -3552,6 +3573,19 @@ onUnmounted(() => {
           @use-free-greeting="useFreeOpening"
         />
 
+        <ChatMessageEditor
+          v-else-if="activePanel === 'editor'"
+          v-model="editMessageDraft"
+          :sender-label="selectedMessage?.senderId === 'user' ? '我发出的消息' : `${title} 的消息`"
+          :is-saving="isSavingMessageEdit"
+          :panel-style="panelStyle"
+          @drag-start="beginPanelDrag"
+          @drag-move="movePanelDrag"
+          @drag-end="endPanelDrag"
+          @save="saveSelectedMessageEdit"
+          @close="activePanel = null"
+        />
+
         <ChatActionSheet
           v-else-if="activePanel === 'message'"
           :message="selectedMessage"
@@ -3564,7 +3598,7 @@ onUnmounted(() => {
           @drag-end="endPanelDrag"
           @reply="replyToSelectedMessage"
           @copy="copySelectedMessage"
-          @edit="editSelectedMessage"
+          @edit="openSelectedMessageEditor"
           @continue-reply="continueSelectedReply"
           @branch="branchFromSelectedMessage"
           @download-image="downloadSelectedImage"

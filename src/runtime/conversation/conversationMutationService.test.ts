@@ -12,6 +12,8 @@ function memory(overrides: Partial<CharacterMemory>): CharacterMemory {
     conversationId: 'conv-1',
     characterId: 'char-1',
     category: 'event',
+    layer: 'shared',
+    scope: 'conversation',
     content: 'memory',
     importance: 3,
     sourceType: 'automatic',
@@ -61,6 +63,21 @@ describe('buildConversationMutationPlan', () => {
     })
 
     expect(plan.automaticMemoryIdsToDelete).toEqual(['mem-auto'])
+    expect(plan.automaticMemoryPatches).toEqual([])
+  })
+
+  it('never deletes character-shared memories during conversation rewind', () => {
+    const shared = memory({ id: 'mem-shared', scope: 'character', sourceMessageId: 'msg-1' })
+    const plan = buildConversationMutationPlan({
+      affectedMessageIds: ['msg-1'],
+      affectedCreatedAt,
+      memories: [shared],
+      stateHistory: [],
+      messages: [],
+      now
+    })
+
+    expect(plan.automaticMemoryIdsToDelete).toEqual([])
     expect(plan.automaticMemoryPatches).toEqual([])
   })
 

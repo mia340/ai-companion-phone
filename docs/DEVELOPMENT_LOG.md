@@ -1,4 +1,62 @@
+## 2026-09-10 · V0.5.0-alpha.3.5｜App Icon + 多聊天记忆归属
+
+- 首页 App 图标从 Emoji 占位升级为统一 SVG 图标系统，Dock 同步复用。
+- 新增首页编辑模式与本地图标上传；图片裁切为 512×512 WebP，按世界保存。
+- IndexedDB V16 增加 `appCustomizations`，Backup V11 纳入自定义图标。
+- CharacterMemory 增加 `scope`：`character` / `conversation`。稳定事实、共同经历、承诺、关系默认跨聊天共享；主观与剧情默认局部。
+- Chat Prompt 改为当前聊天 + 角色共享记忆；朋友圈发帖/回评读取角色共享记忆。
+- rewind / branch / opening reset / 删除聊天保护 character-scoped memory。
+- 记忆管理增加共享范围切换与三种视图。
+
+## 2026-09-09 · V0.5.0-alpha.3.4.1｜聊天输入框布局热修
+
+- 实机截图确认 ChatComposer 输入框被压缩到左侧约 40px。
+- 根因不是 textarea 自身尺寸，而是 `src/assets/main.css` 的历史全局 `.composer { grid-template-columns: 40px 1fr 58px; }` 同时命中聊天组件根节点。
+- 将聊天组件根类改为 `chat-composer`，显式单列、全宽布局，继续保留可自动/手动调整高度的输入体验。
+
+## 2026-09-09 · V0.5.0-alpha.3.4｜真实手机化第二轮
+
+### 目标
+
+不再扩张 App 数量，优先把已有 Surface 从“网页卡片”收敛到接近原生手机的信息层级：列表用列表、设置用 grouped list、详情页用单一主操作，减少大圆角、强阴影和每页独立配色。
+
+### 本轮修改
+
+1. ChatList：搜索、时间、未读、预览与置顶统一成白底消息列表。
+2. Contacts：新增本地搜索，“新建角色”作为原生列表入口，联系人采用标准行分隔。
+3. Settings：按体验 / 角色与世界 / AI 与数据 / 关于分组，修复长期遗留的 V0.4.1 关于文案。
+4. CharacterDetail：去粉化并统一资料卡、状态、操作按钮、会话记录、资源与原卡阅读器。
+5. WorldCenter：资源库和 Regex Sheet 收敛到蓝灰色 Token，减少粉紫视觉噪音。
+6. main.css：建立基础 Surface Token，统一导航栏和按压反馈。
+
+> 设计原则：层级清楚、控件克制、文本可扫读；列表不做卡片墙，主操作只强调一个。
+
+
+## V0.5.0-alpha.3.3.1
+
+Windows 回归显示 alpha.3.3 仅剩朋友圈 guaranteed reply 的一个边界测试失败：`chance=1` 遇到测试随机源返回 1 时被误判为冷场。实现改为仅当 `chance < 1` 时执行概率淘汰，使 lively / party 在存在候选好友时语义上真正保证至少一位回应。
+
 # 开发记录
+
+## 2026-09-07 · V0.5.0-alpha.3.3｜真实手机感、输入与朋友圈互动
+
+### 截图反馈
+
+用户实机截图暴露五个高频体验问题：聊天输入框被工具按钮挤窄；首页/锁屏深紫壁纸偏离淡蓝基调；用户朋友圈发布后无人互动；消息编辑落到浏览器原生 `prompt()`，文本区又小又脱离手机壳；Community UI 虽能静态显示，但每条消息底部仍挂着安全阻止诊断。海龟汤截图还暴露了 Vue mustache 写在原生 `placeholder` 字符串里没有绑定的问题。
+
+### 本轮修改
+
+1. ChatComposer 改为全宽可扩展 textarea，下方放相册/相机/语音/发送工具栏；输入空间优先级高于按钮。
+2. 新增 `ChatMessageEditor.vue`，长按消息 → 编辑后进入 App 内 bottom sheet，大文本区直接编辑 raw/rich 原文；保存后继续复用既有 Regex/runOnEdit 与重新生成语义。
+3. Home/Lock 统一淡蓝乳白壁纸与深色状态栏；Dock、通知卡、标签同步改成适合浅色背景的玻璃层。
+4. Moments 用户发布后的好友互动不再依赖“好友自主发动态”开关；默认 lively 至少一人回复，角色回评同时增加一个总点赞。
+5. Moments 评论 composer 移除占宽头像，改成 `1fr + 66px` 发送布局，textarea 可纵向扩展。
+6. SafeRichHtml 保持不执行第三方脚本，但取消可见的阻止诊断卡；脚本存在仅写入内部 data marker。
+7. TurtleSoup 修正动态 placeholder 绑定，并把底部 composer 从悬浮大卡改成贴底原生工具栏。
+
+### 参考产品原则
+
+只学习交互原则，不复制第三方实现：微信式聊天优先保证输入与长按操作效率；虚拟手机桌面/锁屏要有统一壁纸与状态栏语义；编辑应发生在应用壳内而不是浏览器弹窗。
 
 ## 2026-09-07 · V0.5.0-alpha.3.2.1｜海龟汤引用热修
 

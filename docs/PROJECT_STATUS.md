@@ -3,12 +3,36 @@
 ## 当前版本
 
 ```text
-开发线：V0.5.0-alpha.3.2.1
-IndexedDB：V15（新增 momentPosts / momentComments）
-Backup：V10（含朋友圈动态与评论）
+开发线：V0.5.0-alpha.3.5
+IndexedDB：V16（新增主屏幕 App 图标个性化）
+Backup：V11（含朋友圈动态、评论与 App 图标个性化）
 原始审查基线：用户上传 V0.4.7.1
 本轮输入基线：用户上传 alpha.3 RAR（已包含朋友圈 / 音乐 / 海龟汤）
 ```
+
+
+## V0.5.0-alpha.3.5 当前状态
+
+本轮开始把“手机外观”从 Emoji 占位真正收敛成可持续的 App Icon 系统，并同时解决多聊天角色的记忆归属问题。
+
+- 首页 12 个 App 使用统一 SVG 图标语言，不再使用 Emoji 作为主图标；Dock 同步复用同一套图标。
+- 首页新增“编辑”模式；玩家可以上传图片替换任意主屏幕 App 图标，也可以恢复默认图标。图片本地裁切/压缩后保存到 IndexedDB V16，并纳入 Backup V11。
+- 记忆增加 `conversation / character` 两级 Scope：稳定事实、承诺、关系事件默认跨聊天共享；共同经历、主观记忆与长期剧情默认只属于当前聊天。
+- Chat Prompt 现在读取“当前聊天 + 角色共享记忆”，不再要求其他 App 选择某一个聊天。
+- 朋友圈发帖/回评也开始读取角色共享记忆；后续 Diary / Forum / Calendar 等 Native App 统一走同一 Memory Ownership 规则。
+- 记忆管理新增“全部 / 当前聊天 / 角色共享”三视图与 Scope 切换，明确告诉用户一条记忆到底会影响哪里。
+
+本版是功能性升级，建议 Windows 完整测试通过后再部署。
+
+本版新增 3 个回归用例，当前目标测试矩阵为 **27 个测试文件 / 261 个用例**；当前环境未具备完整依赖，最终 Vitest / Build 仍以 Windows 工作区验收为准。
+
+## V0.5.0-alpha.3.4.1 当前状态
+
+alpha.3.4 实机发现聊天输入组件受到 `main.css` 历史 `.composer` 三列 Grid 规则污染，输入框被压成左侧竖条。alpha.3.4.1 将聊天 Composer 根类隔离为 `chat-composer` 并明确单列全宽布局；这是纯展示层热修，不改 Runtime / DB / Backup。
+
+## V0.5.0-alpha.3.4 当前状态
+
+进入“真实手机化第二轮”：聊天列表、通讯录、设置、角色详情、世界中心使用统一淡蓝 / 白色视觉语言与 grouped list / native row 结构。该阶段不新增 App，不改变 DB/Backup，不触碰 Conversation Runtime 数据语义。
 
 V0.5.0 不以继续堆 Phone App 为主，而是把 V0.4.x 已有功能收敛成**稳定、可测试、可解释的 AI Companion Runtime**。
 
@@ -23,6 +47,24 @@ V0.5.0 不以继续堆 Phone App 为主，而是把 V0.4.x 已有功能收敛成
 ```
 
 
+
+## V0.5.0-alpha.3.3.1 当前状态
+
+alpha.3.3 Windows 全量测试达到 **26/27 test files、257/258 tests**。唯一失败是朋友圈 `planReplyCount()` 的边界：`lively / party` 已配置 `chance=1`，但测试注入 `rand() => 1` 时被 `>= 1` 误判为无人回应。alpha.3.3.1 将 `chance === 1` 明确为 guaranteed reply，不改其他朋友圈行为；目标恢复 **27/27、258/258**。
+
+## V0.5.0-alpha.3.3 当前状态
+
+本轮不扩张新 App，集中解决真实手机感与高频交互：聊天输入区、消息编辑、首页/锁屏壁纸、朋友圈真实互动、海龟汤底部操作和 Community UI 诊断噪音。
+
+```text
+Chat 输入：全宽正文 + 工具栏，支持长文本扩展
+消息编辑：App 内大编辑器，不再弹浏览器 prompt
+Home / Lock：淡蓝乳白壁纸 + 深色状态栏
+Moments：用户发动态默认会有角色回应，与自主发帖开关解耦
+Community UI：脚本仍阻止，但不再常驻警告卡
+```
+
+当前测试定义目标：**27 个测试文件 / 258 个用例**。DB V15 / Backup V10 不变。
 
 ## V0.5.0-alpha.3.2.1 当前状态
 
@@ -53,7 +95,7 @@ Moments / Music / Turtle Soup / future native apps
 - 游戏允许短动作、神态或心理描写，但状态/按钮/布局由 App 自己渲染；
 - `appPresentationPolicy.ts` 作为后续所有独立 App 的统一输出边界。
 
-当前静态规模：**100 个生产 TS/Vue 文件 / 34,793 行；27 个测试文件 / 256 个用例定义**。DB V15 / Backup V10 不变。
+alpha.3.2 静态规模记录：**100 个生产 TS/Vue 文件 / 34,793 行；27 个测试文件 / 256 个用例定义**。DB V15 / Backup V10 不变。
 
 ## V0.5.0-alpha.3.1.1 当前状态
 

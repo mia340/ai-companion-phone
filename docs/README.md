@@ -1,13 +1,13 @@
 # AI Companion Phone Docs
 
-当前开发线：**V0.5.0-alpha.3.2.1（Presentation Policy 引用热修）**
+当前开发线：**V0.5.0-alpha.3.5（App Icon + 多聊天 Memory Ownership）**
 
 ```text
-应用：0.5.0-alpha.3.2.1
-IndexedDB：V15
-Backup：V10
+应用：0.5.0-alpha.3.5
+IndexedDB：V16
+Backup：V11
 本轮输入基线：用户上传的 alpha.3 RAR（含朋友圈 / 音乐 / 海龟汤等新增功能）
-自动化定义：27 个测试文件 / 256 个用例
+自动化定义：27 个测试文件 / 261 个用例
 ```
 
 > 重要：alpha.3.2 不删除聊天 Community UI。相反，Chat 是唯一允许角色卡作者接管 Presentation 的主要 Surface；朋友圈、音乐、海龟汤等原生 App 只让 AI 生成内容，由本地 Vue 负责 UI。

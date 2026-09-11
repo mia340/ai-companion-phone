@@ -202,21 +202,11 @@ function wrapLooseNarrative(root: HTMLElement) {
   return wrapped
 }
 
-function compileFallbackForScriptData(root: HTMLElement, hadScripts: boolean, compiledCount: number) {
-  if (!hadScripts || compiledCount > 0) return 0
-  const source = [...root.querySelectorAll<HTMLElement>('[id*="data-container"], [class*="data-container"], [style*="display:none"], [style*="display: none"]')]
-    .map(node => (node.textContent || '').trim())
-    .find(text => text.length >= 8)
-
-  const details = root.ownerDocument.createElement('details')
-  details.className = 'safe-ui-fallback'
-  const summary = root.ownerDocument.createElement('summary')
-  summary.textContent = source ? '社区 UI 数据（安全模式）' : '社区 UI 脚本已安全阻止'
-  const pre = root.ownerDocument.createElement('pre')
-  pre.textContent = source || '这个社区界面依赖第三方 JavaScript 动态生成内容。小手机不会执行作者脚本，因此无法安全还原这一部分交互；AI 原始回复仍保留在消息与 Prompt 调试中。'
-  details.append(summary, pre)
-  root.appendChild(details)
-  return 1
+function noteBlockedScripts(root: HTMLElement, hadScripts: boolean) {
+  if (!hadScripts) return
+  // 第三方脚本仍然不会执行，但不把“已阻止”诊断卡长期塞进聊天正文。
+  // 可用的静态 HTML / CSS 与本地安全交互照常显示；诊断信息留给 Prompt Debug / 开发工具。
+  root.setAttribute('data-community-script-blocked', '1')
 }
 
 function sanitize(html: string) {
@@ -226,9 +216,9 @@ function sanitize(html: string) {
   const hadScripts = root.querySelectorAll('script').length > 0
 
   // 不执行第三方 JS。先读取它已经放进 HTML 的静态数据，用本地安全编译器恢复常见 UI。
-  let compiledCount = compileSimpleDataContainer(root)
-  compiledCount += compileStructuredStatus(root)
-  compiledCount += compileFallbackForScriptData(root, hadScripts, compiledCount)
+  compileSimpleDataContainer(root)
+  compileStructuredStatus(root)
+  noteBlockedScripts(root, hadScripts)
   wrapLooseNarrative(root)
 
   root.querySelectorAll('script,iframe,object,embed,link,meta,base,form,input,textarea,select').forEach(node => node.remove())
@@ -383,7 +373,7 @@ function bindSafeInteractions() {
 function render() {
   if (!host.value) return
   shadow ||= host.value.attachShadow({ mode: 'open' })
-  shadow.innerHTML = `<style>:host{display:block;width:100%;max-width:100%;min-width:0;font:inherit;color:inherit;white-space:normal}*,*::before,*::after{box-sizing:border-box}img,video,canvas,svg{max-width:100%;height:auto}audio{max-width:100%}details,table{max-width:100%}a{color:inherit}.safe-rich-narrative{margin:0 0 10px;padding:11px 14px;border:1px solid rgba(46,78,105,.07);border-radius:18px 18px 18px 6px;background:#fff;color:#263b4d;box-shadow:0 1px 3px rgba(43,72,98,.06);font-size:15px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}.safe-rich-narrative:last-child{margin-bottom:0}.safe-ui-fallback{margin:10px 0;padding:10px;border:1px dashed rgba(90,116,138,.24);border-radius:12px;background:rgba(255,255,255,.72)}.safe-ui-fallback summary{cursor:pointer;font-size:12px}.safe-ui-fallback pre,.safe-compiled-raw-data{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:inherit;font-size:12px;line-height:1.6}</style>${sanitize(props.html)}`
+  shadow.innerHTML = `<style>:host{display:block;width:100%;max-width:100%;min-width:0;font:inherit;color:inherit;white-space:normal}*,*::before,*::after{box-sizing:border-box}img,video,canvas,svg{max-width:100%;height:auto}audio{max-width:100%}details,table{max-width:100%}a{color:inherit}.safe-rich-narrative{margin:0 0 10px;padding:11px 14px;border:1px solid rgba(46,78,105,.07);border-radius:18px 18px 18px 6px;background:#fff;color:#263b4d;box-shadow:0 1px 3px rgba(43,72,98,.06);font-size:15px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}.safe-rich-narrative:last-child{margin-bottom:0}.safe-compiled-raw-data{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:inherit;font-size:12px;line-height:1.6}</style>${sanitize(props.html)}`
   bindSafeInteractions()
 }
 

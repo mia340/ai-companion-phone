@@ -10,6 +10,7 @@ import {
 import CharacterAvatar from '../components/CharacterAvatar.vue'
 import PhoneFrame from '../components/PhoneFrame.vue'
 import { db } from '../db/database'
+import { listCharacterSharedMemories } from '../services/memoryService'
 import { useRouter } from 'vue-router'
 import { findSingleConversation } from '../services/characterService'
 import { prepareChatImage } from '../services/imageService'
@@ -24,6 +25,7 @@ import {
   MOMENT_MAX_CONTENT_LENGTH,
   MOMENT_MAX_IMAGES,
   addMomentComment,
+  addMomentExternalLike,
   createCharacterMoment,
   createUserMoment,
   deleteMomentPost,
@@ -222,7 +224,7 @@ async function publishMyMoment() {
 }
 
 // —— 我发动态后，好友可能“路过评论” ——
-// “自演”开关关掉时也同步停这类自动评论；离开本页时清掉所有已排的定时器。
+// 与“好友自主发动态”开关独立；离开本页时清掉所有已排的定时器。
 const reactionTimers = new Set<number>()
 
 /** 随热度档位决定这次有没有人来、来几位（0 = 冷场）。 */
@@ -234,15 +236,16 @@ function rollReactionAuthors(): Character[] {
 }
 
 function scheduleReactionsTo(post: MomentPost) {
-  if (!isAutoMomentsEnabled()) return
+  // ‘好友自主发动态’和‘好友回应我的动态’是两件事。
+  // 用户主动发布后是否有人来互动，只由回复热度决定，不再被自主发动态开关误伤。
   const authors = rollReactionAuthors()
   if (!authors.length) return
 
-  // 第一位约 4~9 秒后到；若再来一位，再晚约 12~18 秒——像真有人在陆续刷手机。
-  let delayMs = 4000 + Math.floor(Math.random() * 5000)
+  // 第一位约 2.5~6 秒后到；若再来一位，再晚约 8~14 秒。
+  let delayMs = 2500 + Math.floor(Math.random() * 3500)
   for (const author of authors) {
     scheduleOneReaction(author, post, delayMs)
-    delayMs += 12000 + Math.floor(Math.random() * 6000)
+    delayMs += 8000 + Math.floor(Math.random() * 6000)
   }
 }
 
@@ -263,8 +266,9 @@ async function runReaction(character: Character, post: MomentPost) {
     const reply = await generateCharacterReactionToUserPost(
       character,
       selfDisplay.value.name,
-      post.content
+      post.content || (post.images?.length ? '（发了一组图片，没有配文字。）' : '')
     )
+    await addMomentExternalLike(post.id)
     await addMomentComment({
       momentId: post.id,
       worldId: post.worldId,
@@ -320,8 +324,10 @@ async function publishCharacterMoment() {
   showSettingsHint.value = false
 
   try {
+    const sharedMemories = await listCharacterSharedMemories(character.id)
     const generated = await generateCharacterPost(character, {
-      contextLabel: formatNowLabel()
+      contextLabel: formatNowLabel(),
+      memoryHints: sharedMemories.map(memory => memory.content)
     })
 
     // 如果 TA 已经和你有单聊，把动态和那份聊天绑定，方便看完直接去聊。
@@ -424,7 +430,8 @@ async function submitComment(item: MomentFeedItem) {
       character,
       item.post.content,
       selfDisplay.value.name,
-      content
+      content,
+      { memoryHints: (await listCharacterSharedMemories(character.id)).map(memory => memory.content) }
     )
     await addMomentComment({
       momentId: item.post.id,
@@ -1063,8 +1070,9 @@ onUnmounted(() => {
 .comment-body b{margin-right:5px;color:var(--mom-blue);font-size:12px}.comment-body b::after{content:'：'}
 .comment-body span{color:#33424f;font-size:12.5px;word-break:break-word}
 .reply-pending{align-items:center;color:#8c99a4;font-size:12px}
-.comment-composer{display:flex;align-items:flex-start;gap:8px;margin-top:9px;padding-top:8px;border-top:1px solid var(--mom-line)}
-.comment-input{flex:1;min-height:62px;padding:9px 11px;font-size:13px;resize:none}.send-btn{align-self:flex-end}
+.comment-composer{display:grid;grid-template-columns:minmax(0,1fr) 66px;align-items:end;gap:8px;margin-top:9px;padding:10px 0 0;border-top:1px solid var(--mom-line)}
+.comment-composer :deep(.character-avatar){display:none}
+.comment-input{min-width:0;width:100%;min-height:44px;max-height:150px;padding:10px 12px;font-size:13.5px;line-height:1.5;resize:vertical;background:#fff}.send-btn{width:66px;min-height:42px;align-self:end;border-radius:12px}
 
 .empty-moments{padding:70px 20px 40px;text-align:center;color:#8c99a4}.empty-emoji{font-size:46px;opacity:.75}
 .empty-moments p{margin:13px 0 18px;font-size:13px;line-height:1.8}

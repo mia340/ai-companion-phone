@@ -1,7 +1,7 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.3.2.1**。
-> V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V15 / Backup V10（朋友圈两表已纳入备份）。
+> 当前文档版本：**V0.5.0-alpha.3.5**。
+> V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V16 / Backup V11（朋友圈与主屏幕个性化已纳入备份）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
 ## V0.5.0-alpha.3.1 App Surface 边界
@@ -20,6 +20,40 @@ Home / Router
 - 重交互 App 使用 route-level lazy import，避免它们全部进入首屏主包；
 - 后台/自动 AI 行为必须显式 opt-in、前台运行且禁止重入，不能静默制造持续费用；
 - UI 页面只负责展示与交互，AI prompt / 解析继续留在 service，后续可再迁入 `runtime/`，但不把新逻辑塞回 `ChatRoom.vue`。
+
+## V0.5.0-alpha.3.5 Memory Ownership 与主屏幕个性化
+
+### 多聊天记忆不再“选一个聊天”
+
+同一角色允许拥有多个独立聊天后，**其他 App 不应该随机挑一个聊天作为“角色记忆源”**。当前运行时采用双层记忆：
+
+```text
+Character Shared Memory
+  ├─ fact
+  ├─ shared
+  ├─ promise
+  └─ relationship
+        ↓
+  可跨多个聊天 / Moments / future native apps 读取
+
+Conversation Memory
+  ├─ subjective
+  └─ story
+        ↓
+  只属于当前剧情线，默认不跨聊天
+```
+
+用户可以在“记忆管理”中手动把任意记忆提升为“角色共享”，或移回“仅当前聊天”。这样既避免“第二个聊天突然知道第一条支线剧情”的污染，也不会让角色在换聊天后忘掉姓名、偏好、承诺等稳定事实；共同经历默认属于当前剧情线，确认后再共享。
+
+Chat 的 Prompt 读取顺序现在是：**当前聊天记忆 + 该角色全部聊天中的角色共享记忆**；同一内容跨聊天重复时去重，冲突仍保留并交给现有冲突机制处理。
+
+原生 App Surface（当前已落地朋友圈）不读取某个随机聊天，而是通过 `listCharacterSharedMemories(characterId)` 获取角色共享记忆；如果以后需要“从某个聊天跳进 App 并临时带入剧情”，应使用显式 handoff context，而不是改变共享记忆归属。
+
+### 主屏幕 App Icon
+
+首页 App 图标从 Emoji 占位升级为统一的轻量 SVG 图标系统：简洁轮廓、柔和双色底、玻璃高光和一致安全区，遵循 Apple 对图标“简单、可识别、主体居中”的设计方向。
+
+用户可进入首页“编辑”，为 App 上传自己的图片；本地会裁成 512×512 并压缩为 WebP，按世界保存到 IndexedDB。自定义图标也会进入 Backup，恢复数据后不会丢失。
 
 ## V0.5.0-alpha.3.2 Presentation Policy
 

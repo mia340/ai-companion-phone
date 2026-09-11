@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   extractMemoryCandidates,
+  memoryScopeFor,
   selectMemoryHits,
   selectMemoryHitsDetailed
 } from './memoryService'
@@ -26,6 +27,17 @@ const make = (
 })
 
 describe('multi-layer memory', () => {
+
+  it('默认把稳定事实类记忆设为角色共享，把剧情类记忆留在当前聊天', () => {
+    expect(memoryScopeFor({ category: 'other', layer: 'fact' })).toBe('character')
+    expect(memoryScopeFor({ category: 'event', layer: 'shared' })).toBe('conversation')
+    expect(memoryScopeFor({ category: 'promise', layer: 'promise' })).toBe('character')
+    expect(memoryScopeFor({ category: 'relationship', layer: 'relationship' })).toBe('character')
+    expect(memoryScopeFor({ category: 'other', layer: 'story' })).toBe('conversation')
+    expect(memoryScopeFor({ category: 'relationship', layer: 'subjective' })).toBe('conversation')
+    expect(memoryScopeFor({ category: 'other', layer: 'story', scope: 'character' })).toBe('character')
+  })
+
   it('extracts explicit facts and promises into different layers', () => {
     const rows = extractMemoryCandidates(
       '请记住我对花生过敏。明天面试，记得提醒我。',

@@ -113,7 +113,7 @@ const bodyTransform = computed(() =>
 </script>
 
 <template>
-  <PhoneFrame status-tone="light">
+  <PhoneFrame status-tone="dark">
     <section
       class="ls-root"
       @pointerdown="onPointerDown"
@@ -207,18 +207,17 @@ const bodyTransform = computed(() =>
   z-index: 0;
   overflow: hidden;
   background:
-    radial-gradient(120% 90% at 82% -12%, rgba(120, 168, 255, 0.55) 0%, transparent 46%),
-    radial-gradient(130% 110% at 6% 108%, rgba(255, 158, 200, 0.5) 0%, transparent 52%),
-    linear-gradient(165deg, #1d2b55 0%, #34407a 42%, #5a3d76 100%);
+    radial-gradient(120% 70% at 86% -8%, rgba(255,255,255,.97) 0%, rgba(225,243,255,.78) 34%, transparent 62%),
+    radial-gradient(100% 75% at -8% 100%, rgba(196,227,249,.86) 0%, transparent 62%),
+    linear-gradient(165deg,#f6fbff 0%,#eaf6ff 45%,#dcecf8 100%);
 }
 
 .glow {
   position: absolute;
   display: block;
   border-radius: 50%;
-  filter: blur(6px);
-  opacity: 0.55;
-  mix-blend-mode: screen;
+  filter:blur(10px);
+  opacity:.48;
 }
 
 .g1 {
@@ -226,7 +225,7 @@ const bodyTransform = computed(() =>
   height: 230px;
   top: -70px;
   right: -60px;
-  background: radial-gradient(circle, rgba(168, 205, 255, 0.9), transparent 68%);
+  background:radial-gradient(circle,rgba(156,207,243,.72),transparent 68%);
 }
 
 .g2 {
@@ -234,7 +233,7 @@ const bodyTransform = computed(() =>
   height: 260px;
   bottom: -90px;
   left: -90px;
-  background: radial-gradient(circle, rgba(255, 174, 205, 0.7), transparent 66%);
+  background:radial-gradient(circle,rgba(182,223,250,.72),transparent 66%);
 }
 
 .g3 {
@@ -242,7 +241,7 @@ const bodyTransform = computed(() =>
   height: 140px;
   top: 42%;
   left: 12%;
-  background: radial-gradient(circle, rgba(255, 214, 170, 0.5), transparent 70%);
+  background:radial-gradient(circle,rgba(255,255,255,.9),transparent 70%);
 }
 
 .ls-vignette {
@@ -250,7 +249,7 @@ const bodyTransform = computed(() =>
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: radial-gradient(130% 90% at 50% 30%, transparent 55%, rgba(12, 16, 40, 0.42) 100%);
+  background:radial-gradient(130% 90% at 50% 30%,transparent 58%,rgba(159,194,219,.12) 100%);
 }
 
 /* ---------- 主体 ---------- */
@@ -262,8 +261,8 @@ const bodyTransform = computed(() =>
   flex-direction: column;
   align-items: center;
   padding: 28px 20px 26px;
-  color: rgba(255, 255, 255, 0.96);
-  text-shadow: 0 2px 14px rgba(12, 20, 50, 0.35);
+  color:#294055;
+  text-shadow:none;
   transition: transform 0.28s ease;
 }
 
@@ -312,9 +311,9 @@ const bodyTransform = computed(() =>
 .ls-quiet {
   padding: 12px 18px;
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  color:#6c8294;
+  background:rgba(255,255,255,.58);
+  border:1px solid rgba(255,255,255,.88);
   border-radius: 16px;
   backdrop-filter: blur(14px);
 }
@@ -324,13 +323,13 @@ const bodyTransform = computed(() =>
   align-items: center;
   gap: 11px;
   padding: 11px 13px;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  background:rgba(255,255,255,.68);
+  border:1px solid rgba(255,255,255,.92);
   border-radius: 20px;
   backdrop-filter: blur(18px);
   text-align: left;
   text-shadow: none;
-  box-shadow: 0 10px 30px rgba(10, 16, 44, 0.25);
+  box-shadow:0 12px 30px rgba(61,94,120,.12);
 }
 
 .ls-notice-avatar {
@@ -345,12 +344,12 @@ const bodyTransform = computed(() =>
 }
 
 .ls-notice-main b {
-  color: rgba(255, 255, 255, 0.98);
+  color:#2f4659;
   font-size: 15px;
 }
 
 .ls-notice-main small {
-  color: rgba(255, 255, 255, 0.72);
+  color:#75899a;
   font-size: 12px;
 }
 

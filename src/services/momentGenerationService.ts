@@ -98,13 +98,17 @@ export const MOMENT_POST_SYSTEM_RULES = [
  */
 export function buildCharacterPostMessages(
   profile: MomentCharacterProfile,
-  contextLabel?: string
+  contextLabel?: string,
+  memoryHints?: string[]
 ): ChatTurn[] {
   const userLines = [
     `你是：\n${describeCharacter(profile)}`
   ]
   if (contextLabel?.trim()) {
     userLines.push(`现在是：${contextLabel.trim()}`)
+  }
+  if (memoryHints?.length) {
+    userLines.push(`可参考的角色长期记忆（只使用与当前动态自然相关的内容，不要逐条复述）：\n${memoryHints.slice(0, 8).map(item => `- ${item}`).join('\n')}`)
   }
   userLines.push('请发一条朋友圈动态。')
 
@@ -130,7 +134,8 @@ export function buildCharacterCommentMessages(
   profile: MomentCharacterProfile,
   targetPost: string,
   myDisplayName: string,
-  myComment: string
+  myComment: string,
+  memoryHints?: string[]
 ): ChatTurn[] {
   const rules = [
     `你正在扮演上面描述的角色，在朋友圈动态下看到「${myDisplayName}」给你的评论：`,
@@ -150,8 +155,9 @@ export function buildCharacterCommentMessages(
       role: 'user',
       content: [
         `你是：\n${describeCharacter(profile)}`,
-        rules
-      ].join('\n\n')
+        rules,
+        memoryHints?.length ? `角色长期记忆参考：\n${memoryHints.slice(0, 8).map(item => `- ${item}`).join('\n')}` : ''
+      ].filter(Boolean).join('\n\n')
     }
   ]
 }
@@ -213,13 +219,13 @@ async function requireConfigured() {
  */
 export async function generateCharacterPost(
   character: Character,
-  options?: { contextLabel?: string; topicHint?: string }
+  options?: { contextLabel?: string; topicHint?: string; memoryHints?: string[] }
 ): Promise<{ text: string; model: string }> {
   const settings = await requireConfigured()
   const provider = createProvider(settings)
   const profile = momentProfileFromCharacter(character)
 
-  const messages = buildCharacterPostMessages(profile, options?.contextLabel)
+  const messages = buildCharacterPostMessages(profile, options?.contextLabel, options?.memoryHints)
 
   if (options?.topicHint?.trim()) {
     const last = messages[messages.length - 1]
@@ -250,7 +256,8 @@ export async function generateCharacterComment(
   character: Character,
   targetPost: string,
   myDisplayName: string,
-  myComment: string
+  myComment: string,
+  options?: { memoryHints?: string[] }
 ): Promise<{ text: string; model: string }> {
   const settings = await requireConfigured()
   const provider = createProvider(settings)
@@ -260,7 +267,8 @@ export async function generateCharacterComment(
     profile,
     targetPost,
     myDisplayName,
-    myComment
+    myComment,
+    options?.memoryHints
   )
 
   const response = await provider.chat({

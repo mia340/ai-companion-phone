@@ -101,6 +101,25 @@ describe('conversation branch plan', () => {
     expect(plan.conversation.unread).toBe(0)
   })
 
+  it('does not copy character-shared memories into a new story branch', () => {
+    let seq = 0
+    const plan = buildConversationBranchPlan({
+      sourceConversation: conversation,
+      sourceMessages: [message({ id: 'm-1' })],
+      selectedMessageId: 'm-1',
+      sourceMemories: [
+        memory({ id: 'shared', scope: 'character', sourceMessageId: 'm-1' }),
+        memory({ id: 'local', scope: 'conversation', sourceMessageId: 'm-1' })
+      ],
+      sourceHistory: [],
+      sourceState: createDefaultConversationState('c-1'),
+      idFactory: () => `new-${++seq}`
+    })
+
+    expect(plan.memories.map(row => row.id)).not.toContain('shared')
+    expect(plan.memories).toHaveLength(1)
+  })
+
   it('remaps reply references that point inside the copied branch', () => {
     let seq = 0
     const plan = buildConversationBranchPlan({

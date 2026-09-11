@@ -116,9 +116,9 @@ describe('planReplyCount', () => {
     expect(planReplyCount('party', 0, () => 0)).toBe(0)
   })
 
-  it('rand 恒 1（都往坏里掷）时各档都冷场', () => {
-    expect(planReplyCount('lively', 6, () => 1)).toBe(0)
-    expect(planReplyCount('party', 6, () => 1)).toBe(0)
+  it('默认 lively 与 party 保证至少一位好友回应', () => {
+    expect(planReplyCount('lively', 6, () => 1)).toBe(1)
+    expect(planReplyCount('party', 6, () => 1)).toBe(1)
   })
 
   it('rand 恒 0（都往好里掷）时按档位冲到上限', () => {

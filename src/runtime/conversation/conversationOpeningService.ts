@@ -1,6 +1,7 @@
 import { db } from '../../db/database'
 import type { Character, ConversationState, Message } from '../../types/domain'
 import { resetConversationRuntime } from './conversationMutationService'
+import { memoryScopeFor } from '../../services/memoryService'
 
 /**
  * Persist one selected Character Card greeting as the new opening seed.
@@ -24,7 +25,9 @@ export async function installConversationGreeting(options: {
     async () => {
       if (options.resetExisting) {
         await db.messages.where('conversationId').equals(options.conversationId).delete()
-        await db.memories.where('conversationId').equals(options.conversationId).delete()
+        const memoryRows = await db.memories.where('conversationId').equals(options.conversationId).toArray()
+        const localMemoryIds = memoryRows.filter(row => memoryScopeFor(row) === 'conversation').map(row => row.id)
+        if (localMemoryIds.length) await db.memories.bulkDelete(localMemoryIds)
         await db.conversationStateHistory.where('conversationId').equals(options.conversationId).delete()
         await db.promptDebugTraces.where('conversationId').equals(options.conversationId).delete()
       }

@@ -1,5 +1,6 @@
 import { db } from '../../db/database'
 import { createDefaultConversationState } from '../../services/chatSettings'
+import { memoryScopeFor } from '../../services/memoryService'
 import type {
   CharacterMemory,
   ConversationStateHistory,
@@ -32,6 +33,7 @@ export interface ConversationTruncatePlan extends ConversationMutationPlan {
 }
 
 function isAutomaticMemory(row: CharacterMemory) {
+  if (memoryScopeFor(row) === 'character') return false
   return row.sourceType === 'automatic' || (!row.sourceType && Boolean(row.sourceMessageId))
 }
 
@@ -256,9 +258,10 @@ export async function resetConversationRuntime(options: {
   memoryPolicy?: 'automatic' | 'all'
 }) {
   const memoryRows = await db.memories.where('conversationId').equals(options.conversationId).toArray()
-  const memoryIds = options.memoryPolicy === 'all'
-    ? memoryRows.map(row => row.id)
-    : memoryRows.filter(isAutomaticMemory).map(row => row.id)
+  const memoryIds = memoryRows
+    .filter(row => memoryScopeFor(row) === 'conversation')
+    .filter(row => options.memoryPolicy === 'all' || isAutomaticMemory(row))
+    .map(row => row.id)
   const now = new Date().toISOString()
   const state = createDefaultConversationState(options.conversationId)
   state.updatedAt = now

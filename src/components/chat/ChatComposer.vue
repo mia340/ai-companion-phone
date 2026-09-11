@@ -47,6 +47,10 @@ const emit = defineEmits<{
 
 const textareaRef = ref<HTMLTextAreaElement>()
 const selectedReadyIndex = ref(0)
+const manualTextareaHeight = ref<number | null>(null)
+let composerResizePointer: number | null = null
+let composerResizeStartY = 0
+let composerResizeStartHeight = 44
 let micPressTimer: number | undefined
 let longPressRecording = false
 
@@ -63,9 +67,44 @@ function resize() {
   void nextTick(() => {
     const el = textareaRef.value
     if (!el) return
+    if (!el.value.trim()) {
+      manualTextareaHeight.value = null
+      el.style.height = '44px'
+      return
+    }
+    if (manualTextareaHeight.value !== null) {
+      el.style.height = `${manualTextareaHeight.value}px`
+      return
+    }
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 112)}px`
+    el.style.height = `${Math.min(Math.max(44, el.scrollHeight), 190)}px`
   })
+}
+function composerResizeLimit() {
+  return Math.max(180, Math.min(320, Math.round(window.innerHeight * 0.42)))
+}
+function beginComposerResize(event: PointerEvent) {
+  const el = textareaRef.value
+  const grip = event.currentTarget as HTMLElement | null
+  if (!el || !grip) return
+  composerResizePointer = event.pointerId
+  composerResizeStartY = event.clientY
+  composerResizeStartHeight = el.getBoundingClientRect().height
+  grip.setPointerCapture?.(event.pointerId)
+}
+function moveComposerResize(event: PointerEvent) {
+  if (composerResizePointer !== event.pointerId || !textareaRef.value) return
+  const next = Math.max(44, Math.min(composerResizeLimit(), composerResizeStartHeight + event.clientY - composerResizeStartY))
+  manualTextareaHeight.value = Math.round(next)
+  textareaRef.value.style.height = `${manualTextareaHeight.value}px`
+}
+function endComposerResize(event?: PointerEvent) {
+  if (event && composerResizePointer !== event.pointerId) return
+  composerResizePointer = null
+}
+function resetComposerResize() {
+  manualTextareaHeight.value = null
+  resize()
 }
 function focus() { textareaRef.value?.focus() }
 function handleInput(event: Event) {
@@ -237,15 +276,48 @@ defineExpose({ focus, resize })
   </div>
   <div v-if="isSending && modelValue.trim()" class="next-message-hint">已保留为下一条消息，当前回复结束后即可发送</div>
 
-  <form class="composer" @submit.prevent="emit('submit')">
+  <form class="chat-composer" @submit.prevent="emit('submit')">
     <input id="chat-album-input" class="image-input" type="file" accept="image/*" multiple :disabled="pickerDisabled" @change="handleImageChange" />
     <input id="chat-camera-input" class="image-input" type="file" accept="image/*" capture="environment" :disabled="pickerDisabled" @change="handleImageChange" />
-    <label class="composer-side-button file-picker-label" :class="{ 'file-picker-label--disabled': pickerDisabled }" for="chat-album-input" aria-label="从相册选择图片" title="从相册选择，可多选">＋</label>
-    <label class="camera-button file-picker-label" :class="{ 'file-picker-label--disabled': pickerDisabled }" for="chat-camera-input" aria-label="拍照" title="打开相机拍照">📷</label>
-    <button v-if="voiceInputAvailable" type="button" :class="['mic-button',{'mic-button--active':isRecording}]" :disabled="isPreparingImage || isRecognizing" :aria-label="isRecording ? '结束录音' : '语音输入'" @click.prevent @pointerdown.prevent="handleMicPointerDown" @pointerup.prevent="handleMicPointerUp" @pointerleave="handleMicPointerCancel" @pointercancel="handleMicPointerCancel">{{ isRecording ? '■' : '🎙' }}</button>
-    <textarea ref="textareaRef" :value="modelValue" rows="1" inputmode="text" enterkeyhint="send" autocomplete="off" autocapitalize="sentences" aria-label="消息输入框" :placeholder="imageCount ? '为这些图片添加一句话…' : isSending ? '可以先输入下一条消息…' : '输入消息…'" @input="handleInput" @focus="emit('focus')" @keydown="handleKeydown"></textarea>
-    <button v-if="isSending" class="stop-button" type="button" @click="emit('stop')">停止</button>
-    <button v-else class="send-button" type="submit" :disabled="!canSend">发送</button>
+
+    <div class="composer-editor">
+      <textarea
+        ref="textareaRef"
+        :value="modelValue"
+        rows="1"
+        inputmode="text"
+        enterkeyhint="send"
+        autocomplete="off"
+        autocapitalize="sentences"
+        aria-label="消息输入框"
+        :placeholder="imageCount ? '为这些图片添加一句话…' : isSending ? '可以先输入下一条消息…' : '输入消息…'"
+        @input="handleInput"
+        @focus="emit('focus')"
+        @keydown="handleKeydown"
+      ></textarea>
+      <div
+        class="textarea-resize-grip"
+        role="separator"
+        aria-label="拖动调整输入框高度，双击恢复自动高度"
+        title="拖动调整输入框高度"
+        @pointerdown.prevent="beginComposerResize"
+        @pointermove.prevent="moveComposerResize"
+        @pointerup="endComposerResize"
+        @pointercancel="endComposerResize"
+        @dblclick="resetComposerResize"
+      ><span></span></div>
+    </div>
+
+    <div class="composer-toolbar">
+      <div class="composer-tools">
+        <label class="composer-side-button file-picker-label" :class="{ 'file-picker-label--disabled': pickerDisabled }" for="chat-album-input" aria-label="从相册选择图片" title="从相册选择，可多选">＋</label>
+        <label class="camera-button file-picker-label" :class="{ 'file-picker-label--disabled': pickerDisabled }" for="chat-camera-input" aria-label="拍照" title="打开相机拍照">📷</label>
+        <button v-if="voiceInputAvailable" type="button" :class="['mic-button',{'mic-button--active':isRecording}]" :disabled="isPreparingImage || isRecognizing" :aria-label="isRecording ? '结束录音' : '语音输入'" @click.prevent @pointerdown.prevent="handleMicPointerDown" @pointerup.prevent="handleMicPointerUp" @pointerleave="handleMicPointerCancel" @pointercancel="handleMicPointerCancel">{{ isRecording ? '■' : '🎙' }}</button>
+      </div>
+
+      <button v-if="isSending" class="stop-button" type="button" @click="emit('stop')">停止</button>
+      <button v-else class="send-button" type="submit" :disabled="!canSend">发送</button>
+    </div>
   </form>
 </template>
 
@@ -256,6 +328,32 @@ defineExpose({ focus, resize })
 .selected-image-detail{display:flex;align-items:center;justify-content:space-between;gap:9px;margin-top:4px;padding:8px;border-radius:12px;background:#f3f7fa}.selected-image-detail__text{min-width:0;display:grid;gap:2px}.selected-image-detail__text b{overflow:hidden;color:#455d70;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.selected-image-detail__text span,.selected-image-detail__text small{color:#7d8e9c;font-size:10px}.selected-image-detail__actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px}.selected-image-detail__actions button,.failed-image-actions button{padding:5px 7px;border:0;border-radius:8px;background:#eaf3f9;color:#5d86a5;font-size:10px}.selected-image-detail__actions button:disabled,.failed-image-actions button:disabled{opacity:.4}
 .failed-image-hint{margin:7px 0 0;color:#b1606a;font-size:10px}.failed-image-list{display:grid;gap:6px;margin-top:7px}.failed-image-list article{display:grid;gap:6px;padding:8px;border:1px solid rgba(190,88,98,.16);border-radius:12px;background:#fff8f8}.failed-image-list article>div:first-child{min-width:0;display:grid;gap:2px}.failed-image-list b{overflow:hidden;color:#a95f68;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.failed-image-list span{color:#8d6f75;font-size:10px;line-height:1.35}.failed-image-list small{color:#9b8c91;font-size:9px}.failed-image-actions{display:flex;gap:5px}.failed-image-list details{color:#897c82;font-size:9px}.failed-image-list summary{cursor:pointer}.failed-image-list p{margin:4px 0 0;line-height:1.4}
 .reply-preview-bar,.recording-bar{display:flex;align-items:center;gap:10px;padding:8px 12px 7px}.reply-preview-bar>div,.recording-bar>div{min-width:0;flex:1}.recording-bar>div{display:grid;gap:3px}.reply-preview-bar b,.recording-bar b{color:#5f91b8;font-size:12px}.reply-preview-bar span,.recording-bar small{overflow:hidden;color:#7c8f9e;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.reply-preview-bar>button{width:30px;height:30px;flex:0 0 auto;border:0;border-radius:50%;background:#edf4f9;color:#61788a;font-size:19px}.reply-preview-bar>div{display:flex;flex-direction:column;gap:2px;padding-left:9px;border-left:3px solid #6ea7d1}.recording-bar>button{padding:7px 11px;border:0;border-radius:11px;background:#edf4f9;color:#637b8e}.recording-dot{width:10px;height:10px;flex:0 0 auto;border-radius:50%;background:#5f94bd;animation:recording-pulse 1s ease-in-out infinite}.next-message-hint{padding:6px 14px;color:#788b9b;font-size:11px;text-align:center}
-.composer{flex:0 0 auto;display:flex;align-items:flex-end;gap:6px;padding:8px 10px max(14px,env(safe-area-inset-bottom));border-top:1px solid rgba(35,65,88,.055);background:rgba(250,252,254,.94);backdrop-filter:blur(22px) saturate(150%)}.composer textarea{min-width:0;min-height:40px;height:40px;max-height:112px;flex:1;padding:9px 13px;overflow-y:auto;resize:none;border:1px solid rgba(44,70,92,.10);border-radius:19px;outline:none;background:#fff;color:#263b4d;line-height:1.48;transition:height .12s ease,border-color .15s ease,box-shadow .15s ease;user-select:text;-webkit-user-select:text}.composer textarea:focus{border-color:rgba(88,146,190,.28);box-shadow:0 0 0 3px rgba(104,164,207,.08)}.image-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.file-picker-label{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}.file-picker-label--disabled{pointer-events:none;opacity:.45}.composer-side-button,.camera-button,.mic-button,.send-button,.stop-button{flex:0 0 auto;height:40px;border:0;border-radius:16px;cursor:pointer}.composer-side-button,.camera-button,.mic-button{width:38px;background:#edf4f9;color:#5b8fb7}.composer-side-button{font-size:24px;font-weight:300}.camera-button{font-size:16px}.mic-button{font-size:16px}.mic-button--active{background:#5f96c0;color:#fff}.send-button,.stop-button{min-width:56px;padding:0 12px;background:#6ea8d2;color:#fff;font-weight:700}.stop-button{background:#71818d}.send-button:disabled,.composer-side-button:disabled,.camera-button:disabled,.mic-button:disabled{opacity:.42}@keyframes recording-pulse{0%,100%{transform:scale(.8);opacity:.55}50%{transform:scale(1.15);opacity:1}}
-@media(max-width:390px){.composer{gap:4px;padding-left:8px;padding-right:8px}.composer-side-button,.camera-button,.mic-button{width:34px}.send-button,.stop-button{min-width:50px;padding:0 8px}.selected-image-detail{align-items:flex-start;flex-direction:column}.selected-image-detail__actions{justify-content:flex-start}}
+.chat-composer{
+  flex:0 0 auto;display:grid;grid-template-columns:minmax(0,1fr);width:100%;gap:7px;padding:8px 10px max(12px,env(safe-area-inset-bottom));
+  border-top:1px solid rgba(35,65,88,.055);background:rgba(250,252,254,.97);
+  backdrop-filter:blur(24px) saturate(155%)
+}
+.composer-editor{min-width:0;padding:0 1px}
+.textarea-resize-grip{display:flex;align-items:center;justify-content:center;height:11px;margin:0 28px -2px;touch-action:none;cursor:ns-resize;user-select:none}
+.textarea-resize-grip span{width:34px;height:3px;border-radius:999px;background:#d5e2ec;transition:background .15s ease}
+.textarea-resize-grip:hover span{background:#aac7dc}
+.chat-composer textarea{
+  box-sizing:border-box;width:100%;min-width:0;min-height:44px;height:44px;max-height:190px;
+  padding:10px 14px;overflow-y:auto;resize:none;border:1px solid rgba(52,84,109,.10);
+  border-radius:18px;outline:none;background:#fff;color:#263b4d;font:inherit;font-size:15px;line-height:1.52;
+  transition:border-color .15s ease,box-shadow .15s ease;user-select:text;-webkit-user-select:text;
+  box-shadow:0 2px 8px rgba(51,82,106,.035)
+}
+.chat-composer textarea:focus{border-color:rgba(88,146,190,.34);box-shadow:0 0 0 3px rgba(104,164,207,.09),0 3px 10px rgba(51,82,106,.045)}
+.composer-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.composer-tools{display:flex;align-items:center;gap:6px;min-width:0}
+.image-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.file-picker-label{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}.file-picker-label--disabled{pointer-events:none;opacity:.45}
+.composer-side-button,.camera-button,.mic-button,.send-button,.stop-button{flex:0 0 auto;height:36px;border:0;border-radius:13px;cursor:pointer}
+.composer-side-button,.camera-button,.mic-button{width:36px;background:#edf4f9;color:#5b8fb7}
+.composer-side-button{font-size:23px;font-weight:300}.camera-button{font-size:15px}.mic-button{font-size:15px}.mic-button--active{background:#5f96c0;color:#fff}
+.send-button,.stop-button{min-width:70px;padding:0 17px;background:#69a6d2;color:#fff;font-weight:750;box-shadow:0 5px 12px rgba(78,137,181,.13)}
+.stop-button{background:#71818d}.send-button:disabled,.composer-side-button:disabled,.camera-button:disabled,.mic-button:disabled{opacity:.42}
+@keyframes recording-pulse{0%,100%{transform:scale(.8);opacity:.55}50%{transform:scale(1.15);opacity:1}}
+@media(max-width:390px){.chat-composer{padding-left:8px;padding-right:8px}.composer-side-button,.camera-button,.mic-button{width:34px}.send-button,.stop-button{min-width:64px;padding:0 13px}.selected-image-detail{align-items:flex-start;flex-direction:column}.selected-image-detail__actions{justify-content:flex-start}}
 </style>

@@ -3,7 +3,8 @@ import type {
   CharacterMemory,
   MemoryLayer,
   MemoryStrength,
-  Message
+  Message,
+  MemoryScope
 } from '../types/domain'
 
 interface MemoryCandidate {
@@ -272,10 +273,27 @@ function similarity(a: string, b: string) {
   return overlap / Math.max(left.size, right.size)
 }
 
+function defaultMemoryScope(layer: MemoryLayer): MemoryScope {
+  return ['fact', 'promise', 'relationship'].includes(layer)
+    ? 'character'
+    : 'conversation'
+}
+
+export function memoryScopeFor(memory: Pick<CharacterMemory, 'scope' | 'layer' | 'category'>): MemoryScope {
+  if (memory.scope) return memory.scope
+  return defaultMemoryScope(memoryLayerFor(memory))
+}
+
+export function isCharacterSharedMemory(memory: CharacterMemory): boolean {
+  return memoryScopeFor(memory) === 'character'
+}
+
 function normalizeMemory(row: CharacterMemory): CharacterMemory {
+  const layer = memoryLayerFor(row)
   return {
     ...row,
-    layer: memoryLayerFor(row),
+    layer,
+    scope: memoryScopeFor({ ...row, layer }),
     confidence: typeof row.confidence === 'number' ? row.confidence : .82,
     locked: Boolean(row.locked),
     status: row.status ?? 'active',
@@ -307,10 +325,7 @@ export async function rememberFromMessageDetailed(options: {
   const candidates = extractMemoryCandidates(options.text, options.strength)
   if (!candidates.length) return { created: [], merged: [], conflicts: [] }
 
-  const existing = (await db.memories
-    .where('conversationId')
-    .equals(options.conversationId)
-    .toArray()).map(normalizeMemory)
+  const existing = await listConversationMemoryContext(options.conversationId, options.characterId)
 
   const created: CharacterMemory[] = []
   const merged: CharacterMemory[] = []
@@ -357,6 +372,7 @@ export async function rememberFromMessageDetailed(options: {
       characterId: options.characterId,
       category: item.category,
       layer: item.layer,
+      scope: defaultMemoryScope(item.layer),
       content: item.content,
       importance: item.importance,
       confidence: item.confidence,
@@ -405,6 +421,48 @@ export async function listMemories(conversationId: string): Promise<CharacterMem
   })
 }
 
+function sortMemories(rows: CharacterMemory[]) {
+  return rows.sort((a, b) => {
+    const statusRank = (value?: CharacterMemory['status']) => value === 'conflict' ? 0 : value === 'active' ? 1 : 2
+    if (statusRank(a.status) !== statusRank(b.status)) return statusRank(a.status) - statusRank(b.status)
+    if (Boolean(a.locked) !== Boolean(b.locked)) return a.locked ? -1 : 1
+    if (a.importance !== b.importance) return b.importance - a.importance
+    return b.updatedAt.localeCompare(a.updatedAt)
+  })
+}
+
+export async function listCharacterSharedMemories(characterId: string): Promise<CharacterMemory[]> {
+  const rows = await db.memories.where('characterId').equals(characterId).toArray()
+  const normalized = rows.map(normalizeMemory).filter(row => isCharacterSharedMemory(row) && row.status !== 'invalid')
+  const seen = new Set<string>()
+  const deduped: CharacterMemory[] = []
+  for (const row of normalized.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))) {
+    const key = normalizeComparable(row.content)
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(row)
+  }
+  return sortMemories(deduped)
+}
+
+/**
+ * Chat sees two memory planes: current conversation memory + stable character memory.
+ * Story/subjective memories stay local unless explicitly promoted to character scope.
+ */
+export async function listConversationMemoryContext(conversationId: string, characterId: string): Promise<CharacterMemory[]> {
+  const [localRows, sharedRows] = await Promise.all([
+    listMemories(conversationId),
+    listCharacterSharedMemories(characterId)
+  ])
+  const byId = new Map<string, CharacterMemory>()
+  for (const row of [...sharedRows, ...localRows]) byId.set(row.id, row)
+  return sortMemories(Array.from(byId.values()))
+}
+
+export async function setMemoryScope(id: string, scope: MemoryScope) {
+  return updateMemory(id, { scope })
+}
+
 export async function addMemory(options: {
   conversationId: string
   characterId: string
@@ -412,6 +470,7 @@ export async function addMemory(options: {
   category?: CharacterMemory['category']
   importance?: CharacterMemory['importance']
   layer?: MemoryLayer
+  scope?: MemoryScope
 }): Promise<CharacterMemory> {
   const content = normalizeContent(options.content)
   if (!content) throw new Error('记忆内容不能为空。')
@@ -425,6 +484,7 @@ export async function addMemory(options: {
     characterId: options.characterId,
     category,
     layer: options.layer ?? (category === 'promise' ? 'promise' : category === 'relationship' ? 'relationship' : category === 'event' ? 'shared' : 'fact'),
+    scope: options.scope ?? defaultMemoryScope(options.layer ?? (category === 'promise' ? 'promise' : category === 'relationship' ? 'relationship' : category === 'event' ? 'shared' : 'fact')),
     content,
     importance: options.importance ?? 3,
     confidence: 1,
@@ -472,6 +532,7 @@ export async function rememberCharacterObservation(options: {
     characterId: options.characterId,
     category: 'relationship',
     layer: 'subjective',
+    scope: 'conversation',
     content,
     importance: options.importance ?? 3,
     confidence: .82,
@@ -573,7 +634,9 @@ export async function removeMemory(id: string) {
 }
 
 export async function clearMemories(conversationId: string) {
-  await db.memories.where('conversationId').equals(conversationId).delete()
+  const rows = await db.memories.where('conversationId').equals(conversationId).toArray()
+  const localIds = rows.map(normalizeMemory).filter(row => row.scope !== 'character').map(row => row.id)
+  if (localIds.length) await db.memories.bulkDelete(localIds)
 }
 
 function tokenizeForMemory(value: string) {

@@ -1,4 +1,5 @@
 import { db } from '../db/database'
+import { memoryScopeFor } from './memoryService'
 import { deleteMomentsByAuthor } from './momentService'
 
 import type {
@@ -234,15 +235,14 @@ export async function deleteCharacterSafely(
             .equals(conversation.id)
             .delete()
 
+          const conversationMemoryRows = await db.memories.where('conversationId').equals(conversation.id).toArray()
+          const localMemoryIds = conversationMemoryRows.filter(row => memoryScopeFor(row) === 'conversation').map(row => row.id)
           await Promise.all([
             db.conversations.delete(conversation.id),
             db.chatSettings.delete(conversation.id),
             db.conversationStates.delete(conversation.id),
             db.musicStates.delete(conversation.id),
-            db.memories
-              .where('conversationId')
-              .equals(conversation.id)
-              .delete()
+            localMemoryIds.length ? db.memories.bulkDelete(localMemoryIds) : Promise.resolve()
           ])
 
           result.deletedMessages +=
@@ -274,15 +274,14 @@ export async function deleteCharacterSafely(
             .equals(conversation.id)
             .delete()
 
+          const conversationMemoryRows = await db.memories.where('conversationId').equals(conversation.id).toArray()
+          const localMemoryIds = conversationMemoryRows.filter(row => memoryScopeFor(row) === 'conversation').map(row => row.id)
           await Promise.all([
             db.conversations.delete(conversation.id),
             db.chatSettings.delete(conversation.id),
             db.conversationStates.delete(conversation.id),
             db.musicStates.delete(conversation.id),
-            db.memories
-              .where('conversationId')
-              .equals(conversation.id)
-              .delete()
+            localMemoryIds.length ? db.memories.bulkDelete(localMemoryIds) : Promise.resolve()
           ])
 
           result.deletedMessages +=

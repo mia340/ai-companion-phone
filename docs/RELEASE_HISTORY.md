@@ -1,3 +1,33 @@
+## V0.5.0-alpha.3.5 · App Icon 与 Memory Ownership
+
+- 首页 App 图标从 Emoji 占位升级为统一 SVG 图标语言，Dock 同步复用。
+- 玩家可进入首页“编辑”模式上传图片替换 App 图标；自定义图标按世界保存，并进入 Backup。
+- IndexedDB 升级到 V16，Backup 升级到 V11；旧备份仍可恢复。
+- 多聊天角色不再让其他 App 随机选择一个聊天作为记忆源。新增 `character / conversation` Memory Scope：稳定事实、承诺、关系事件默认跨聊天共享；共同经历、主观/剧情记忆默认局部。
+- Chat Prompt 改为当前聊天 + 角色共享记忆；朋友圈开始读取角色共享记忆。
+- 重新开局、rewind、branch、删除聊天时保护角色共享记忆，避免跨聊天记忆因某一剧情线被删除。
+
+## V0.5.0-alpha.3.4.1｜聊天输入框布局热修
+
+- 修复聊天输入框因全局 `.composer` 历史样式冲突而被压成竖条。
+- ChatComposer 使用隔离根类 `chat-composer` 与单列全宽布局。
+- DB V15 / Backup V10 不变。
+
+## V0.5.0-alpha.3.4｜全手机视觉统一第二轮
+
+聊天列表、通讯录、设置、角色详情与世界中心统一为淡蓝 / 白色原生手机语言；建立基础视觉 Token，降低卡片感与粉紫残留。不改 DB V15 / Backup V10 / Conversation Runtime。
+
+## V0.5.0-alpha.3.3｜真实手机感与高频交互打磨
+
+## V0.5.0-alpha.3.3.1
+
+朋友圈 guaranteed reply 边界热修：`lively / party` 的 `chance=1` 现在不会因测试随机源返回边界值 1 而冷场；其余行为不变。
+
+
+本版根据实际页面截图集中修 UI/UX：聊天输入框改全宽可扩展；消息编辑从浏览器弹窗迁入 App 内大编辑器；首页和锁屏改成淡蓝乳白壁纸；朋友圈用户发布后默认能收到好友评论/点赞且不再依赖自主发帖开关；海龟汤修动态 placeholder 和底部工具栏；Community UI 不再常驻“脚本已安全阻止”提示。
+
+目标测试矩阵：27 个文件 / 258 个用例。DB V15 / Backup V10 不变。
+
 ## V0.5.0-alpha.3.2.1｜海龟汤 Presentation Policy 引用热修
 
 - `turtleSoupService.ts` 补齐 `NATIVE_APP_TEXT_ONLY_RULE` 与 `sanitizeNativeAppText` 的静态导入。

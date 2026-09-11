@@ -23,7 +23,8 @@ import type {
   ResourceBinding,
   CommunityResourceArchive,
   PromptDebugTrace,
-  World
+  World,
+  AppCustomization
 } from '../types/domain'
 
 import type { ModelSettings } from '../types/modelSettings'
@@ -51,6 +52,7 @@ export class CompanionDatabase extends Dexie {
   conversationStateHistory!: EntityTable<ConversationStateHistory, 'id'>
   momentPosts!: EntityTable<MomentPost, 'id'>
   momentComments!: EntityTable<MomentComment, 'id'>
+  appCustomizations!: EntityTable<AppCustomization, 'id'>
 
   constructor() {
     super('companion-world-v1')
@@ -856,6 +858,11 @@ export class CompanionDatabase extends Dexie {
       promptDebugTraces: 'id, conversationId, characterId, createdAt',
       momentPosts: 'id, worldId, authorType, authorId, conversationId, createdAt, updatedAt',
       momentComments: 'id, worldId, momentId, createdAt'
+    })
+
+    // V16：主屏幕 App 图标个性化。只增加一张表，不改既有索引。
+    this.version(16).stores({
+      appCustomizations: 'id, worldId, appKey, updatedAt'
     })
 
   }
