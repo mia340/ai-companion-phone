@@ -1,3 +1,16 @@
+## V0.5.0-alpha.4.4.1 · 2026-09-13
+
+- 通用归一化社区 Persona 的年龄/身高字段，支持中文与英文常见单位写法。
+- 英文 `user_profile/player_profile` 结构化字段纳入 Persona 内容信号。
+- 移除误进入发布包的本地 `/mnt/data/community_cards` corpus probe 测试。
+- 发布目标：30 files / 277 tests；DB V16 / Backup V11 不变。
+
+## V0.5.0-alpha.4.3.1 · 2026-09-13
+
+- 修复 `creator_notes` 用户 Persona 中年龄后紧跟生日括号时的年龄漏解析。
+- 新增 `npm run verify`，让本地验收与 CI 一样在测试失败时阻断后续发布流程。
+- DB V16 / Backup V11 不变。
+
 ## V0.5.0-alpha.4.3 · 朋友圈评论串 / 多人互动 / creator_notes Persona
 
 - 朋友圈支持点按角色评论继续回复，评论持久化 reply reference，并显示“甲 回复 乙”；AI 被直接回复时会基于自己的上一条评论继续接话。

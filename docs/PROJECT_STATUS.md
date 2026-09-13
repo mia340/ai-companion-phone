@@ -3,7 +3,7 @@
 ## 当前版本
 
 ```text
-开发线：V0.5.0-alpha.4.3
+开发线：V0.5.0-alpha.4.4.1
 IndexedDB：V16（主屏幕图标与外观个性化）
 Backup：V11（含朋友圈动态、评论与 App 外观个性化）
 原始审查基线：用户上传 V0.4.7.1
@@ -11,6 +11,23 @@ Backup：V11（含朋友圈动态、评论与 App 外观个性化）
 ```
 
 
+
+## V0.5.0-alpha.4.4.1 当前状态
+
+alpha.4.4 的 Windows `npm run verify` 暴露两个问题：社区对象 Persona 的年龄值已识别但未去除 `岁/years old` 单位；同时开发期语料探针被误打进正式 Vitest，硬编码容器路径导致 Windows `ENOENT`。本热修把字段归一化做成通用中英规则，并从发布测试中移除本地探针。
+
+- 发布目标：**30 test files / 277 tests**。
+- 用户社区语料独立审计：49 JSON → 32 角色卡可解析，17 世界书/预设按类型拒绝；17 张角色卡检测到独立用户 Persona。
+- IndexedDB **V16** / Backup **V11** 不变。
+
+## V0.5.0-alpha.4.3.1 当前状态
+
+本轮是 alpha.4.3 的 CI 热修。Windows 与 GitHub Actions 都证明功能代码可以 Build，但 275 个测试中有 1 个失败：`creator_notes` Persona 的 `23岁(生日...)` 未提取年龄。现已扩展年龄字段边界识别，并增加 `npm run verify` 作为“一次命令完成测试 + 构建”的本地发布门禁。
+
+- 目标：**30 test files / 275 tests 全绿**。
+- `npm run build` 在 alpha.4.3 已由用户 Windows 实测成功；当前唯一已知发布阻塞是上述测试。
+- IndexedDB **V16** / Backup **V11** 不变。
+- GitHub Pages workflow 无需改动：测试失败会自然阻断 Build/Deploy。
 
 ## V0.5.0-alpha.4.3 当前状态
 

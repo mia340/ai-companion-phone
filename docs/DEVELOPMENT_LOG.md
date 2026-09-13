@@ -1,3 +1,39 @@
+## 2026-09-13 · V0.5.0-alpha.4.4.1｜社区 Persona 归一化 + 发布探针清理
+
+### Windows 实测暴露的问题
+
+- `characterCardImportService.test.ts` 的通用社区对象样本中，`player_profile.年龄 = "29岁"` 已被正确识别为 Persona，但结构化 `age` 保留了单位，测试契约要求统一为 `"29"`。
+- alpha.4.4 还误打包了开发期 `__communityCorpusProbe.test.ts`。该文件只用于容器里扫描 `/mnt/data/community_cards`，不属于产品测试，因此在 Windows 上必然报 `ENOENT`。
+
+### 通用修复
+
+- 新增社区 Persona 年龄/身高归一化：同时处理中文 `29岁`、`23岁（生日…）` 与英文 `31 years old`，以及 `172 cm`。
+- `looksLikePersonaTemplateContent()` 增加英文结构化字段识别（name/age/gender/height/occupation/...），使 `user_profile/player_profile` 的英文对象也走同一语义兼容层。
+- 本地 corpus probe 从正式测试目录删除；真实社区语料审计在发布前单独运行，不再依赖用户机器存在容器路径。
+- 独立运行 49 份用户社区 JSON：32 份为角色卡并成功解析，17 份世界书/预设按资源类型拒绝；其中 17 份角色卡识别到独立用户 Persona。
+
+### 数据兼容
+
+- IndexedDB V16 / Backup V11 不变；无迁移。
+
+## 2026-09-13 · V0.5.0-alpha.4.3.1｜CI Persona 年龄解析热修
+
+### 真实问题
+
+- Windows 本地 `npm test` 与 GitHub Actions 同时复现唯一失败：`characterCardImportService.test.ts` 期望 creator_notes Persona 的 `age === '23'`，实际为 `undefined`。
+- 同一轮 `npm run build` 能成功并不能代表版本可发布：Windows PowerShell 会继续执行后续命令；GitHub Actions 的独立 `Run tests` step 则会在测试退出码 1 时直接阻断部署。
+
+### 根因与修复
+
+- Persona 文本为 `姜阮,女,23岁(生日12月3日),168cm,...`。
+- `parseEmbeddedUserPersonaTemplate()` 的年龄兜底正则此前只允许“岁”后接标点/空白/文本结束，没有接受 `(` / `（` / `【` / `[` 作为字段边界，因此姓名、性别、身高可识别，年龄漏掉。
+- 正则改为零宽 lookahead，接受常规分隔符和中英文左括号，同时不吞掉括号中的生日补充信息。
+- 增加 `npm run verify = npm test && npm run build` 作为本地发布门禁。
+
+### 数据兼容
+
+- IndexedDB V16 / Backup V11 不变；无迁移、无清库要求。
+
 ## 2026-09-13 · V0.5.0-alpha.4.3｜朋友圈评论串 + 主控 Persona 导入修复
 
 ### 真实问题
@@ -465,3 +501,7 @@ StoryPhone 一类项目允许更强 HTML 互动，而我们的安全边界是不
 - 不复制它们的角色设定、提示词或私有内容；
 - 不因为别人执行第三方 JS 就放开我们的未知脚本安全边界；
 - 不因为参考项目有某个 App，就假装本项目已经实现。
+
+## 2026-09-13 · V0.5.0-alpha.4.4 社区 Persona 泛化
+
+用户明确要求不能针对某一张卡做特殊修补。本轮以用户提供的社区资源包作为兼容语料审计，49 份可读取 JSON 中观察到多种用户 Persona 表达：世界书 `user人设/user设定/user基本情况`、creator_notes `[用户设定]/[我的设定]`、HTML 人物档案、对象型 `user_profile/player_profile`，以及应排除的 `user_personal_room`、`user人设自拟`。因此实现改为语义标签 + Persona 内容信号 + 误判排除三层策略，不包含特定角色名/用户名硬编码。

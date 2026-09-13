@@ -192,6 +192,78 @@ it('识别 creator_notes 中明确标注的用户设定块，并继续保持 cre
   expect(result.notes.some(note => note.includes('creator_notes 只在原卡阅读器展示'))).toBe(true)
 })
 
+
+it('兼容社区常见用户 Persona 标签与字段，而不是针对单一卡片姓名', () => {
+  const creatorNotesInline = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    data: {
+      name: '社区卡A',
+      description: '{{char}}会与{{user}}相识。',
+      creator_notes: '作者说明：请自行调整 UI。 请注意 [我的设定]林夏,24岁,女,165cm,记者,性格独立。'
+    }
+  }))
+  expect(creatorNotesInline.embeddedUser?.patch.name).toBe('林夏')
+  expect(creatorNotesInline.embeddedUser?.patch.age).toBe('24')
+  expect(creatorNotesInline.embeddedUser?.patch.height).toBe('165cm')
+
+  const worldBookVariant = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    data: {
+      name: '社区卡B',
+      description: '角色说明',
+      character_book: {
+        entries: [
+          { id: 1, name: '玩家人设（自行粘贴）', content: '周宁,女,26岁（生日5月1日）,170cm,医生。', enabled: true }
+        ]
+      }
+    }
+  }))
+  expect(worldBookVariant.embeddedUser?.patch.name).toBe('周宁')
+  expect(worldBookVariant.embeddedUser?.patch.age).toBe('26')
+
+  const communityField = parseCharacterCardJson(JSON.stringify({
+    name: '社区卡C',
+    description: '角色说明',
+    player_profile: {
+      姓名: 'Alex',
+      年龄: '29岁',
+      性别: '男',
+      身高: '181cm',
+      职业: '摄影师'
+    }
+  }))
+  expect(communityField.embeddedUser?.patch.name).toBe('Alex')
+  expect(communityField.embeddedUser?.patch.age).toBe('29')
+  expect(communityField.embeddedUser?.patch.height).toBe('181cm')
+
+  const englishCommunityField = parseCharacterCardJson(JSON.stringify({
+    name: 'Community Card D',
+    description: 'Character description',
+    user_profile: {
+      name: 'Casey',
+      age: '31 years old',
+      gender: 'female',
+      height: '172 cm',
+      occupation: 'designer'
+    }
+  }))
+  expect(englishCommunityField.embeddedUser?.patch.name).toBe('Casey')
+  expect(englishCommunityField.embeddedUser?.patch.age).toBe('31')
+  expect(englishCommunityField.embeddedUser?.patch.height).toBe('172cm')
+})
+
+it('“user 人设自拟/请填写用户设定”只有提示词时不会伪造 Persona', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    data: {
+      name: '自拟用户卡',
+      description: '{{char}}会与{{user}}互动。',
+      creator_notes: 'user人设自拟，推荐医生、记者、运动康复员等职业；请填写用户设定后再开始。'
+    }
+  }))
+  expect(result.embeddedUser).toBeUndefined()
+})
+
 it('不会把普通 creator_notes 作者说明误识别成 Persona', () => {
   const result = parseCharacterCardJson(JSON.stringify({
     spec: 'chara_card_v2',

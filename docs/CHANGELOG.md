@@ -1,3 +1,19 @@
+## V0.5.0-alpha.4.4.1 · 社区 Persona 兼容回归 Hotfix
+
+- 修复对象型社区 Persona 字段的结构化值归一化：`age: "29岁"`、`age: "31 years old"` 统一保存为纯年龄数字，`height: "172 cm"` 统一为 `172cm`。
+- 年龄解析不再围绕某一张角色卡；新增中英文字段/单位的通用归一化，并继续保留 `23岁(生日...)` 等自由文本兼容。
+- 修复 alpha.4.4 打包时误把本地语料审计探针 `__communityCorpusProbe.test.ts` 带入正式测试集，导致 Windows/GitHub 上硬编码 `/mnt/data/community_cards` 路径而失败。该探针现已从发布源码移除。
+- 用用户提供的 49 份社区 JSON 做独立语料运行：32 份被识别为角色卡，17 份被正确拒绝为世界书/预设；32 份角色卡中 17 份检测到独立用户 Persona。
+- 发布测试目标恢复为 **30 个测试文件 / 277 个用例**；IndexedDB **V16** / Backup **V11** 不变。
+
+## V0.5.0-alpha.4.3.1 · creator_notes 年龄解析 CI Hotfix
+
+- 修复角色卡 `creator_notes` Persona 在 `23岁(生日12月3日)` / `23岁（生日…）` 这类“年龄后紧跟括号补充信息”格式下，年龄字段解析为 `undefined` 的问题。
+- 根因是年龄兜底正则要求“岁”后必须立刻出现逗号、句号、空白或文本结束，未把中英文左括号视为合法字段边界。
+- 保留 alpha.4.3 的朋友圈评论串、多角色热度与 creator_notes Persona 识别逻辑；IndexedDB **V16** / Backup **V11** 均不变。
+- 新增 `npm run verify`，按 `npm test && npm run build` 串行验证，避免 Windows PowerShell 在测试失败后仍继续执行 Build 造成“Build 绿但整体验收其实失败”的误判。
+- 目标回归矩阵仍为 **30 个测试文件 / 275 个用例**；本热修应使失败的 `creator_notes` Persona 测试恢复通过。
+
 ## V0.5.0-alpha.4.3 · 朋友圈评论串 + creator_notes 用户 Persona 修复
 
 - 朋友圈从“平铺评论 + 仅动态作者回评”升级为可继续对话的评论串：点按角色评论即可回复，保存 `replyToCommentId`，展示“甲 回复 乙：……”；角色收到直接回复后会结合自己上一条评论继续接话，而不是重新评论整条动态。
@@ -349,3 +365,11 @@
 - 聊天组件化。
 
 更早和更细的说明见 `RELEASE_HISTORY.md`。
+
+## V0.5.0-alpha.4.4
+
+- 将内嵌用户 Persona 导入升级为社区格式兼容识别，不再针对单张角色卡或单个姓名。
+- 扩展 creator_notes / 世界书 / 社区 JSON 字段中的用户 Persona 语义标签。
+- 支持同行 `[我的设定]...`、玩家/主控/自机标签及 `player_profile` 等对象字段。
+- 保留 `user_personal_room` 等非 Persona 资源排除，并避免把“user 人设自拟”提示伪造成 Persona。
+- 增加社区泛化与误判保护回归测试。

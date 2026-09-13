@@ -157,10 +157,10 @@ function stripUserMarker(value: string) {
 function personaSignalCount(value: string) {
   const head = value.slice(0, 320)
   const signals = [
-    /(?:^|[,，。；;\s])(男|女)(?:[,，。；;\s]|$)/,
-    /\d{1,3}\s*岁/,
+    /(?:^|[,，。；;\s])(男|女|male|female|man|woman|non[- ]?binary)(?:[,，。；;\s]|$)/i,
+    /\d{1,3}\s*(?:岁|years?(?:\s*old)?|yrs?(?:\s*old)?|y\/?o)/i,
     /\d{2,3}(?:\.\d+)?\s*(?:cm|厘米)/i,
-    /(?:学生|新生|研究生|本科生|徒弟|弟子|剑修|杀手|记者|幼师|插画师|演员|导演|助理|医生|教师|律师|老板|店主|妻子|丈夫|老公|老婆|继承人|军人|警察|女将|将军|修士|少爷|小姐|职业|身份|家庭|学校|住校|寝室)/
+    /(?:学生|新生|研究生|本科生|徒弟|弟子|剑修|杀手|记者|幼师|插画师|演员|导演|助理|医生|教师|律师|老板|店主|妻子|丈夫|老公|老婆|继承人|军人|警察|女将|将军|修士|少爷|小姐|职业|身份|家庭|学校|住校|寝室|student|doctor|teacher|lawyer|designer|artist|writer|engineer|photographer|occupation|profession|identity)/i
   ]
   return signals.filter(pattern => pattern.test(head)).length
 }
@@ -176,7 +176,7 @@ function looksLikeDirectPersonaLine(value: string) {
 function looksLikePersonaTemplateContent(value: string) {
   const readable = stripPersonaMarkup(value)
   if (looksLikeNaturalPersona(readable)) return true
-  return /(?:^|\n)\s*(?:[-*•·]\s*)?(?:姓名|名字|年龄|性别|生日|身高|职业|工作|身份|外貌|性格|背景|经历|爱好|兴趣|习惯|边界)\s*[:：]/u.test(readable)
+  return /(?:^|\n)\s*(?:[-*•·]\s*)?(?:姓名|名字|年龄|性别|生日|身高|职业|工作|身份|外貌|性格|背景|经历|爱好|兴趣|习惯|边界|name|age|gender|sex|birthday|height|occupation|profession|job|identity|appearance|personality|background|history|relationship|interests?|hobbies|habits|boundaries)\s*[:：]/iu.test(readable)
 }
 
 function looksLikePersonaNameToken(value: string) {
@@ -282,6 +282,27 @@ export function extractEmbeddedUserTemplate(sourceText: string): string {
   return candidates.sort((a, b) => b.score - a.score)[0]?.raw || ''
 }
 
+function normalizePersonaAgeValue(value: string | undefined) {
+  const raw = (value || '').trim()
+  if (!raw) return ''
+  const simple = raw.match(/^(?:(?:年龄|age)\s*[:：]?\s*)?(\d{1,3})(?:\s*(?:岁|years?(?:\s*old)?|yrs?(?:\s*old)?|y\/?o))?(?:\s*[（(][^）)]{0,80}[）)])?$/iu)
+  return simple?.[1] || raw
+}
+
+function normalizePersonaHeightValue(value: string | undefined) {
+  const raw = (value || '').trim()
+  if (!raw) return ''
+  const simple = raw.match(/^(?:(?:身高|height)\s*[:：]?\s*)?(\d{2,3}(?:\.\d+)?)\s*(cm|厘米)$/iu)
+  if (!simple) return raw
+  return `${simple[1]}${simple[2].toLowerCase() === 'cm' ? 'cm' : '厘米'}`
+}
+
+function inferPersonaAgeFromText(value: string) {
+  const labeled = value.match(/(?:^|[,，。；;.\s])(?:年龄|age)\s*[:：]?\s*(\d{1,3})(?:\s*(?:岁|years?(?:\s*old)?|yrs?(?:\s*old)?|y\/?o))?/iu)?.[1]
+  if (labeled) return labeled
+  return value.match(/(?:^|[,，。；;.\s])(\d{1,3})\s*(?:岁|years?(?:\s*old)?|yrs?(?:\s*old)?|y\/?o)(?=[,，。；;.\s（(【\[]|$)/iu)?.[1] || ''
+}
+
 export function parseEmbeddedUserPersonaTemplate(rawTemplate: string, characterName = '角色'): (ImportedPersonaPreview & { rawTemplate: string }) | undefined {
   const cleanTemplate = rawTemplate.trim()
   if (!cleanTemplate) return undefined
@@ -297,16 +318,18 @@ export function parseEmbeddedUserPersonaTemplate(rawTemplate: string, characterN
     preview.patch.name = fallbackName
   }
 
+  preview.patch.age = normalizePersonaAgeValue(preview.patch.age) || undefined
   if (!preview.patch.age) {
-    const age = readablePersonaText.match(/(?:^|[,，。；;.\s])(?:年龄\s*[:：]\s*)?(\d{1,3})\s*岁(?:[,，。；;.\s]|$)/u)?.[1]
+    const age = inferPersonaAgeFromText(readablePersonaText)
     if (age) preview.patch.age = age
   }
   if (!preview.patch.gender) {
     const gender = readablePersonaText.match(/(?:^|[,，。；;\s])(?:性别\s*[:：]\s*)?(男|女)(?:[,，。；;\s]|$)/u)?.[1]
     if (gender) preview.patch.gender = gender
   }
+  preview.patch.height = normalizePersonaHeightValue(preview.patch.height) || undefined
   if (!preview.patch.height) {
-    const height = readablePersonaText.match(/(?:^|[,，。；;.\s])(?:身高\s*[:：]\s*)?(\d{2,3}(?:\.\d+)?)\s*(cm|厘米)(?:[,，。；;.\s]|$)/iu)
+    const height = readablePersonaText.match(/(?:^|[,，。；;.\s])(?:(?:身高|height)\s*[:：]?\s*)?(\d{2,3}(?:\.\d+)?)\s*(cm|厘米)(?:[,，。；;.\s]|$)/iu)
     if (height) preview.patch.height = `${height[1]}${height[2].toLowerCase() === 'cm' ? 'cm' : '厘米'}`
   }
 
@@ -342,29 +365,50 @@ export function buildEmbeddedUserPreview(sourceText: string, characterName = '�
  * creator_notes 仍然不会整体进入模型 Prompt；这里仅把明确标注的用户设定块
  * 当作导入元数据解析成角色专属 Persona，避免把作者说明误当用户事实。
  */
+/**
+ * 从作者备注、描述等社区自由文本里提取“明确标注”的用户 Persona 区块。
+ *
+ * 社区卡没有统一格式：标签可能独占一行，也可能写成
+ * “说明文字…… [我的设定]张三,25岁……”；因此这里按语义标签而不是
+ * 针对某一张卡/某个姓名做匹配。只有区块本身具备 Persona 信号时才接受，
+ * 以免把“user 人设自拟”“请填写用户设定”等作者提示误当真实 Persona。
+ */
 export function extractLabeledUserPersonaBlock(sourceText: string): string {
-  const lines = sourceText.replace(/\r/g, '').split('\n')
-  const headerPattern = /^\s*\[(?:用户设定|用户人设|用户角色卡|主控设定|主控人设|user设定|user人设|user persona|user profile)(?:[^\]]*)\]\s*(.*)$/iu
-  const sectionPattern = /^\s*\[[^\]]+\]\s*$/u
+  const normalized = sourceText.replace(/\r/g, '')
+  if (!normalized.trim()) return ''
+
+  const bracketHeader = /\[(?:用户设定|用户人设|用户角色卡|用户档案|用户资料|用户基本情况|用户基本信息|玩家设定|玩家人设|玩家角色|玩家档案|主控设定|主控人设|主角设定|主角人设|我的设定|自机设定|自设|user\s*(?:设定|人设|persona|profile|character|settings?)|player\s*(?:persona|profile|character|settings?))[^\]]*\]/giu
+  const matches = Array.from(normalized.matchAll(bracketHeader))
+
+  for (const match of matches) {
+    const start = (match.index ?? 0) + match[0].length
+    const remainder = normalized.slice(start)
+    const nextBracket = remainder.search(/\n?\s*\[[^\]\n]{1,120}\]/u)
+    const end = nextBracket >= 0 ? start + nextBracket : normalized.length
+    const content = normalized.slice(start, end).trim()
+    if (content && looksLikePersonaTemplateContent(content)) return content
+  }
+
+  const lines = normalized.split('\n')
+  const headingPattern = /^\s*(?:#{1,6}\s*|[-*•·]\s*)?(用户设定|用户人设|用户角色卡|用户档案|用户资料|用户基本情况|用户基本信息|玩家设定|玩家人设|玩家角色|玩家档案|主控设定|主控人设|主角设定|主角人设|我的设定|自机设定|自设|user\s*(?:设定|人设|persona|profile|character|settings?)|player\s*(?:persona|profile|character|settings?))\s*(?:[:：=-]\s*)?(.*)$/iu
+  const genericHeading = /^\s*(?:#{1,6}\s*)?[^\n:：]{1,40}\s*[:：]?\s*$/u
 
   for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index]?.match(headerPattern)
+    const match = lines[index]?.match(headingPattern)
     if (!match) continue
 
     const collected: string[] = []
-    if (match[1]?.trim()) collected.push(match[1].trim())
+    if (match[2]?.trim()) collected.push(match[2].trim())
 
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
       const line = lines[cursor] ?? ''
       const trimmed = line.trim()
-      if (trimmed && sectionPattern.test(trimmed)) break
+      if (trimmed && genericHeading.test(trimmed) && !looksLikePersonaTemplateContent(trimmed)) break
       collected.push(line)
     }
 
     const content = collected.join('\n').trim()
-    if (content && looksLikePersonaTemplateContent(content)) {
-      return content
-    }
+    if (content && looksLikePersonaTemplateContent(content)) return content
   }
 
   return ''
@@ -392,9 +436,9 @@ function userPersonaEntryScore(entry: Record<string, unknown>): number {
   if (/(?:personalroom|房间|住址|住所|居住|座驾|车辆|出行|衣橱|穿搭|单位|公司|npc|联系人|手机|相册|日记)/i.test(compactLabel)) return -100
 
   let score = 0
-  if (/^(?:user|用户|\{\{user\}\})(?:人设|设定|persona|profile|人物设定|人物档案|基本情况|基本信息|档案)$/i.test(compactLabel)) score += 130
-  if (/(?:user人设|用户人设|userpersona(?![a-z])|user设定|用户设定|user人物设定|用户人物设定|user基本情况|用户基本情况|user基本信息|用户基本信息|用户档案|\{\{user\}\}人设)/i.test(compactLabel)) score += 110
-  if (/(?:user人设辅助|用户人设辅助|userprofile(?![a-z])|关于user$|关于用户$)/i.test(compactLabel)) score += 85
+  if (/^(?:user|用户|玩家|主控|主角|自机|\{\{user\}\})(?:人设|设定|persona|profile|人物设定|人物档案|基本情况|基本信息|档案|资料)$/i.test(compactLabel)) score += 130
+  if (/(?:user人设|用户人设|玩家人设|主控人设|主角人设|自机人设|userpersona(?![a-z])|user设定|用户设定|玩家设定|主控设定|主角设定|自机设定|user人物设定|用户人物设定|user基本情况|用户基本情况|user基本信息|用户基本信息|用户档案|用户资料|我的设定|\{\{user\}\}人设)/i.test(compactLabel)) score += 110
+  if (/(?:user人设辅助|用户人设辅助|userprofile(?![a-z])|playerprofile(?![a-z])|关于user$|关于用户$|关于玩家$)/i.test(compactLabel)) score += 85
   if (/^\s*\{\{user\}\}/i.test(content)) score += 35
   if (/^\s*(?:\[(?:用户|user)\]\s*)?\{\{user\}\}\s*(?:\[(?:用户|user)\]\s*)?(?:我(?:是|叫|名为)|是|姓名\s*[:：])/i.test(content)) score += 45
   if (looksLikeNaturalPersona(stripPersonaMarkup(content))) score += 25
@@ -443,6 +487,48 @@ function buildEmbeddedUserPreviewFromExtensions(extensions: Record<string, unkno
     }
   }
   return undefined
+}
+
+
+function communityUserPersonaKeyScore(key: string) {
+  const normalized = key.toLowerCase().replace(/[\s_\-<>/\\]+/g, '')
+  if (!normalized) return -100
+  if (/(?:personalroom|房间|住址|住所|座驾|车辆|衣橱|穿搭|头像|avatar|手机|相册|日记|联系人|npc)/i.test(normalized)) return -100
+  if (/^(?:userpersona|userprofile|usersetting|usersettings|playerpersona|playerprofile|playersetting|playersettings|用户人设|用户设定|用户角色卡|用户档案|用户资料|用户基本情况|用户基本信息|玩家人设|玩家设定|玩家档案|主控人设|主控设定|主角人设|主角设定|我的设定|自机人设|自机设定|自设)$/i.test(normalized)) return 140
+  if (/(?:userpersona|userprofile|用户人设|用户设定|玩家人设|玩家设定|主控人设|主控设定|主角人设|主角设定|自机人设|自机设定)/i.test(normalized)) return 110
+  return -100
+}
+
+function buildEmbeddedUserPreviewFromCommunityObject(value: unknown, characterName: string) {
+  const visited = new Set<object>()
+  const candidates: Array<{ raw: string; score: number }> = []
+
+  const visit = (node: unknown, depth = 0) => {
+    if (!node || depth > 4) return
+    if (Array.isArray(node)) {
+      node.slice(0, 100).forEach(item => visit(item, depth + 1))
+      return
+    }
+    if (typeof node !== 'object') return
+    if (visited.has(node as object)) return
+    visited.add(node as object)
+
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+      const keyScore = communityUserPersonaKeyScore(key)
+      if (keyScore > 0) {
+        const raw = objectPersonaTemplate(child)
+        const readable = stripPersonaMarkup(raw)
+        if (raw && looksLikePersonaTemplateContent(readable)) {
+          candidates.push({ raw, score: keyScore + Math.min(40, personaSignalCount(readable) * 10) })
+        }
+      }
+      if (depth < 4 && child && typeof child === 'object') visit(child, depth + 1)
+    }
+  }
+
+  visit(value)
+  const raw = candidates.sort((a, b) => b.score - a.score)[0]?.raw || ''
+  return parseEmbeddedUserPersonaTemplate(raw, characterName)
 }
 
 
@@ -663,10 +749,14 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   const characterName = asText(data.name) || '角色'
   const embeddedUserSources = [
     { label: '角色扩展 user Persona', preview: buildEmbeddedUserPreviewFromExtensions([rootExtensions, extensions], characterName) },
+    { label: '社区字段 user Persona', preview: buildEmbeddedUserPreviewFromCommunityObject(record, characterName) },
     { label: '内嵌世界书 user 人设条目', preview: buildEmbeddedUserPreviewFromCharacterBook(data.character_book, characterName) },
     { label: 'creator_notes 用户设定块', preview: buildEmbeddedUserPreviewFromCreatorNotes(asText(data.creator_notes), characterName) },
     { label: '角色 description', preview: buildEmbeddedUserPreview(description, characterName) },
-    { label: '角色 scenario', preview: buildEmbeddedUserPreview(asText(data.scenario), characterName) }
+    { label: '角色 personality', preview: buildEmbeddedUserPreview(personality, characterName) },
+    { label: '角色 scenario', preview: buildEmbeddedUserPreview(asText(data.scenario), characterName) },
+    { label: 'system_prompt', preview: buildEmbeddedUserPreview(asText(data.system_prompt), characterName) },
+    { label: 'post_history_instructions', preview: buildEmbeddedUserPreview(asText(data.post_history_instructions), characterName) }
   ]
   const embeddedUserCandidate = embeddedUserSources.find(item => Boolean(item.preview))
   const embeddedUser = embeddedUserCandidate?.preview
