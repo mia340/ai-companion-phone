@@ -116,16 +116,16 @@ describe('planReplyCount', () => {
     expect(planReplyCount('party', 0, () => 0)).toBe(0)
   })
 
-  it('默认 lively 与 party 保证至少一位好友回应', () => {
-    expect(planReplyCount('lively', 6, () => 1)).toBe(1)
-    expect(planReplyCount('party', 6, () => 1)).toBe(1)
+  it('默认 lively 与 party 直接体现多人社交最低人数', () => {
+    expect(planReplyCount('lively', 6, () => 1)).toBe(2)
+    expect(planReplyCount('party', 6, () => 1)).toBe(3)
   })
 
   it('rand 恒 0（都往好里掷）时按档位冲到上限', () => {
     expect(planReplyCount('quiet', 6, () => 0)).toBe(1)
     expect(planReplyCount('mild', 6, () => 0)).toBe(2)
-    expect(planReplyCount('lively', 6, () => 0)).toBe(2)
-    expect(planReplyCount('party', 6, () => 0)).toBe(3)
+    expect(planReplyCount('lively', 6, () => 0)).toBe(3)
+    expect(planReplyCount('party', 6, () => 0)).toBe(5)
   })
 
   it('人数不能超过候选数', () => {

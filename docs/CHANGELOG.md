@@ -1,3 +1,13 @@
+## V0.5.0-alpha.4.3 · 朋友圈评论串 + creator_notes 用户 Persona 修复
+
+- 朋友圈从“平铺评论 + 仅动态作者回评”升级为可继续对话的评论串：点按角色评论即可回复，保存 `replyToCommentId`，展示“甲 回复 乙：……”；角色收到直接回复后会结合自己上一条评论继续接话，而不是重新评论整条动态。
+- 用户动态的默认 `lively` 回复热度从“通常 1 位、偶尔 2 位”调整为**通常 2～3 位不同角色**；`party` 为 3～5 位，候选角色不足时自动以实际人数为上限。
+- Character Card 导入兼容新增 `creator_notes` 明确用户设定块识别，支持 `[用户设定(...)]` / `[用户人设]` / `[主控人设]` 等标签；仅提取该明确块作为角色专属 Persona 元数据，**creator_notes 全文仍不会直接进入模型 Prompt**。
+- 现有已导入角色也可在原卡编辑器中从保存的 `creatorNotes` 恢复该 Persona 预览并“创建并绑定角色专属 Persona”，无需删除旧聊天。
+- 针对“褚焚川 / 姜阮”这类 `creator_notes` 实样新增回归测试，并增加朋友圈 comment-thread Prompt 测试与多人热度边界测试；静态测试定义为 **30 个测试文件 / 275 个用例**。
+- IndexedDB **V16** / Backup **V11** 不变；`MomentComment.replyToCommentId` 为非索引可选字段，无需数据库迁移。
+- 当前容器完成改动 TypeScript / Vue script 语法检查；由于离线依赖缓存不完整，完整 `npm test` / `npm run build` 仍需 Windows 验收。
+
 ## V0.5.0-alpha.4.2.1 · Windows Build Hotfix
 
 - 修复 `src/views/HomeScreen.vue` 长按计时器类型冲突：将 `ReturnType<typeof window.setTimeout> | undefined` 收敛为浏览器语义明确的 `number | undefined`。

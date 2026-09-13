@@ -756,6 +756,8 @@ export interface MomentComment {
   momentId: UUID
   authorType: MomentAuthorType
   authorId: UUID | 'user'
+  /** 可选：回复哪一条评论。字段不参与 Dexie 索引，因此旧库 V16 可直接兼容。 */
+  replyToCommentId?: UUID
   content: string
   source: MomentSource
   createdAt: string

@@ -45,8 +45,8 @@ import {
 } from '../services/momentAutoActivityService'
 import type { MomentReplyHeat } from '../services/momentAutoActivityService'
 
-import type { MomentFeedItem } from '../services/momentService'
-import type { Character, MomentPost, MomentPostImage } from '../types/domain'
+import type { MomentCommentItem, MomentFeedItem } from '../services/momentService'
+import type { Character, MomentComment, MomentPost, MomentPostImage } from '../types/domain'
 
 type ComposerMode = 'none' | 'mine' | 'character'
 
@@ -106,8 +106,17 @@ const likingIds = ref<Set<string>>(new Set())
 // 评论相关：每条动态只开一个输入框，草稿按 momentId 存
 const openCommentId = ref<string | null>(null)
 const commentDrafts = ref<Record<string, string>>({})
+const replyTarget = ref<{
+  momentId: string
+  commentId: string
+  authorType: 'character' | 'user'
+  authorId: string
+  authorName: string
+  content: string
+} | null>(null)
 const replyingMomentId = ref<string | null>(null)
 const replyingCharacterName = ref('')
+const replyingCharacterAvatar = ref('🙂')
 
 const noticeText = ref('')
 const noticeKind = ref<'ok' | 'warn' | 'error'>('ok')
@@ -241,11 +250,11 @@ function scheduleReactionsTo(post: MomentPost) {
   const authors = rollReactionAuthors()
   if (!authors.length) return
 
-  // 第一位约 2.5~6 秒后到；若再来一位，再晚约 8~14 秒。
+  // 第一位约 2.5~6 秒后到；后续好友错峰出现，评论区更像真实多人互动。
   let delayMs = 2500 + Math.floor(Math.random() * 3500)
   for (const author of authors) {
     scheduleOneReaction(author, post, delayMs)
-    delayMs += 8000 + Math.floor(Math.random() * 6000)
+    delayMs += 4500 + Math.floor(Math.random() * 3500)
   }
 }
 
@@ -372,7 +381,38 @@ async function onToggleLike(item: MomentFeedItem) {
 }
 
 function toggleCommentBox(item: MomentFeedItem) {
-  openCommentId.value = openCommentId.value === item.post.id ? null : item.post.id
+  if (openCommentId.value === item.post.id) {
+    openCommentId.value = null
+    replyTarget.value = null
+    return
+  }
+  openCommentId.value = item.post.id
+  replyTarget.value = null
+}
+
+function beginCommentReply(item: MomentFeedItem, entry: MomentCommentItem) {
+  // 当前只有一个真实用户身份；点自己的评论不进入“回复自己”。
+  if (entry.author.type === 'user') return
+  openCommentId.value = item.post.id
+  replyTarget.value = {
+    momentId: item.post.id,
+    commentId: entry.comment.id,
+    authorType: entry.author.type,
+    authorId: entry.author.id,
+    authorName: entry.author.name,
+    content: entry.comment.content
+  }
+}
+
+function cancelCommentReply() {
+  replyTarget.value = null
+}
+
+function commentPlaceholder(item: MomentFeedItem) {
+  const target = replyTarget.value
+  return target?.momentId === item.post.id
+    ? `回复 ${target.authorName}…`
+    : `评论 ${item.author.name}…`
 }
 
 function commentDraftOf(item: MomentFeedItem) {
@@ -392,12 +432,18 @@ async function submitComment(item: MomentFeedItem) {
     return
   }
 
+  const target = replyTarget.value?.momentId === item.post.id
+    ? { ...replyTarget.value }
+    : null
+
+  let sentComment: MomentComment | undefined
   try {
-    await addMomentComment({
+    sentComment = await addMomentComment({
       momentId: item.post.id,
       worldId: item.post.worldId,
       authorType: 'user',
       authorId: 'user',
+      replyToCommentId: target?.commentId,
       content,
       source: 'manual'
     })
@@ -408,40 +454,50 @@ async function submitComment(item: MomentFeedItem) {
 
   setCommentDraft(item, '')
   openCommentId.value = null
+  replyTarget.value = null
 
-  // 动态作者是角色时，让 TA 用 AI 回你一条；作者是自己时无需回评。
-  if (item.post.authorType !== 'character') {
-    showNotice('评论已发送。', 'ok')
+  // 回复某位角色的评论时，由被回复的角色继续接话；
+  // 普通评论角色动态时，则由动态作者回复。
+  if (!sentComment) return
+
+  const responderId = target?.authorType === 'character'
+    ? target.authorId
+    : item.post.authorType === 'character'
+      ? item.post.authorId
+      : undefined
+
+  if (!responderId || responderId === 'user') {
+    showNotice(target ? `已回复 ${target.authorName}。` : '评论已发送。', 'ok')
     return
   }
 
-  const authorId = item.post.authorId
-  if (typeof authorId !== 'string' || authorId === 'user') {
-    return
-  }
-
-  const character = await db.characters.get(authorId)
+  const character = await db.characters.get(responderId)
   if (!character) return
 
   replyingMomentId.value = item.post.id
   replyingCharacterName.value = character.name
+  replyingCharacterAvatar.value = character.avatar || '🙂'
   try {
     const reply = await generateCharacterComment(
       character,
-      item.post.content,
+      item.post.content || (item.post.images?.length ? '（这是一条图片动态。）' : ''),
       selfDisplay.value.name,
       content,
-      { memoryHints: (await listCharacterSharedMemories(character.id)).map(memory => memory.content) }
+      {
+        memoryHints: (await listCharacterSharedMemories(character.id)).map(memory => memory.content),
+        replyToComment: target?.authorId === character.id ? target.content : undefined
+      }
     )
     await addMomentComment({
       momentId: item.post.id,
       worldId: item.post.worldId,
       authorType: 'character',
       authorId: character.id,
+      replyToCommentId: sentComment.id,
       content: reply.text,
       source: 'ai'
     })
-    showNotice(`${character.name} 回了一条评论。`, 'ok')
+    showNotice(`${character.name} 回了你。`, 'ok')
   } catch (error) {
     if (error instanceof MomentAiUnconfiguredError) {
       showNotice(`已发送。${character.name} 本来想回你，但还没配好 AI（见设置）。`, 'warn')
@@ -451,6 +507,7 @@ async function submitComment(item: MomentFeedItem) {
   } finally {
     replyingMomentId.value = null
     replyingCharacterName.value = ''
+    replyingCharacterAvatar.value = '🙂'
   }
 }
 
@@ -845,6 +902,8 @@ onUnmounted(() => {
               v-for="entry in item.comments"
               :key="entry.comment.id"
               class="comment-row"
+              :class="{ 'comment-row--replyable': entry.author.type === 'character' }"
+              @click="beginCommentReply(item, entry)"
             >
               <CharacterAvatar
                 :avatar="entry.author.avatar"
@@ -854,6 +913,9 @@ onUnmounted(() => {
 
               <div class="comment-body">
                 <b>{{ entry.author.name }}</b>
+                <template v-if="entry.replyToAuthor">
+                  <span class="reply-label">回复 <strong>{{ entry.replyToAuthor.name }}</strong>：</span>
+                </template>
                 <span>{{ entry.comment.content }}</span>
               </div>
             </div>
@@ -863,7 +925,7 @@ onUnmounted(() => {
               class="reply-pending"
             >
               <CharacterAvatar
-                :avatar="item.author.avatar"
+                :avatar="replyingCharacterAvatar"
                 :name="replyingCharacterName"
                 :size="26"
               />
@@ -883,11 +945,19 @@ onUnmounted(() => {
               :size="26"
             />
 
+            <div
+              v-if="replyTarget?.momentId === item.post.id"
+              class="comment-reply-target"
+            >
+              <span>回复 <b>{{ replyTarget.authorName }}</b></span>
+              <button type="button" aria-label="取消回复" @click="cancelCommentReply">×</button>
+            </div>
+
             <textarea
               class="comment-input"
               :maxlength="MAX.comment"
               rows="3"
-              :placeholder="`评论 ${item.author.name}…`"
+              :placeholder="commentPlaceholder(item)"
               :value="commentDraftOf(item)"
               @input="setCommentDraft(item, ($event.target as HTMLTextAreaElement).value)"
             ></textarea>
@@ -1065,12 +1135,12 @@ onUnmounted(() => {
 .chat-btn{background:#f3f6f8;color:#576b95;font-weight:700}
 
 .comment-area{margin-top:6px;padding:8px 10px;border:0;border-radius:4px;background:#f5f6f7;display:flex;flex-direction:column;gap:7px}
-.comment-row,.reply-pending{display:flex;align-items:flex-start;gap:7px}
+.comment-row,.reply-pending{display:flex;align-items:flex-start;gap:7px}.comment-row--replyable{cursor:pointer}.comment-row--replyable:active{opacity:.72}
 .comment-body{min-width:0;flex:1;padding:0;background:transparent;border:0;border-radius:0;display:block;line-height:1.45}
-.comment-body b{margin-right:5px;color:var(--mom-blue);font-size:12px}.comment-body b::after{content:'：'}
+.comment-body b{margin-right:5px;color:var(--mom-blue);font-size:12px}.comment-body>b::after{content:'：'}.reply-label{margin-right:3px;color:#536775;font-size:12px}.reply-label strong{color:var(--mom-blue);font-weight:650}
 .comment-body span{color:#33424f;font-size:12.5px;word-break:break-word}
 .reply-pending{align-items:center;color:#8c99a4;font-size:12px}
-.comment-composer{display:grid;grid-template-columns:minmax(0,1fr) 66px;align-items:end;gap:8px;margin-top:9px;padding:10px 0 0;border-top:1px solid var(--mom-line)}
+.comment-composer{display:grid;grid-template-columns:minmax(0,1fr) 66px;align-items:end;gap:8px;margin-top:9px;padding:10px 0 0;border-top:1px solid var(--mom-line)}.comment-reply-target{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 9px;border-radius:9px;background:#eef4f8;color:#64798a;font-size:12px}.comment-reply-target b{color:var(--mom-blue)}.comment-reply-target button{width:24px;height:24px;border:0;border-radius:50%;background:transparent;color:#8293a0;font-size:18px;line-height:1}
 .comment-composer :deep(.character-avatar){display:none}
 .comment-input{min-width:0;width:100%;min-height:44px;max-height:150px;padding:10px 12px;font-size:13.5px;line-height:1.5;resize:vertical;background:#fff}.send-btn{width:66px;min-height:42px;align-self:end;border-radius:12px}
 

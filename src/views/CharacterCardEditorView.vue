@@ -10,6 +10,7 @@ import {
 } from '../services/characterCardService'
 import {
   parseEmbeddedUserPersonaTemplate,
+  buildEmbeddedUserPreviewFromCreatorNotes,
   exportCharacterCardJson,
   extractEmbeddedUserTemplate,
   parseCharacterCardFile
@@ -64,7 +65,15 @@ const form = reactive({
 
 const embeddedUserPreview = computed(() => {
   if (!character.value) return undefined
-  const raw = character.value.embeddedUserTemplate || extractEmbeddedUserTemplate(character.value.persona || '')
+  if (character.value.embeddedUserTemplate?.trim()) {
+    return parseEmbeddedUserPersonaTemplate(character.value.embeddedUserTemplate, character.value.name)
+  }
+  const creatorNotesPersona = buildEmbeddedUserPreviewFromCreatorNotes(
+    character.value.creatorNotes || '',
+    character.value.name
+  )
+  if (creatorNotesPersona) return creatorNotesPersona
+  const raw = extractEmbeddedUserTemplate(character.value.persona || '')
   return parseEmbeddedUserPersonaTemplate(raw, character.value.name)
 })
 
@@ -101,7 +110,8 @@ const isResourceDrivenCard = computed(() => Boolean(
     resourceStats.value.regexScripts > 0 ||
     resourceStats.value.presets > 0 ||
     character.value?.depthPrompt?.prompt?.trim() ||
-    character.value?.embeddedUserTemplate?.trim()
+    character.value?.embeddedUserTemplate?.trim() ||
+    embeddedUserPreview.value
   )
 ))
 

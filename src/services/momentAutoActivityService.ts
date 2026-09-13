@@ -139,20 +139,20 @@ export interface ReplyHeatOption {
 export const REPLY_HEAT_OPTIONS: ReplyHeatOption[] = [
   { key: 'quiet', emoji: '🥶', label: '冷清', desc: '好友几乎不评论，安静为主' },
   { key: 'mild', emoji: '🍃', label: '偶尔', desc: '偶尔有一两位好友路过评论' },
-  { key: 'lively', emoji: '🔥', label: '热闹', desc: '常态：常有人来、偶尔来俩' },
-  { key: 'party', emoji: '🎉', label: '爆棚', desc: '一发动态就热闹刷屏' }
+  { key: 'lively', emoji: '🔥', label: '热闹', desc: '常态：通常 2～3 位好友来互动' },
+  { key: 'party', emoji: '🎉', label: '爆棚', desc: '一发动态通常 3～5 位好友来互动' }
 ]
 
 /** 每档的概率参数：chance=会不会来人，extraChance=要不要再多一位，max=上限。 */
 const REPLY_HEAT_RULES: Record<
   MomentReplyHeat,
-  { chance: number; extraChance: number; max: number }
+  { chance: number; min: number; extraChance: number; max: number }
 > = {
-  quiet: { chance: 0.12, extraChance: 0, max: 1 },
-  mild: { chance: 0.68, extraChance: 0.15, max: 2 },
-  // 默认档：用户主动发朋友圈时至少有一位好友回应，避免‘功能像坏了’。
-  lively: { chance: 1, extraChance: 0.35, max: 2 },
-  party: { chance: 1, extraChance: 0.8, max: 3 }
+  quiet: { chance: 0.12, min: 1, extraChance: 0, max: 1 },
+  mild: { chance: 0.68, min: 1, extraChance: 0.22, max: 2 },
+  // 默认档：让朋友圈有明显“多人社交”感，而不是永远只有一个角色来回。
+  lively: { chance: 1, min: 2, extraChance: 0.45, max: 3 },
+  party: { chance: 1, min: 3, extraChance: 0.7, max: 5 }
 }
 
 export function getReplyHeat(): MomentReplyHeat {
@@ -183,9 +183,10 @@ export function planReplyCount(
   if (rule.chance < 1 && rand() >= rule.chance) return 0
 
   const cap = Math.min(rule.max, candidateCount)
-  let count = 1
-  if (cap >= 2 && rand() < rule.extraChance) count = 2
-  if (count === 2 && cap >= 3 && rand() < 0.5) count = 3
+  let count = Math.min(cap, Math.max(1, rule.min))
+  while (count < cap && rand() < rule.extraChance) {
+    count += 1
+  }
   return count
 }
 

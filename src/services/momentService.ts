@@ -50,6 +50,8 @@ export type MomentAuthor =
 export interface MomentCommentItem {
   comment: MomentComment
   author: MomentAuthor
+  /** replyToCommentId 指向的原评论作者，用于“甲 回复 乙：...”展示。 */
+  replyToAuthor?: MomentAuthor
 }
 
 export interface MomentFeedItem {
@@ -179,10 +181,12 @@ export async function loadMomentFeed(
   ])
 
   const commentByMoment = new Map<string, MomentComment[]>()
+  const commentById = new Map<string, MomentComment>()
   for (const comment of comments) {
     const list = commentByMoment.get(comment.momentId) ?? []
     list.push(comment)
     commentByMoment.set(comment.momentId, list)
+    commentById.set(comment.id, comment)
   }
   for (const list of commentByMoment.values()) {
     list.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -209,7 +213,13 @@ export async function loadMomentFeed(
     for (const comment of commentByMoment.get(post.id) ?? []) {
       const commentAuthor = await authorFor(comment.authorType, comment.authorId)
       if (!commentAuthor) continue
-      commentItems.push({ comment, author: commentAuthor })
+      const replyTarget = comment.replyToCommentId
+        ? commentById.get(comment.replyToCommentId)
+        : undefined
+      const replyToAuthor = replyTarget && replyTarget.momentId === post.id
+        ? await authorFor(replyTarget.authorType, replyTarget.authorId)
+        : undefined
+      commentItems.push({ comment, author: commentAuthor, replyToAuthor })
     }
 
     items.push({ post, author, comments: commentItems })
@@ -318,6 +328,7 @@ export async function addMomentComment(input: {
   worldId: string
   authorType: MomentPost['authorType']
   authorId: MomentPost['authorId']
+  replyToCommentId?: string
   content: string
   source: MomentSource
 }): Promise<MomentComment> {
@@ -331,12 +342,20 @@ export async function addMomentComment(input: {
     throw new Error('这条动态已经不存在。')
   }
 
+  if (input.replyToCommentId) {
+    const target = await db.momentComments.get(input.replyToCommentId)
+    if (!target || target.momentId !== input.momentId) {
+      throw new Error('要回复的评论已经不存在。')
+    }
+  }
+
   const comment: MomentComment = {
     id: crypto.randomUUID(),
     worldId: input.worldId,
     momentId: input.momentId,
     authorType: input.authorType,
     authorId: input.authorId,
+    replyToCommentId: input.replyToCommentId,
     content,
     source: input.source,
     createdAt: new Date().toISOString()

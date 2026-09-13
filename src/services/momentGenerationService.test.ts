@@ -94,6 +94,21 @@ describe('buildCharacterCommentMessages', () => {
     )
     expect(String(messages[0].content)).toContain('朋友圈')
   })
+
+  it('回复已有角色评论时，prompt 明确是继续评论串而不是重新评论动态', () => {
+    const messages = buildCharacterCommentMessages(
+      profile,
+      '动态正文',
+      '我',
+      '你怎么知道的？',
+      [],
+      { characterComment: '看起来你今天心情不错。' }
+    )
+    const userContent = String(messages[1].content)
+    expect(userContent).toContain('你刚才的评论：看起来你今天心情不错。')
+    expect(userContent).toContain('「我」回复你：你怎么知道的？')
+    expect(userContent).toContain('不要重新评论整条动态')
+  })
 })
 
 describe('truncateBySentence', () => {

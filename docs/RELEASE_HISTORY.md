@@ -1,3 +1,11 @@
+## V0.5.0-alpha.4.3 · 朋友圈评论串 / 多人互动 / creator_notes Persona
+
+- 朋友圈支持点按角色评论继续回复，评论持久化 reply reference，并显示“甲 回复 乙”；AI 被直接回复时会基于自己的上一条评论继续接话。
+- 默认热闹档调整为 2～3 位不同角色互动，爆棚档为 3～5 位，避免有多名角色却长期只出现一人。
+- Character Card 新增明确 `creator_notes` 用户/主控人设区块识别；普通作者备注仍不会被当作 Persona，也不会直接进入 Prompt。
+- 已导入角色可在 Character Card Editor 原地创建并绑定角色专属 Persona，不要求重建聊天。
+- 静态测试矩阵 30 files / 275 tests；DB V16 / Backup V11 不变。
+
 ## V0.5.0-alpha.4.2 · Community Chat Compatibility
 
 - 明确 Presentation Ownership：手机聊天壳由 App 控制，角色消息内部 UI 默认尊重社区作者资源。

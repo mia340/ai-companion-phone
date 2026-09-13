@@ -3,7 +3,7 @@
 ## 当前版本
 
 ```text
-开发线：V0.5.0-alpha.4.2.1
+开发线：V0.5.0-alpha.4.3
 IndexedDB：V16（主屏幕图标与外观个性化）
 Backup：V11（含朋友圈动态、评论与 App 外观个性化）
 原始审查基线：用户上传 V0.4.7.1
@@ -11,6 +11,20 @@ Backup：V11（含朋友圈动态、评论与 App 外观个性化）
 ```
 
 
+
+## V0.5.0-alpha.4.3 当前状态
+
+本轮来自真实角色卡和朋友圈截图验收，修复两个会直接破坏沉浸感的问题：**朋友圈只有平铺回评**，以及**角色卡把主控/用户人设放在 `creator_notes` 时 Persona 漏识别**。
+
+朋友圈现在支持评论级回复引用，点按角色评论即可继续评论串；AI 回复会引用本轮被回复角色的上一条评论上下文。默认 `lively` 热度在候选角色足够时保证 2 位、最多 3 位；`party` 保证 3 位、最多 5 位。该结构仍保持 Native App Presentation Policy：模型只生成文字内容，评论 UI、回复关系与数据引用由本地 Vue / Dexie 管理。
+
+角色卡导入现在只对 `creator_notes` 中**明确标注**的 `[用户设定...]` / `[用户人设]` / `[主控人设]` 等区块做 Persona 解析，并继续阻止整段作者备注进入模型 Prompt。已导入角色无需删聊天：Character Card Editor 会从已有 `creatorNotes` 重建 Persona 预览并允许创建/绑定角色专属 Persona。
+
+- 静态测试定义：**30 files / 275 tests**。
+- 改动 TypeScript / Vue `<script setup>` 语法检查通过。
+- 容器 `npm ci --offline` 因依赖 tarball 缺失无法完成，未宣称完整 Vitest / vue-tsc / Vite Build 已通过。
+- IndexedDB **V16** / Backup **V11** 不变，无迁移步骤。
+- 当前已知边界：用户动态的首次多人 AI 反应仍使用朋友圈页面内定时器；离开页面会取消尚未触发的反应。后续可迁入全局 Social Activity Queue。
 
 ## V0.5.0-alpha.4.2.1 当前状态
 

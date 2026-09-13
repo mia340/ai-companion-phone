@@ -334,6 +334,47 @@ export function buildEmbeddedUserPreview(sourceText: string, characterName = '�
   return parseEmbeddedUserPersonaTemplate(rawTemplate, characterName)
 }
 
+/**
+ * 一些 Tavo / 社区角色卡把“主控人设”放在 creator_notes，常见格式：
+ * [用户设定(...)]
+ * 姜阮,女,23岁,168cm,...
+ *
+ * creator_notes 仍然不会整体进入模型 Prompt；这里仅把明确标注的用户设定块
+ * 当作导入元数据解析成角色专属 Persona，避免把作者说明误当用户事实。
+ */
+export function extractLabeledUserPersonaBlock(sourceText: string): string {
+  const lines = sourceText.replace(/\r/g, '').split('\n')
+  const headerPattern = /^\s*\[(?:用户设定|用户人设|用户角色卡|主控设定|主控人设|user设定|user人设|user persona|user profile)(?:[^\]]*)\]\s*(.*)$/iu
+  const sectionPattern = /^\s*\[[^\]]+\]\s*$/u
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index]?.match(headerPattern)
+    if (!match) continue
+
+    const collected: string[] = []
+    if (match[1]?.trim()) collected.push(match[1].trim())
+
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const line = lines[cursor] ?? ''
+      const trimmed = line.trim()
+      if (trimmed && sectionPattern.test(trimmed)) break
+      collected.push(line)
+    }
+
+    const content = collected.join('\n').trim()
+    if (content && looksLikePersonaTemplateContent(content)) {
+      return content
+    }
+  }
+
+  return ''
+}
+
+export function buildEmbeddedUserPreviewFromCreatorNotes(sourceText: string, characterName = '角色'): (ImportedPersonaPreview & { rawTemplate: string }) | undefined {
+  const rawTemplate = extractLabeledUserPersonaBlock(sourceText)
+  return parseEmbeddedUserPersonaTemplate(rawTemplate, characterName)
+}
+
 function characterBookEntryRows(value: unknown): Record<string, unknown>[] {
   const book = asRecord(value)
   const entries = book.entries
@@ -623,6 +664,7 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   const embeddedUserSources = [
     { label: '角色扩展 user Persona', preview: buildEmbeddedUserPreviewFromExtensions([rootExtensions, extensions], characterName) },
     { label: '内嵌世界书 user 人设条目', preview: buildEmbeddedUserPreviewFromCharacterBook(data.character_book, characterName) },
+    { label: 'creator_notes 用户设定块', preview: buildEmbeddedUserPreviewFromCreatorNotes(asText(data.creator_notes), characterName) },
     { label: '角色 description', preview: buildEmbeddedUserPreview(description, characterName) },
     { label: '角色 scenario', preview: buildEmbeddedUserPreview(asText(data.scenario), characterName) }
   ]

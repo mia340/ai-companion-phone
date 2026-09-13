@@ -1,3 +1,27 @@
+## 2026-09-13 · V0.5.0-alpha.4.3｜朋友圈评论串 + 主控 Persona 导入修复
+
+### 真实问题
+
+- 截图确认朋友圈只能在动态层面发表评论，用户无法点某条角色评论继续“回复评论”；此前 AI 回评也固定由动态作者承担，社交结构偏单线程。
+- 默认 `lively` 热度实际上常常只选中 1 位角色，所以即使通讯录有多人，用户动态也容易表现成“永远只有一个人理我”。
+- 用户提供的褚焚川角色卡中，主控 Persona `姜阮` 明确写在 `creator_notes` 的 `[用户设定(...)]` 区块。旧导入器只扫描 extension / character_book / description / scenario，并且通用内联提取依赖 `{{user}}` 形式，因此创建页报告“有 {{user}} 剧情占位，但没有可安全提取的独立 Persona”。
+
+### 实现
+
+- `MomentComment` 增加非索引可选 `replyToCommentId`；Feed 层解析 `replyToAuthor`，UI 展示“甲 回复 乙：……”。
+- 点按角色评论进入定向回复；用户回复保存引用，随后由被回复角色继续接话。Generation Prompt 会带上该角色上一条评论，明确这是“继续评论串”，避免重新评价整条动态。
+- `planReplyCount()` 引入每档 `min`：lively 为 2～3，party 为 3～5；仍以候选角色数为硬上限。
+- Character Card 导入新增 `extractLabeledUserPersonaBlock()`：只解析 creator_notes 中明确标注的用户/主控 Persona 区块，不把普通作者说明误识别为用户事实。
+- Character Card Editor 同样从持久化 creatorNotes 构建 Persona 预览，因此旧角色可以原地修复并绑定，不需要删除历史会话。
+- 用户提供的“小吟朋友圈小程序”世界书样本含 `$评论循环` 与“回复者 回复 被回复人”的嵌套评论表达；公开 InternalBeyond Circle 也已把发布 / 评论 / 回复 / 转发和逐 AI Circle 权限作为社交能力。我们吸收的是“评论关系与能力边界”，不复制其脚本/Prompt/UI。
+
+### 验证
+
+- 新增 3 个测试定义，静态矩阵 **30 files / 275 tests**。
+- 对改动 TS 文件及两个 Vue `<script setup lang="ts">` 做 TypeScript transpile 语法检查通过。
+- `npm ci --offline` 因当前容器缺少 zod 等依赖 tarball 无法安装，完整 `npm test` / `npm run build` 由 Windows 验收。
+- DB V16 / Backup V11 不变。评论引用字段不建索引，Dexie schema 无需升级。
+
 ## 2026-09-13 · V0.5.0-alpha.4.2.1｜Windows Build Hotfix + 参考项目学习基线
 
 ### 输入

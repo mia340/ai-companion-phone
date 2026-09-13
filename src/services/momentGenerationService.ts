@@ -135,16 +135,27 @@ export function buildCharacterCommentMessages(
   targetPost: string,
   myDisplayName: string,
   myComment: string,
-  memoryHints?: string[]
+  memoryHints?: string[],
+  replyContext?: { characterComment: string }
 ): ChatTurn[] {
-  const rules = [
-    `你正在扮演上面描述的角色，在朋友圈动态下看到「${myDisplayName}」给你的评论：`,
-    `我的动态：${targetPost}`,
-    `我的评论：${myComment}`,
-    '',
-    '请以角色的口吻回这条评论：像刷到熟人消息那样自然接话，贴合角色性格与你们的关系。',
-    `20～70 字。直接输出回复内容即可，不要加引号、括号、动作描述或“${profile.name}说”之类的旁白，也不要回复我的动态原文本身。`
-  ].join('\n')
+  const rules = replyContext?.characterComment?.trim()
+    ? [
+        `你正在扮演上面描述的角色，在朋友圈的一条评论串里继续和「${myDisplayName}」说话。`,
+        `动态正文：${targetPost}`,
+        `你刚才的评论：${replyContext.characterComment.trim()}`,
+        `「${myDisplayName}」回复你：${myComment}`,
+        '',
+        '请继续以角色口吻回复对方这句，像真实朋友圈评论区里的接话，不要重新评论整条动态。',
+        `20～70 字。直接输出回复内容即可，不要加引号、括号、动作描述或“${profile.name}说”之类的旁白。`
+      ].join('\n')
+    : [
+        `你正在扮演上面描述的角色，在朋友圈动态下看到「${myDisplayName}」给你的评论：`,
+        `我的动态：${targetPost}`,
+        `我的评论：${myComment}`,
+        '',
+        '请以角色的口吻回这条评论：像刷到熟人消息那样自然接话，贴合角色性格与你们的关系。',
+        `20～70 字。直接输出回复内容即可，不要加引号、括号、动作描述或“${profile.name}说”之类的旁白，也不要回复我的动态原文本身。`
+      ].join('\n')
 
   return [
     {
@@ -257,7 +268,7 @@ export async function generateCharacterComment(
   targetPost: string,
   myDisplayName: string,
   myComment: string,
-  options?: { memoryHints?: string[] }
+  options?: { memoryHints?: string[]; replyToComment?: string }
 ): Promise<{ text: string; model: string }> {
   const settings = await requireConfigured()
   const provider = createProvider(settings)
@@ -268,7 +279,8 @@ export async function generateCharacterComment(
     targetPost,
     myDisplayName,
     myComment,
-    options?.memoryHints
+    options?.memoryHints,
+    options?.replyToComment ? { characterComment: options.replyToComment } : undefined
   )
 
   const response = await provider.chat({

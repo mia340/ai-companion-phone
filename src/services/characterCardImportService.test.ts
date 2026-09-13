@@ -165,6 +165,45 @@ it('识别 user基本情况 / user设定 世界书，同时忽略 user_personal_
 })
 
 
+it('识别 creator_notes 中明确标注的用户设定块，并继续保持 creator_notes 不直接进 Prompt', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    spec_version: '2.0',
+    data: {
+      name: '褚焚川',
+      description: '[{{char}}和{{user}}关系]\n褚焚川与姜阮初次见面，相互试探。',
+      creator_notes: [
+        '请使用通用预设世界书',
+        '主控人设剪切至用户角色卡',
+        '',
+        '[用户设定(禁止陌生关系时直接获悉底层身份,长期卧底剧情,获悉信息只能经用户透露)]',
+        '姜阮,女,23岁(生日12月3日),168cm,55kg,真实身份ISIG特工,代号Cipher,专攻暗网军火交易追踪。',
+        '-能力:狙击/战术爆破/黑客/近战冷兵器暗杀'
+      ].join('\n')
+    }
+  }))
+
+  expect(result.embeddedUser?.patch.name).toBe('姜阮')
+  expect(result.embeddedUser?.patch.age).toBe('23')
+  expect(result.embeddedUser?.patch.gender).toBe('女')
+  expect(result.embeddedUser?.patch.height).toBe('168cm')
+  expect(result.embeddedUser?.rawTemplate).toContain('真实身份ISIG特工')
+  expect(result.notes.some(note => note.includes('creator_notes 用户设定块'))).toBe(true)
+  expect(result.notes.some(note => note.includes('creator_notes 只在原卡阅读器展示'))).toBe(true)
+})
+
+it('不会把普通 creator_notes 作者说明误识别成 Persona', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    data: {
+      name: '普通作者说明',
+      description: '{{char}}会和{{user}}慢慢熟悉。',
+      creator_notes: '请使用通用世界书。UI 调整一下。作者备注仅供阅读。'
+    }
+  }))
+  expect(result.embeddedUser).toBeUndefined()
+})
+
 it('V3 读取 nickname / multilingual notes / assets，并按 V3 回写', () => {
   const result = parseCharacterCardJson(JSON.stringify({
     spec: 'chara_card_v3', spec_version: '3.0',
