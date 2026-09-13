@@ -1,3 +1,23 @@
+## V0.5.0-alpha.4.2 · Community Chat Compatibility
+
+- 明确 Presentation Ownership：手机聊天壳由 App 控制，角色消息内部 UI 默认尊重社区作者资源。
+- 默认优先级调整为 Rich Regex → WorldBook HTML → 作者直接 HTML → 结构化/纯文本 → 原生气泡。
+- `first_mes` / 备用开场与后续回复共享 Community UI Contract；支持把纯文本 `<br>` 开场本地映射进作者 WorldBook HTML 模板。
+- 旧 Greeting Seed 加载时可自动升级；修复 `<br>` 转义、固定宽度溢出和作者 Rich UI 双层气泡。
+- 测试定义更新为 30 files / 272 tests；DB V16 / Backup V11 不变。
+
+## V0.5.0-alpha.4.1 · 主屏幕真实手机化 / 美化中心 / 记忆 App
+
+- Home 移除常驻“编辑”按钮，桌面只承担 Launcher 与 glanceable state。
+- 新增 `设置 → 桌面与外观`，统一管理壁纸、App 自定义图标、图标大小和名称显示；主屏空白处长按可快速进入。
+- 主屏“记忆”升级为一级 Memory Center，按角色汇总角色共享 / 聊天内记忆、冲突与多会话入口。
+- Chat Settings 的 Memory Tab 只保留自动记忆行为参数，逐条 CRUD、冲突处理、Scope 切换统一进入 Memory App。
+- 外观偏好复用 V16 `appCustomizations`，Backup V11 不变；测试定义仍为 30 files / 270 tests。
+
+## V0.5.0-alpha.4.0 · Generation Runtime 第一阶段
+
+这是 V0.5 Generation Runtime 的第一批结构性迁移：先冻结生成上下文，再统一 Provider/Streaming 调用与 AI 回复持久化；同时把聊天列表删除升级为可左滑触发、并由 Runtime 保证数据一致性的完整操作。DB 与 Backup 格式不升级。
+
 ## V0.5.0-alpha.3.5 · App Icon 与 Memory Ownership
 
 - 首页 App 图标从 Emoji 占位升级为统一 SVG 图标语言，Dock 同步复用。

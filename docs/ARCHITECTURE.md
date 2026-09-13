@@ -1,8 +1,83 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.3.5**。
+> 当前文档版本：**V0.5.0-alpha.4.2**。
 > V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V16 / Backup V11（朋友圈与主屏幕个性化已纳入备份）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
+
+
+## V0.5.0-alpha.4.2 Community Chat Presentation
+
+聊天的 Presentation Ownership 采用“**手机壳归 App，消息内部 UI 归作者资源**”原则：
+
+```text
+Character Card / first_mes / alternate_greetings
+WorldBook / Preset / Regex
+             ↓
+Community Contract Detection
+             ↓
+1. Rich Regex UI
+2. WorldBook HTML contract
+3. Direct author HTML
+4. Structured / plain author text
+5. Native phone bubble fallback
+             ↓
+SafeRichHtml / ChatMessageItem
+             ↓
+Phone Chat Surface
+```
+
+边界规则：
+
+- 默认不把社区卡转换为本项目自创的状态卡；作者已有 UI 时尽量保留作者 HTML/CSS 与 Regex 显示结果。
+- 开场与后续回复必须共享同一 Presentation Contract。WorldBook 已声明固定 HTML 外壳时，`first_mes` 的结构化纯文本可以在本地填回该外壳。
+- 本地 Compiler 只做确定性的数据显示映射，不生成正文、不补剧情、不改 `rawContent`。
+- `phone-text` / `phone-split` 是玩家主动选择的 presentation override；默认 `scene-merged` 对应原卡 / 社区 UI。
+- Rich HTML 继续进入 `SafeRichHtml`：未知脚本不执行，作者布局在手机宽度内约束为 `max-width:100%`。
+- Rich provenance 分为 `regex` / `worldbook-ui` / `card-ui`，用于调试与后续兼容回归。
+
+当前 Opening Contract 的 orchestration 暂时仍在 `ChatRoom.vue`。下一步可迁入 `src/runtime/generation` / `src/runtime/presentation`，避免 View 继续承担资源调度。
+
+## V0.5.0-alpha.4.1 App Shell 职责边界
+
+```text
+Home / Lock Screen
+  → 只做 Launcher 与 glanceable state
+  → 不常驻“编辑 / 美化”业务按钮
+
+Settings → Desktop & Appearance
+  → Wallpaper / Icon / Icon Size / Label visibility
+  → 外观偏好写入本地 appCustomizations
+
+Memory App
+  → Character-shared memory + conversation-local memory 的一级管理入口
+  → Chat Settings 只控制 memory behavior，不做 memory CRUD
+```
+
+这条边界用于避免“手机壳”和“业务设置”互相侵入。后续新增主题、Widget、桌面布局时继续进入 Appearance 层；后续增强 Memory 可视化、搜索、导入导出时继续进入 Memory App，不重新塞回 ChatRoom。
+
+## V0.5.0-alpha.4.0 Generation Runtime 第一阶段
+
+`requestAssistantReply()` 开始从 `ChatRoom.vue` 迁移到 `src/runtime/generation/`。本阶段先抽出生成两端，保留现有 Provider 与绝大多数 response projection 语义，避免一次性重写成熟链路。
+
+```text
+UI / ChatRoom
+  ↓
+GenerationContextBuilder
+  ├─ freeze Character / Persona / Conversation / ChatSettings
+  ├─ freeze ConversationState / Memory / Messages / ModelSettings
+  ├─ WorldBook / Regex / Preset / Presentation / Vision Context
+  └─ produce withVision / withoutVision ChatRequest
+  ↓
+Generation Orchestrator
+  └─ existing Provider / Streaming + vision capability downgrade
+  ↓
+Response Persistence
+  └─ generated message / rich message / alternative / streaming placeholder
+```
+
+每轮生成分配 `generationId`，并记录 `contextCreatedAt`。生成开始后使用冻结 Context 作为本轮事实来源，降低异步请求期间 Vue reactive state 或数据库状态漂移造成的前后不一致。Prompt Debug 同步记录 generation provenance，后续可继续把 Memory Retrieval、Resource/WorldBook、Prompt Build、Regex/Protocol projection、State/Memory update 逐段迁入 Runtime。
+
+聊天列表新增原生式左滑删除。删除通过 Conversation Runtime 统一清理当前会话消息、局部记忆、状态历史、Prompt Debug、聊天级资源绑定等，同时保留角色级共享记忆，并修复 branch parent/root 引用，避免产生悬空分支。
 
 ## V0.5.0-alpha.3.1 App Surface 边界
 
@@ -43,7 +118,7 @@ Conversation Memory
   只属于当前剧情线，默认不跨聊天
 ```
 
-用户可以在“记忆管理”中手动把任意记忆提升为“角色共享”，或移回“仅当前聊天”。这样既避免“第二个聊天突然知道第一条支线剧情”的污染，也不会让角色在换聊天后忘掉姓名、偏好、承诺等稳定事实；共同经历默认属于当前剧情线，确认后再共享。
+用户从主屏幕进入“记忆”App，再进入对应角色/聊天的完整记忆管理，可手动把任意记忆提升为“角色共享”，或移回“仅当前聊天”。这样既避免“第二个聊天突然知道第一条支线剧情”的污染，也不会让角色在换聊天后忘掉姓名、偏好、承诺等稳定事实；共同经历默认属于当前剧情线，确认后再共享。
 
 Chat 的 Prompt 读取顺序现在是：**当前聊天记忆 + 该角色全部聊天中的角色共享记忆**；同一内容跨聊天重复时去重，冲突仍保留并交给现有冲突机制处理。
 
@@ -53,7 +128,7 @@ Chat 的 Prompt 读取顺序现在是：**当前聊天记忆 + 该角色全部�
 
 首页 App 图标从 Emoji 占位升级为统一的轻量 SVG 图标系统：简洁轮廓、柔和双色底、玻璃高光和一致安全区，遵循 Apple 对图标“简单、可识别、主体居中”的设计方向。
 
-用户可进入首页“编辑”，为 App 上传自己的图片；本地会裁成 512×512 并压缩为 WebP，按世界保存到 IndexedDB。自定义图标也会进入 Backup，恢复数据后不会丢失。
+用户从“设置 → 桌面与外观”统一管理壁纸、App 图标、图标大小与名称显示；也可在主屏幕空白处长按快速进入。自定义 App 图片会在本地裁成 512×512 并压缩为 WebP，按世界保存到 IndexedDB；外观数据继续进入 Backup，恢复数据后不会丢失。
 
 ## V0.5.0-alpha.3.2 Presentation Policy
 

@@ -1,14 +1,20 @@
 # AI Companion Phone Docs
 
-当前开发线：**V0.5.0-alpha.3.5（App Icon + 多聊天 Memory Ownership）**
+当前开发线：**V0.5.0-alpha.4.2.1（Build Hotfix）**
 
 ```text
-应用：0.5.0-alpha.3.5
+应用：0.5.0-alpha.4.2.1
 IndexedDB：V16
 Backup：V11
 本轮输入基线：用户上传的 alpha.3 RAR（含朋友圈 / 音乐 / 海龟汤等新增功能）
-自动化定义：27 个测试文件 / 261 个用例
+自动化定义：30 个测试文件 / 272 个用例
 ```
+
+### V0.5.0-alpha.4.2.1 本轮重点
+
+本热修只修复 `HomeScreen.vue` 浏览器长按计时器的 TypeScript 类型冲突，不改变 Runtime、数据库或 UI 语义。
+
+上一版的核心仍是：聊天默认尊重社区作者的 Presentation：富文本 Regex / WorldBook HTML / 作者 HTML 优先，本项目只提供安全渲染与手机壳；纯气泡模式由玩家显式选择。开场 `first_mes` 与后续回复现在会共享同一套作者 UI 合同，避免“第一条纯文本、第二条突然变卡片”。
 
 > 重要：alpha.3.2 不删除聊天 Community UI。相反，Chat 是唯一允许角色卡作者接管 Presentation 的主要 Surface；朋友圈、音乐、海龟汤等原生 App 只让 AI 生成内容，由本地 Vue 负责 UI。
 
@@ -27,6 +33,7 @@ Backup：V11
 4. `COMMUNITY_RUNTIME.md`：Character Card / WorldBook / Regex / Community UI 当前语义。
 5. `DEVELOPMENT_LOG.md`：最近开发决策和本轮实际修改。
 6. `REFERENCE_PROJECTS.md`：公开“小手机”与工具样本、学习原则。
+7. `REFERENCE_STUDY_2026-09-13.md`：本轮公开参考项目的工程/产品学习结论与毕业前吸收优先级。
 
 ### 历史归档
 
@@ -51,6 +58,7 @@ docs/
 ├─ ARCHITECTURE.md                   # 架构单一事实源
 ├─ COMMUNITY_RUNTIME.md              # 当前社区 Runtime 语义
 ├─ REFERENCE_PROJECTS.md             # 参考项目学习库
+├─ REFERENCE_STUDY_2026-09-13.md      # 2026-09 参考项目阶段研究结论
 ├─ DEVELOPMENT_LOG.md                # 最近开发记录
 ├─ CHANGELOG.md                      # 精简版本变化
 ├─ RELEASE_HISTORY.md                # 发布历史归档

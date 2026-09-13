@@ -22,17 +22,34 @@ import { deleteConversationMessagesConsistently, resetConversationRuntime, trunc
 import { createConversationBranch } from '../runtime/conversation/conversationBranchService'
 import { installConversationGreeting, switchConversationToFreeOpening } from '../runtime/conversation/conversationOpeningService'
 import { rebuildAndPersistConversationState } from '../runtime/conversation/conversationStateReplayService'
+import { buildGenerationContext } from '../runtime/generation/generationContextBuilder'
+import {
+  chatTurnContentText,
+  cloneChatRequest,
+  includeVisionCount,
+  type GenerationRequestOptions
+} from '../runtime/generation/generationContext'
+import {
+  accumulateGenerationTokenUsage,
+  createGenerationTokenUsage,
+  runGenerationProvider
+} from '../runtime/generation/generationOrchestrator'
+import {
+  patchGeneratedMessage,
+  persistAlternativeReply,
+  persistAssistantContentMessage,
+  persistRichAssistantMessage,
+  persistStreamingPlaceholder,
+  removeGeneratedMessage
+} from '../runtime/generation/responsePersistenceService'
 import {
   isTokenLimitError,
-  isVisionUnsupportedError,
   type ChatRequest,
   type ChatResponse,
-  type ChatStreamChunk,
-  type ChatTurn,
-  type ModelProvider
+  type ChatStreamChunk
 } from '../services/ai/provider'
 import { createProvider } from '../services/ai/providerFactory'
-import { getModelSettings, getVisionCapability, saveVisionCapability } from '../services/modelSettings'
+import { getModelSettings, getVisionCapability } from '../services/modelSettings'
 import {
   MAX_CHAT_IMAGES,
   prepareChatImage,
@@ -53,17 +70,11 @@ import {
   saveMusicState
 } from '../services/chatSettings'
 import {
-  addMemory,
-  buildMemoryPrompt,
-  clearMemories,
   createLocalSummary,
   listConversationMemoryContext,
   rememberCharacterObservation,
   rememberFromMessageDetailed,
-  buildMemoryWriteNotice,
-  removeMemory,
-  recordMemoryHits,
-  selectMemoryHitsDetailed
+  buildMemoryWriteNotice
 } from '../services/memoryService'
 import { generateVisibleCharacterState } from '../services/characterStateService'
 import { inferCardInitialActivity, inferCardInitialRelationship } from '../services/characterInitialStateService'
@@ -71,19 +82,18 @@ import { collectCharacterGreetings } from '../services/characterGreetingService'
 import { planProactiveMessage } from '../services/proactiveMessageService'
 import { getOrCreateUserProfile } from '../services/userProfile'
 import { getPersonaForChat, listPersonas } from '../services/personaService'
+import { listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml, type RegexExecutionTrace } from '../services/regexRuntime'
+import { compileIncomingMessageRegex, compileWorldInfoRegex } from '../services/regexPipelineService'
+import { buildCommunityUiRepairPrompt, buildCommunityUiStateRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, enforceUserMessageOwnershipInRichHtml, mergeCommunityUiStateRepair, regexProducesRichUi, sanitizeCommunityUiText, tryCarryForwardCommunityUiState, tryRepairCommunityUiLocally } from '../services/communityUiRuntime'
+import { getActivePromptPreset } from '../services/presetRuntime'
 import { buildLorebookPrompt } from '../services/lorebookService'
-import { composeRoleplaySystemPrompt } from '../services/promptComposer'
-import { listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml, regexScriptsForDynamicDepthPhase, regexScriptsForStage, type RegexExecutionTrace } from '../services/regexRuntime'
-import { compileIncomingMessageRegex, compileOutgoingMessageRegex, compileWorldInfoRegex } from '../services/regexPipelineService'
-import { composeWithPromptPreset, getActivePromptPreset } from '../services/presetRuntime'
-import { buildCommunityUiPriorityPrompt, buildCommunityUiRepairPrompt, buildCommunityUiStateRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, enforceUserMessageOwnershipInRichHtml, mergeCommunityUiStateRepair, regexProducesRichUi, sanitizeCommunityUiText, tryCarryForwardCommunityUiState, tryRepairCommunityUiLocally } from '../services/communityUiRuntime'
 import { resolveCharacterRuntimeProfile } from '../services/characterRuntimeProfile'
-import { buildCharacterRuntimeManifest, characterMacroName, detectCharacterCardFamily } from '../services/characterCardCompatibility'
+import { characterMacroName, detectCharacterCardFamily } from '../services/characterCardCompatibility'
 import { renderCharacterCardPromptText, renderRoleplayText } from '../services/textMacroService'
-import { buildPresentationOverridePrompt, estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
+import { estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
 import { extractRoleCardUiHints, parseRoleCardUi, resolvePresenceFromRoleCardScene, roleCardUiToConversationPatch } from '../services/roleCardUiService'
 import { analyzePromptSections, buildRuleInfluences, buildTruncationNotes, estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
-import { buildConversationStatePrompt, buildUserSceneTransitionPrompt, deriveUserSceneTransition, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
+import { buildConversationStatePrompt, deriveUserSceneTransition, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
 import type {
   Character,
   CharacterMemory,
@@ -119,7 +129,6 @@ const streamingMessageId = ref('')
 const isLoadingThought = ref(false)
 const errorMessage = ref('')
 const noticeMessage = ref('')
-const newMemoryText = ref('')
 const settingsTab = ref<'chat' | 'roleplay' | 'memory' | 'advanced'>('chat')
 const activePanel = ref<'thought' | 'music' | 'settings' | 'message' | 'editor' | 'greeting' | null>(null)
 const selectedMessage = ref<Message>()
@@ -258,15 +267,6 @@ const {
   }
 })
 
-const memoryCategoryNames: Record<CharacterMemory['category'], string> = {
-  profile: '个人信息',
-  preference: '喜好',
-  relationship: '关系',
-  event: '事件',
-  promise: '约定',
-  other: '日常'
-}
-
 function draftStorageKey(conversationId: string) {
   return `ai-companion-draft:${conversationId}`
 }
@@ -329,61 +329,6 @@ function createReplyReference(message: Message): MessageReplyReference {
         ? 'music'
         : 'text'
   }
-}
-
-function chatTurnContentText(content: ChatTurn['content']) {
-  if (typeof content === 'string') return content
-  return content.filter(part => part.type === 'text').map(part => part.text).join('\n')
-}
-
-function formatMessageForPrompt(message: Message) {
-  const promptContent = message.type === 'rich' ? (message.rawContent || message.content) : message.content
-  const caption = promptContent.trim()
-  const imageCount = getMessageImages(message).length
-  const base = message.type === 'image' && message.placeholderImagePrompt
-    ? `<shared_image_description>${message.placeholderImagePrompt}</shared_image_description>`
-    : message.type === 'image'
-    ? [
-      `<image_share count="${imageCount || 1}" details="unavailable">`,
-      caption ? `用户附言：${caption}` : '用户没有附言。',
-      '图片细节当前不可用。只回应用户的附言、分享行为和关系语境；不要猜测细节，也不要解释技术原因。',
-      '</image_share>'
-    ].join('\n')
-    : message.type === 'voice'
-      ? `<voice_message>${message.content}</voice_message>`
-      : message.type === 'action'
-        ? `<scene_action>${message.content}</scene_action>`
-      : message.type === 'emoji'
-        ? `<emoji_message>${message.content}</emoji_message>`
-        : /^(?:\/ooc\b|ooc\s*[：:])/i.test(promptContent.trim())
-          ? `<director_instruction>${promptContent.trim().replace(/^(?:\/ooc\b|ooc\s*[：:])\s*/i, '')}</director_instruction>`
-          : promptContent
-  if (!message.replyTo) return base
-  return `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。\n${base}`
-}
-
-function imageMessageContent(message: Message): ChatTurn['content'] {
-  const images = getMessageImages(message).filter(image => Boolean(image.dataUrl))
-  const caption = message.content.trim()
-  const text = [
-    `<visual_input count="${images.length}">`,
-    caption ? `用户附言：${caption}` : '用户没有附言。',
-    '请在内部按顺序观察图片。最终只输出角色会自然发出的消息，不要先汇报图片数量、文件名、构图或分析过程。',
-    '</visual_input>'
-  ].join('\n')
-
-  return [
-    {
-      type: 'text',
-      text: message.replyTo
-        ? `这条消息是在回复${message.replyTo.senderName}的“${message.replyTo.preview}”。\n${text}`
-        : text
-    },
-    ...images.map(image => ({
-      type: 'image_url' as const,
-      image_url: { url: image.dataUrl || '', detail: 'auto' as const }
-    }))
-  ]
 }
 
 function openImagePreview(urls: string[], index: number) {
@@ -581,6 +526,148 @@ async function normalizeLegacyCommunityPlainMessages(rows: Message[]) {
 }
 
 
+async function resolveOpeningCommunityUiRuntime(options: {
+  conversation: Conversation
+  character: Character
+  settings: ChatSettings
+  persona?: UserPersona
+  greetingText: string
+}) {
+  const userName = options.persona?.name?.trim() || '你'
+  const charName = characterMacroName(options.character)
+  const [assistantRegex, worldRegex, preset] = await Promise.all([
+    listActiveRegexScripts(options.character.id, 'assistant-output'),
+    listActiveRegexScripts(options.character.id, 'world-info'),
+    getActivePromptPreset(options.character.id)
+  ])
+
+  let contract = detectCommunityUiContract({
+    character: options.character,
+    preset,
+    assistantRegex
+  })
+
+  if (options.settings.lorebookEnabled !== false) {
+    const lorebook = await buildLorebookPrompt({
+      worldId: options.conversation.worldId,
+      characterId: options.character.id,
+      messages: [],
+      latestText: options.greetingText,
+      character: options.character,
+      persona: options.persona
+    })
+    const applyWorldRegex = (value: string) => {
+      if (!value || !worldRegex.length) return value
+      return compileWorldInfoRegex({
+        text: value,
+        scripts: worldRegex,
+        macros: { user: userName, char: charName }
+      }).text
+    }
+    const lorebookContractSource = [
+      lorebook.prompt,
+      ...lorebook.depthInjections.map(item => item.content),
+      ...Object.values(lorebook.outlets)
+    ].filter(Boolean).map(applyWorldRegex).join('\n\n')
+    contract = detectCommunityUiContract({
+      character: options.character,
+      lorebookPrompt: lorebookContractSource,
+      preset,
+      assistantRegex
+    })
+  }
+
+  return { contract, assistantRegex }
+}
+
+async function repairExistingGreetingCommunityUi(options: {
+  rows: Message[]
+  conversation: Conversation
+  character?: Character
+  settings: ChatSettings
+  persona?: UserPersona
+}) {
+  if (!options.character || options.settings.conversationPresentationMode !== 'scene-merged') return options.rows
+  const greetingRows = options.rows.filter(row => row.isGreetingSeed && row.senderId !== 'user' && row.type !== 'rich')
+  if (!greetingRows.length) return options.rows
+
+  const firstGreetingText = greetingRows[0].rawContent || greetingRows[0].content
+  const runtime = await resolveOpeningCommunityUiRuntime({
+    conversation: options.conversation,
+    character: options.character,
+    settings: options.settings,
+    persona: options.persona,
+    greetingText: firstGreetingText
+  })
+  if (!runtime.contract.active && !runtime.assistantRegex.some(regexProducesRichUi)) return options.rows
+
+  const richRegexNames = new Set(runtime.assistantRegex.filter(regexProducesRichUi).map(item => item.name))
+  const nextRows: Message[] = []
+  for (const row of options.rows) {
+    if (!row.isGreetingSeed || row.senderId === 'user' || row.type === 'rich') {
+      nextRows.push(row)
+      continue
+    }
+
+    const source = row.rawContent || row.content
+    const regexView = compileIncomingMessageRegex({
+      rawText: source,
+      source: 'assistant-output',
+      scripts: [],
+      displayScripts: runtime.assistantRegex,
+      depth: 0,
+      macros: { user: options.persona?.name || '你', char: characterMacroName(options.character) }
+    })
+    const applied = regexView.displayApplied
+    const fromRichRegex = applied.some(name => richRegexNames.has(name))
+    let html = regexView.rich || looksLikeRichHtml(regexView.displayText)
+      ? normalizeRichHtml(regexView.displayText)
+      : ''
+    let sourceKind: Message['richSource'] | undefined = html
+      ? (fromRichRegex ? 'regex' : runtime.contract.active ? 'worldbook-ui' : 'card-ui')
+      : undefined
+
+    if (!html && runtime.contract.active) {
+      const repaired = tryRepairCommunityUiLocally(runtime.contract, regexView.displayText)
+      if (repaired.repaired) {
+        html = normalizeRichHtml(repaired.text)
+        sourceKind = 'worldbook-ui'
+      }
+    }
+
+    if (!html) {
+      nextRows.push(row)
+      continue
+    }
+
+    const preview = html
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 280) || '角色卡 UI'
+    const next: Message = {
+      ...row,
+      type: 'rich',
+      content: preview,
+      displayContent: undefined,
+      richHtml: html,
+      richSource: sourceKind,
+      roleCardUi: undefined
+    }
+    await db.messages.update(row.id, {
+      type: next.type,
+      content: next.content,
+      displayContent: undefined,
+      richHtml: next.richHtml,
+      richSource: next.richSource,
+      roleCardUi: undefined
+    })
+    nextRows.push(next)
+  }
+  return nextRows
+}
+
 async function removeLegacySyntheticPhoneActions(rows: Message[]) {
   const removedIds = rows
     .filter(row => row.senderId !== 'user' && row.type === 'action' && /低头看着手机屏幕，停了一会儿才继续回复[。.!！]?/.test(row.content))
@@ -712,11 +799,19 @@ async function loadConversation(conversationId: string) {
     const loadedRuntimeProfile = characterRow
       ? resolveCharacterRuntimeProfile({ character: characterRow, settings: settingsRow })
       : undefined
-    const visibleMessageRows = recoveredMessageRows.map(row =>
-      loadedRuntimeProfile?.preserveCardOutput && row.roleCardUi ? { ...row, roleCardUi: undefined } : row
-    )
     const activePersonaRow = await getPersonaForChat(settingsRow)
     if (!isCurrentLoad()) return
+    const greetingUiRepairedRows = await repairExistingGreetingCommunityUi({
+      rows: recoveredMessageRows,
+      conversation: conversationRow,
+      character: characterRow,
+      settings: settingsRow,
+      persona: activePersonaRow
+    })
+    if (!isCurrentLoad()) return
+    const visibleMessageRows = greetingUiRepairedRows.map(row =>
+      loadedRuntimeProfile?.preserveCardOutput && row.roleCardUi ? { ...row, roleCardUi: undefined } : row
+    )
 
     const proactivePlan = characterRow && loadedRuntimeProfile?.compatibilityMode === 'phone-enhanced'
       ? await planProactiveMessage({
@@ -853,6 +948,7 @@ async function updateUserMessageState(
 
 interface StreamingReplySession {
   messageId?: string
+  generationId: string
   rawText: string
   canonicalText?: string
   text: string
@@ -891,34 +987,16 @@ async function ensureStreamingMessage(
 ) {
   if (session.messageId) return
 
-  const now = new Date().toISOString()
-  const message: Message = {
-    id: crypto.randomUUID(),
-    worldId: session.conversation.worldId,
-    conversationId: session.conversation.id,
+  const message = await persistStreamingPlaceholder({
+    conversation: session.conversation,
     senderId: session.conversation.memberIds[0],
     type: session.type,
     content: session.text,
-    status: 'pending',
-    createdAt: now,
     provider: session.provider,
     model: session.model,
-    proactiveSource: session.proactiveSource,
-    replyGroupId: crypto.randomUUID()
-  }
-
-  await db.transaction(
-    'rw',
-    db.messages,
-    db.conversations,
-    async () => {
-      await db.messages.add(message)
-      await db.conversations.update(
-        session.conversation.id,
-        { updatedAt: now }
-      )
-    }
-  )
+    generationId: session.generationId,
+    proactiveSource: session.proactiveSource
+  })
 
   session.messageId = message.id
   streamingMessageId.value = message.id
@@ -940,14 +1018,11 @@ function scheduleStreamPersistence(
 
     if (!session.messageId) return
 
-    void db.messages.update(
-      session.messageId,
-      {
-        content: session.text,
-        provider: session.provider,
-        model: session.model,
-      }
-    )
+    void patchGeneratedMessage(session.messageId, {
+      content: session.text,
+      provider: session.provider,
+      model: session.model
+    })
   }, 140)
 }
 
@@ -989,37 +1064,50 @@ async function flushStreamingMessage(
 
   if (!session.messageId) return
 
-  await db.messages.update(
-    session.messageId,
-    {
-      content: session.text,
-      provider: session.provider,
-      model: session.model,
-    }
-  )
+  await patchGeneratedMessage(session.messageId, {
+    content: session.text,
+    provider: session.provider,
+    model: session.model
+  })
 }
 
 async function finishStreamingMessage(
   session: StreamingReplySession,
   output: ParsedCompanionOutput,
-  multiBubble: boolean,
+  activeCharacter: Character,
+  settings: ChatSettings,
+  renderState?: ConversationState,
   allowNativeMessageReshaping = true
 ) {
-  const renderState = output.status?.presence
-    ? ({ ...(conversationState.value || {}), presence: output.status.presence } as ConversationState)
-    : conversationState.value
-  const actions = character.value && chatSettings.value && allowNativeMessageReshaping
-    ? shapeCompanionActions(output.messages.slice(), character.value, { ...chatSettings.value, multiBubble }, Boolean(output.rawPacket), renderState)
+  const resolvedRenderState = output.status?.presence
+    ? ({ ...(renderState || {}), presence: output.status.presence } as ConversationState)
+    : renderState
+  const actions = allowNativeMessageReshaping
+    ? shapeCompanionActions(output.messages.slice(), activeCharacter, settings, Boolean(output.rawPacket), resolvedRenderState)
     : output.messages.slice()
   if (!actions.length) throw new Error('模型没有返回有效回复。')
   session.text = actions.map(item => item.content).join('\n\n')
   const canReuse = Boolean(session.messageId) && actions.length === 1 && actions[0].kind === 'text' && session.type !== 'voice' && session.type !== 'emoji'
   if (canReuse && session.messageId) {
-    const visibleRoleCardUi = chatSettings.value?.conversationPresentationMode === 'scene-merged' ? output.roleCardUi : undefined
-    await db.messages.update(session.messageId, { content: actions[0].content, rawContent: session.canonicalText || session.rawText || undefined, modelOutput: session.rawText || undefined, regexPipelineVersion: 2, status: 'delivered', provider: session.provider, model: session.model, errorText: undefined, protocolVersion: output.rawPacket ? 2 : undefined, roleCardUi: visibleRoleCardUi, proactiveSource: session.proactiveSource })
+    const visibleRoleCardUi = settings.conversationPresentationMode === 'scene-merged' ? output.roleCardUi : undefined
+    await patchGeneratedMessage(session.messageId, { content: actions[0].content, rawContent: session.canonicalText || session.rawText || undefined, modelOutput: session.rawText || undefined, regexPipelineVersion: 2, status: 'delivered', provider: session.provider, model: session.model, generationId: session.generationId, errorText: undefined, protocolVersion: output.rawPacket ? 2 : undefined, roleCardUi: visibleRoleCardUi, proactiveSource: session.proactiveSource })
   } else {
-    const visibleRoleCardUi = chatSettings.value?.conversationPresentationMode === 'scene-merged' ? output.roleCardUi : undefined
-    await saveAssistantActions({ actions, provider: session.provider, model: session.model, type: session.type, replaceMessageId: session.messageId, roleCardUi: visibleRoleCardUi, proactiveSource: session.proactiveSource, rawContent: session.canonicalText || session.rawText || undefined, modelOutput: session.rawText || undefined })
+    const visibleRoleCardUi = settings.conversationPresentationMode === 'scene-merged' ? output.roleCardUi : undefined
+    await saveAssistantActions({
+      conversation: session.conversation,
+      character: activeCharacter,
+      settings,
+      actions,
+      provider: session.provider,
+      model: session.model,
+      generationId: session.generationId,
+      type: session.type,
+      replaceMessageId: session.messageId,
+      roleCardUi: visibleRoleCardUi,
+      proactiveSource: session.proactiveSource,
+      rawContent: session.canonicalText || session.rawText || undefined,
+      modelOutput: session.rawText || undefined
+    })
   }
   messages.value = await db.messages.where('conversationId').equals(session.conversation.id).sortBy('createdAt')
   streamingMessageId.value = ''
@@ -1034,7 +1122,7 @@ async function discardStreamingMessage(session: StreamingReplySession) {
     streamPersistTimer = undefined
   }
   if (session.messageId) {
-    await db.messages.delete(session.messageId)
+    await removeGeneratedMessage(session.messageId)
     messages.value = messages.value.filter(item => item.id !== session.messageId)
   }
   streamingMessageId.value = ''
@@ -1051,7 +1139,7 @@ async function preserveInterruptedStream(
 ) {
   if (!session.messageId || !session.text.trim()) {
     if (session.messageId) {
-      await db.messages.delete(session.messageId)
+      await removeGeneratedMessage(session.messageId)
       messages.value = messages.value.filter(
         item => item.id !== session.messageId
       )
@@ -1064,16 +1152,13 @@ async function preserveInterruptedStream(
   }
 
   await flushStreamingMessage(session)
-  await db.messages.update(
-    session.messageId,
-    {
-      content: session.text.trim(),
-      status,
-      errorText,
-      provider: session.provider,
-      model: session.model,
-    }
-  )
+  await patchGeneratedMessage(session.messageId, {
+    content: session.text.trim(),
+    status,
+    errorText,
+    provider: session.provider,
+    model: session.model
+  })
 
   const index = messages.value.findIndex(
     item => item.id === session.messageId
@@ -1103,46 +1188,73 @@ function actionMessageType(action: CompanionActionMessage, baseType?: Message['t
   if (action.kind === 'image_placeholder') return 'image'
   return baseType === 'music' ? 'music' : 'text'
 }
-function messagePacingDelay(action: CompanionActionMessage, index: number) {
+function messagePacingDelay(
+  action: CompanionActionMessage,
+  index: number,
+  settings: ChatSettings,
+  activeCharacter: Character
+) {
   if (action.kind === 'typing_pause') return action.delayMs ?? 620
-  if (index === 0 || !chatSettings.value?.naturalDelay) return action.delayMs ?? 0
-  const pacing = chatSettings.value.messagePacing ?? 'natural'
+  if (index === 0 || !settings.naturalDelay) return action.delayMs ?? 0
+  const pacing = settings.messagePacing ?? 'natural'
   if (pacing === 'off') return action.delayMs ?? 0
-  const speedFactor = character.value?.replySpeed === 'slow' ? 1.35 : character.value?.replySpeed === 'instant' ? .65 : 1
+  const speedFactor = activeCharacter.replySpeed === 'slow' ? 1.35 : activeCharacter.replySpeed === 'instant' ? .65 : 1
   const base = pacing === 'quick' ? 260 : pacing === 'slow' ? 760 : 430
   const perCharacter = action.kind === 'emoji' ? 0 : pacing === 'slow' ? 17 : 11
   return Math.max(action.delayMs ?? 0, Math.round((base + Math.min(1400, action.content.length * perCharacter)) * speedFactor))
 }
-function resolveActionTarget(targetMessageId: string | undefined, sender: 'user' | 'assistant') {
+function resolveActionTarget(
+  conversationId: string,
+  targetMessageId: string | undefined,
+  sender: 'user' | 'assistant'
+) {
+  const conversationMessages = messages.value.filter(item => item.conversationId === conversationId)
   if (targetMessageId && targetMessageId !== 'latest_user' && targetMessageId !== 'latest_assistant') {
-    return messages.value.find(item => item.id === targetMessageId)
+    return conversationMessages.find(item => item.id === targetMessageId)
   }
   const wantUser = targetMessageId === 'latest_user' || sender === 'user'
-  return [...messages.value].reverse().find(item => wantUser ? item.senderId === 'user' : item.senderId !== 'user')
+  return [...conversationMessages].reverse().find(item => wantUser ? item.senderId === 'user' : item.senderId !== 'user')
 }
-async function saveAssistantActions(options: { actions: CompanionActionMessage[]; provider: string; model: string; type?: Message['type']; signal?: AbortSignal; replaceMessageId?: string; roleCardUi?: Message['roleCardUi']; proactiveSource?: ProactiveSource; rawContent?: string; modelOutput?: string; displayContent?: string; regexApplied?: Message['regexApplied'] }) {
-  if (!conversation.value || !options.actions.length) return
-  const activeConversation = conversation.value
+async function saveAssistantActions(options: {
+  conversation: Conversation
+  character: Character
+  settings: ChatSettings
+  actions: CompanionActionMessage[]
+  provider: string
+  model: string
+  generationId: string
+  type?: Message['type']
+  signal?: AbortSignal
+  replaceMessageId?: string
+  roleCardUi?: Message['roleCardUi']
+  proactiveSource?: ProactiveSource
+  rawContent?: string
+  modelOutput?: string
+  displayContent?: string
+  regexApplied?: Message['regexApplied']
+}) {
+  if (!options.actions.length) return
+  const activeConversation = options.conversation
   const groupId = crypto.randomUUID()
   let roleCardUiAssigned = false
   let rawContentAssigned = false
   let modelOutputAssigned = false
   let displayContentAssigned = false
   if (options.replaceMessageId) {
-    await db.messages.delete(options.replaceMessageId)
+    await removeGeneratedMessage(options.replaceMessageId)
     messages.value = messages.value.filter(item => item.id !== options.replaceMessageId)
   }
 
   for (let index = 0; index < options.actions.length; index += 1) {
     if (options.signal?.aborted) throw new DOMException('请求已取消', 'AbortError')
     const action = options.actions[index]
-    const delay = messagePacingDelay(action, index)
+    const delay = messagePacingDelay(action, index, options.settings, options.character)
     if (delay > 0) await wait(delay, options.signal)
 
     if (action.kind === 'typing_pause') continue
 
     if (action.kind === 'recall_message') {
-      const target = resolveActionTarget(action.targetMessageId, 'assistant')
+      const target = resolveActionTarget(activeConversation.id, action.targetMessageId, 'assistant')
       if (target && target.senderId !== 'user' && !target.recalledAt) {
         const recalledAt = new Date().toISOString()
         await db.messages.update(target.id, {
@@ -1160,7 +1272,7 @@ async function saveAssistantActions(options: { actions: CompanionActionMessage[]
     }
 
     if (action.kind === 'react_to_message') {
-      const target = resolveActionTarget(action.targetMessageId || 'latest_user', 'user')
+      const target = resolveActionTarget(activeConversation.id, action.targetMessageId || 'latest_user', 'user')
       if (target && action.content) {
         await db.messages.update(target.id, { reactionEmoji: action.content.slice(0, 8), reactionToMessageId: target.id, protocolVersion: 2 })
         const targetIndex = messages.value.findIndex(item => item.id === target.id)
@@ -1171,73 +1283,66 @@ async function saveAssistantActions(options: { actions: CompanionActionMessage[]
 
     const now = new Date(Date.now() + index).toISOString()
     const type = actionMessageType(action, options.type)
-    const message: Message = {
-      id: crypto.randomUUID(),
-      worldId: activeConversation.worldId,
-      conversationId: activeConversation.id,
+    const message = await persistAssistantContentMessage({
+      conversation: activeConversation,
       senderId: activeConversation.memberIds[0],
       type,
       content: action.kind === 'image_placeholder' ? '' : action.content,
-      rawContent: !rawContentAssigned && options.rawContent ? options.rawContent : undefined,
-      modelOutput: !modelOutputAssigned && options.modelOutput ? options.modelOutput : undefined,
-      displayContent: options.actions.length === 1 && !displayContentAssigned && options.displayContent ? options.displayContent : undefined,
-      regexPipelineVersion: options.rawContent || options.modelOutput || options.displayContent || options.regexApplied ? 2 : undefined,
-      regexApplied: !rawContentAssigned && options.regexApplied ? options.regexApplied : undefined,
-      status: 'delivered',
-      createdAt: now,
-      roleCardUi: !roleCardUiAssigned && options.roleCardUi ? options.roleCardUi : undefined,
+      generationId: options.generationId,
       provider: options.provider,
       model: options.model,
       proactiveSource: options.proactiveSource,
       replyGroupId: groupId,
       replySequence: index,
+      rawContent: !rawContentAssigned && options.rawContent ? options.rawContent : undefined,
+      modelOutput: !modelOutputAssigned && options.modelOutput ? options.modelOutput : undefined,
+      displayContent: options.actions.length === 1 && !displayContentAssigned && options.displayContent ? options.displayContent : undefined,
+      regexApplied: !rawContentAssigned && options.regexApplied ? options.regexApplied : undefined,
+      roleCardUi: !roleCardUiAssigned && options.roleCardUi ? options.roleCardUi : undefined,
       voiceDurationSeconds: type === 'voice' ? estimateVoiceDuration(action.content) : undefined,
       placeholderImagePrompt: action.kind === 'image_placeholder' ? action.content : undefined,
-      protocolVersion: 2
-    }
+      protocolVersion: 2,
+      createdAt: now
+    })
     if (message.roleCardUi) roleCardUiAssigned = true
     if (message.rawContent) rawContentAssigned = true
     if (message.modelOutput) modelOutputAssigned = true
     if (message.displayContent) displayContentAssigned = true
-    await db.transaction('rw', db.messages, db.conversations, async () => {
-      await db.messages.add(message)
-      await db.conversations.update(activeConversation.id, { updatedAt: now })
-    })
     messages.value = await db.messages.where('conversationId').equals(activeConversation.id).sortBy('createdAt')
     await scrollToBottom()
   }
 }
-async function saveRichAssistantMessage(options: { html: string; rawContent: string; modelOutput?: string; provider: string; model: string; source?: Message['richSource']; replaceMessageId?: string; proactiveSource?: ProactiveSource; regexApplied?: Message['regexApplied'] }) {
-  if (!conversation.value || !character.value) return
-  const activeConversation = conversation.value
+async function saveRichAssistantMessage(options: {
+  conversation: Conversation
+  senderId: string
+  html: string
+  rawContent: string
+  modelOutput?: string
+  provider: string
+  model: string
+  generationId: string
+  source?: Message['richSource']
+  replaceMessageId?: string
+  proactiveSource?: ProactiveSource
+  regexApplied?: Message['regexApplied']
+}) {
+  const activeConversation = options.conversation
   if (options.replaceMessageId) {
-    await db.messages.delete(options.replaceMessageId)
+    await removeGeneratedMessage(options.replaceMessageId)
     messages.value = messages.value.filter(item => item.id !== options.replaceMessageId)
   }
-  const now = new Date().toISOString()
-  const preview = options.html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
-  const message: Message = {
-    id: crypto.randomUUID(),
-    worldId: activeConversation.worldId,
-    conversationId: activeConversation.id,
-    senderId: activeCharacterId(),
-    type: 'rich',
-    content: preview || '互动卡片',
+  await persistRichAssistantMessage({
+    conversation: activeConversation,
+    senderId: options.senderId,
+    html: options.html,
     rawContent: options.rawContent,
     modelOutput: options.modelOutput,
-    regexPipelineVersion: 2,
-    regexApplied: options.regexApplied,
-    richHtml: options.html,
-    richSource: options.source || 'regex',
-    status: 'delivered',
     provider: options.provider,
     model: options.model,
+    generationId: options.generationId,
+    source: options.source,
     proactiveSource: options.proactiveSource,
-    createdAt: now
-  }
-  await db.transaction('rw', db.messages, db.conversations, async () => {
-    await db.messages.add(message)
-    await db.conversations.update(activeConversation.id, { updatedAt: now })
+    regexApplied: options.regexApplied
   })
   messages.value = await db.messages.where('conversationId').equals(activeConversation.id).sortBy('createdAt')
   streamingMessageId.value = ''
@@ -1245,39 +1350,7 @@ async function saveRichAssistantMessage(options: { html: string; rawContent: str
   await scrollToBottom('auto')
 }
 
-function activeCharacterId() {
-  return conversation.value?.memberIds[0] || character.value?.id || ''
-}
-
-function buildDeviceTimeContext(now = new Date()) {
-  const weekday = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()]
-  const date = now.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-  const time = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-  const offsetMinutes = -now.getTimezoneOffset()
-  const sign = offsetMinutes >= 0 ? '+' : '-'
-  const absolute = Math.abs(offsetMinutes)
-  const offset = `${sign}${String(Math.floor(absolute / 60)).padStart(2, '0')}:${String(absolute % 60).padStart(2, '0')}`
-  return [
-    `设备本地日期时间：${date} ${weekday} ${time}（UTC${offset}）`,
-    '所有“现在、今天、明天、几点、还有多久、几小时后”等时间判断都以这条设备时间为准。',
-    '如果要说“还有 X 小时/分钟”，必须按当前时间精确计算；不确定时只说具体时间，不要估算一个数字。'
-  ].join('\n')
-}
-
-function includeVisionCount(request: ChatRequest) {
-  return request.messages.reduce((total, turn) => typeof turn.content === 'string' ? total : total + turn.content.filter(part => part.type === 'image_url').length, 0)
-}
-
-async function requestAssistantReply(options?: {
-  musicPrompt?: string
-  type?: Message['type']
-  sourceMessageId?: string
-  visualMessageId?: string
-  alternativeTargetId?: string
-  memoryWriteNotice?: string
-  proactivePrompt?: string
-  proactiveSource?: ProactiveSource
-}) {
+async function requestAssistantReply(options?: GenerationRequestOptions) {
   if (!conversation.value || !character.value || !chatSettings.value) return
 
   manualStopRequested = false
@@ -1290,7 +1363,9 @@ async function requestAssistantReply(options?: {
   const activeConversation = conversation.value
   const activeCharacter = character.value
   const settings = chatSettings.value
+  const generationId = crypto.randomUUID()
   const streamSession: StreamingReplySession = {
+    generationId,
     rawText: '',
     text: '',
     provider: '',
@@ -1307,407 +1382,168 @@ async function requestAssistantReply(options?: {
   let visionFallback = false
 
   try {
-    let currentModelSettings = await getModelSettings()
-    modelSettings.value = currentModelSettings
-    const provider = createProvider(currentModelSettings)
+    const generationContext = await buildGenerationContext({
+      conversation: activeConversation,
+      character: activeCharacter,
+      settings,
+      conversationState: conversationState.value,
+      messages: messages.value,
+      memories: memories.value,
+      activePersona: activePersona.value,
+      signal,
+      requestOptions: options,
+      generationId
+    })
+    modelSettings.value = generationContext.modelSettings
+    activePersona.value = generationContext.persona
 
-    const persona = activePersona.value ?? await getPersonaForChat(settings)
-    activePersona.value = persona
-    const activePreset = await getActivePromptPreset(activeCharacter.id)
-    const macroCharacterName = characterMacroName(activeCharacter)
-    const regexMacros = { user: persona.name, char: macroCharacterName }
-    const [activeAssistantRegex, activeUserRegex, activeWorldRegex] = await Promise.all([
-      listActiveRegexScripts(activeCharacter.id, 'assistant-output'),
-      listActiveRegexScripts(activeCharacter.id, 'user-input'),
-      listActiveRegexScripts(activeCharacter.id, 'world-info')
-    ])
-    const assistantStorageRegex = regexScriptsForStage(activeAssistantRegex, { source: 'assistant-output', phase: 'storage', depth: 0 })
-    const assistantDisplayRegex = regexScriptsForStage(activeAssistantRegex, { source: 'assistant-output', phase: 'display', depth: 0 })
-    // Outgoing Prompt Regex keeps every phase-matching candidate here; minDepth/maxDepth are evaluated later for EACH historical message.
-    const assistantPromptRegex = regexScriptsForDynamicDepthPhase(activeAssistantRegex, { source: 'assistant-output', phase: 'outgoing-prompt' })
-    const userPromptRegex = regexScriptsForDynamicDepthPhase(activeUserRegex, { source: 'user-input', phase: 'outgoing-prompt' })
-    const assistantPromptContractRegex = assistantPromptRegex
-    const assistantUiRegex = [...assistantStorageRegex, ...assistantDisplayRegex].filter((item, index, rows) => rows.findIndex(row => row.id === item.id) === index)
-    const regexExecutionTraces: RegexExecutionTrace[] = []
+    const {
+      persona,
+      macroCharacterName,
+      regexMacros,
+      activeAssistantRegex,
+      activeUserRegex,
+      activeWorldRegex,
+      assistantStorageRegex,
+      displayAssistantRegex,
+      regexExecutionTraces,
+      latestUserText,
+      memoryHitDetails,
+      lorebook,
+      communityUiContract,
+      presentationHidesCommunityUi,
+      runtimeProfile
+    } = generationContext
     const rememberRegexTraces = <T extends { traces?: RegexExecutionTrace[] }>(result: T) => {
       if (result.traces?.length) regexExecutionTraces.push(...result.traces)
       return result
     }
-    if (assistantUiRegex.some(regexProducesRichUi)) streamSession.suppressPreview = true
-    const latestUserText = [...messages.value].reverse().find(item => item.senderId === 'user')?.content ?? ''
-    const memoryQuery = [latestUserText, options?.musicPrompt || '', conversationState.value?.unresolvedTopics?.join(' ') || ''].filter(Boolean).join('\n')
-    const memoryHitDetails = settings.memoryEnabled
-      ? selectMemoryHitsDetailed(memories.value, memoryQuery, settings.memoryStrength === 'deep' ? 14 : settings.memoryStrength === 'light' ? 6 : 10)
-      : []
-    const memoryHits = memoryHitDetails.map(item => item.memory)
-    const memoryPrompt = settings.memoryEnabled ? buildMemoryPrompt(memoryHits, conversationState.value?.summary ?? '') : ''
-    if (memoryHitDetails.length) void recordMemoryHits(memoryHitDetails)
-
-    const lorebook = settings.lorebookEnabled
-      ? await buildLorebookPrompt({
-        worldId: activeConversation.worldId,
-        characterId: activeCharacter.id,
-        messages: messages.value,
-        latestText: [latestUserText, options?.musicPrompt || ''].filter(Boolean).join('\n'),
-        character: activeCharacter,
-        persona,
-        activeResourceEntryId: conversationState.value?.activeResourceEntryId,
-        runtimeState: conversationState.value?.lorebookRuntime
-      })
-      : {
-        prompt: '', beforePrompt: '', afterPrompt: '', beforeCharacterPrompt: '', afterCharacterPrompt: '',
-        authorNoteTopPrompt: '', authorNoteBottomPrompt: '', beforeExamplesPrompt: '', afterExamplesPrompt: '',
-        depthInjections: [], outlets: {}, activated: [], focused: [], deferred: [], routingDecisions: [], estimatedSavedCharacters: 0,
-        nextRuntimeState: conversationState.value?.lorebookRuntime || {},
-        engineDebug: { evaluatedEntries: 0, initialActivated: 0, recursiveActivated: 0, recursionSteps: 0, estimatedUsedTokens: 0, droppedByBudget: 0, stickyActive: [], cooldownBlocked: [], delayBlocked: [], groupDropped: [], depthInjections: [] },
-        resourceSession: { continued: false, exitRequested: false }
-      }
-
-    const applyWorldRegex = (value: string) => {
-      if (!activeWorldRegex.length || !value) return value
-      return rememberRegexTraces(compileWorldInfoRegex({ text: value, scripts: activeWorldRegex, macros: regexMacros })).text
-    }
-    const runtimeLorebookPrompt = applyWorldRegex(lorebook.prompt)
-    const runtimeLorebookBeforeCharacter = applyWorldRegex(lorebook.beforePrompt)
-    const runtimeLorebookAfterCharacter = applyWorldRegex(lorebook.afterCharacterPrompt)
-    const runtimeLorebookAuthorNoteTop = applyWorldRegex(lorebook.authorNoteTopPrompt)
-    const runtimeLorebookAuthorNoteBottom = applyWorldRegex(lorebook.authorNoteBottomPrompt)
-    const runtimeLorebookBeforeExamples = applyWorldRegex(lorebook.beforeExamplesPrompt)
-    const runtimeLorebookAfterExamples = applyWorldRegex(lorebook.afterExamplesPrompt)
-    const runtimeLorebookDepth = lorebook.depthInjections.map(item => ({ ...item, content: applyWorldRegex(item.content) }))
-    const runtimeLorebookOutlets = Object.fromEntries(Object.entries(lorebook.outlets).map(([key, value]) => [key, applyWorldRegex(value)]))
-    const runtimeLorebookContractSource = [
-      runtimeLorebookPrompt,
-      ...runtimeLorebookDepth.map(item => item.content),
-      ...Object.values(runtimeLorebookOutlets)
-    ].filter(Boolean).join('\n\n')
-    const detectedCommunityUiContract = detectCommunityUiContract({
-      character: activeCharacter,
-      lorebookPrompt: runtimeLorebookContractSource,
-      preset: activePreset,
-      assistantRegex: assistantUiRegex,
-      promptRegex: assistantPromptContractRegex
-    })
-    const presentationHidesCommunityUi = settings.conversationPresentationMode !== 'scene-merged'
-    const communityUiContract = presentationHidesCommunityUi
-      ? { ...detectedCommunityUiContract, active: false, mode: 'none' as const }
-      : detectedCommunityUiContract
-    // 手机式呈现不运行“把整条回复变成 HTML UI”的 Regex；普通文本 Regex 继续生效。
-    const displayAssistantRegex = presentationHidesCommunityUi
-      ? assistantDisplayRegex.filter(item => !regexProducesRichUi(item))
-      : assistantDisplayRegex
-    const runtimeProfile = resolveCharacterRuntimeProfile({
-      character: activeCharacter,
-      settings,
-      communityUiContract: detectedCommunityUiContract,
-      resourceUiActive: Boolean(lorebook.resourceSession.entryId)
-    })
-    streamSession.preserveRawOutput = runtimeProfile.preserveCardOutput
-    streamSession.suppressPreview = Boolean(
-      presentationHidesCommunityUi ||
-      communityUiContract.active ||
-      assistantStorageRegex.length ||
-      assistantDisplayRegex.length ||
-      displayAssistantRegex.some(regexProducesRichUi) ||
-      (runtimeProfile.useNativeInteractionProtocol && settings.multiBubble && resolvePresenceMode(settings, conversationState.value) === 'remote')
-    )
-
-    visualMessage = options?.visualMessageId
-      ? messages.value.find(item => item.id === options.visualMessageId)
-      : undefined
-
-    if (visualMessage) {
-      visionImageCount.value = getMessageImageUrls(visualMessage).length
-      visionStage.value = 'checking'
-    }
-
-    const visionCapability = getVisionCapability(currentModelSettings)
-    const mayUseVision = Boolean(
-      visualMessage?.type === 'image' &&
-      getMessageImageUrls(visualMessage).length > 0 &&
-      visionCapability !== 'unsupported'
-    )
-
-    visionUsed = mayUseVision
-    visionFallback = Boolean(visualMessage) && !mayUseVision
-    if (visualMessage && !mayUseVision) {
-      visionStage.value = 'text-only'
-      noticeMessage.value = '当前模型已标记为不支持图片理解，将根据图片说明继续回应。'
-    }
-
-    const applyDepthInjections = (turns: ChatTurn[]): ChatTurn[] => {
-      if (!runtimeLorebookDepth.length) return turns
-      const grouped = new Map<number, typeof runtimeLorebookDepth>()
-      for (const injection of runtimeLorebookDepth) {
-        const index = Math.max(0, Math.min(turns.length, turns.length - Math.max(0, injection.depth)))
-        const list = grouped.get(index) || []
-        list.push(injection)
-        grouped.set(index, list)
-      }
-      const output: ChatTurn[] = []
-      for (let index = 0; index <= turns.length; index += 1) {
-        const rows = (grouped.get(index) || []).sort((a, b) => a.order - b.order || ({ user: 0, assistant: 1, system: 2 }[a.role] - { user: 0, assistant: 1, system: 2 }[b.role]))
-        rows.forEach(row => output.push({ role: row.role, content: row.content }))
-        if (index < turns.length) output.push(turns[index])
-      }
-      return output
-    }
-
-    const applyOutgoingRegexToContent = (
-      content: ChatTurn['content'],
-      source: 'user-input' | 'assistant-output',
-      scripts: typeof activeUserRegex,
-      depth: number
-    ): ChatTurn['content'] => {
-      if (!scripts.length) return content
-      if (typeof content === 'string') {
-        return rememberRegexTraces(compileOutgoingMessageRegex({ text: content, source, scripts, depth, macros: regexMacros })).text
-      }
-      return content.map(part => part.type === 'text'
-        ? { ...part, text: rememberRegexTraces(compileOutgoingMessageRegex({ text: part.text, source, scripts, depth, macros: regexMacros })).text }
-        : part)
-    }
-
-    const buildRecentTurns = (includeVision: boolean): ChatTurn[] => {
-      const alternativeIndex = options?.alternativeTargetId
-        ? messages.value.findIndex(item => item.id === options.alternativeTargetId)
-        : -1
-      const promptMessages = alternativeIndex >= 0
-        ? messages.value.slice(0, alternativeIndex)
-        : messages.value
-      const rows = promptMessages
-        .filter(message => message.type !== 'system' && !message.recalledAt)
-        .slice(-settings.recentMessageLimit)
-        .map(message => {
-          const role = message.senderId === 'user' ? ('user' as const) : ('assistant' as const)
-          const content = includeVision && message.id === visualMessage?.id
-            ? imageMessageContent(message)
-            : formatMessageForPrompt(message)
-          return { role, content }
-        })
-
-      const turns: ChatTurn[] = rows.map((row, index) => {
-        // Regex depth counts actual chat rows only. Internal director/music instructions must not shift depth 0/1/2.
-        const depth = Math.max(0, rows.length - 1 - index)
-        const source = row.role === 'user' ? ('user-input' as const) : ('assistant-output' as const)
-        const scripts = row.role === 'user' ? userPromptRegex : assistantPromptRegex
-        return { role: row.role, content: applyOutgoingRegexToContent(row.content, source, scripts, depth) }
-      })
-
-      // This is an app-internal instruction, not a stored user message; user-input Regex must not rewrite it.
-      if (options?.musicPrompt) turns.push({ role: 'user', content: options.musicPrompt })
-
-      return applyDepthInjections(turns)
-    }
-
-    const buildRuntimeSystemPrompt = (includeVision: boolean) => {
-      const base = composeWithPromptPreset(composeRoleplaySystemPrompt({
-        character: activeCharacter,
-        persona,
-        settings,
-        memoryPrompt,
-        lorebookPrompt: runtimeLorebookPrompt,
-        lorebookBeforeCharacterPrompt: runtimeLorebookBeforeCharacter,
-        lorebookAfterCharacterPrompt: runtimeLorebookAfterCharacter,
-        lorebookAuthorNoteTopPrompt: runtimeLorebookAuthorNoteTop,
-        lorebookAuthorNoteBottomPrompt: runtimeLorebookAuthorNoteBottom,
-        lorebookBeforeExamplesPrompt: runtimeLorebookBeforeExamples,
-        lorebookAfterExamplesPrompt: runtimeLorebookAfterExamples,
-        currentSummary: conversationState.value?.summary || '',
-        statePrompt: buildConversationStatePrompt(conversationState.value ? { ...conversationState.value, presence: resolvePresenceMode(settings, conversationState.value) } : undefined),
-        sceneTransitionPrompt: buildUserSceneTransitionPrompt(deriveUserSceneTransition(latestUserText, conversationState.value)),
-        conversationState: conversationState.value ? { ...conversationState.value, presence: resolvePresenceMode(settings, conversationState.value) } : undefined,
-        deviceTimeContext: buildDeviceTimeContext(),
-        memoryWriteNotice: options?.memoryWriteNotice,
-        hasImages: includeVision && Boolean(visualMessage),
-        imageCount: includeVision && visualMessage ? getMessageImageUrls(visualMessage).length : 0,
-        isAlternativeReply: Boolean(options?.alternativeTargetId),
-        communityUiContract,
-        openingMode: activeConversation.openingMode
-      }), activePreset, {
-        char: characterMacroName(activeCharacter),
-        user: persona.name,
-        scenario: activeCharacter.scenario || '',
-        personality: activeCharacter.cardPersonality || activeCharacter.persona || '',
-        persona: persona.description || persona.identity || '',
-        description: activeCharacter.cardDescription || activeCharacter.background || activeCharacter.identity || '',
-        lastChatMessage: latestUserText,
-        outlets: runtimeLorebookOutlets
-      })
-      // Regex promptOnly 不再错误地改写整个 System Prompt；它只作用于自己 placement 对应的历史消息 / World Info。
-      const proactivePrompt = options?.proactivePrompt?.trim()
-      const withProactive = proactivePrompt ? `${base}\n\n${proactivePrompt}` : base
-      const uiPriority = buildCommunityUiPriorityPrompt(communityUiContract)
-      const withUiPriority = uiPriority ? `${withProactive}\n\n${uiPriority}` : withProactive
-      const presentationOverride = buildPresentationOverridePrompt(settings)
-      return presentationOverride ? `${withUiPriority}\n\n${presentationOverride}` : withUiPriority
-    }
-
-    const createRequest = (includeVision: boolean): ChatRequest => ({
-      model: currentModelSettings.model,
-      temperature: currentModelSettings.temperature,
-      signal,
-      character: {
-        characterName: activeCharacter.name,
-        userName: persona.name,
-        identity: activeCharacter.identity,
-        persona: activeCharacter.persona,
-        speakingStyle: activeCharacter.speakingStyle,
-        background: activeCharacter.background,
-        relationship: activeCharacter.relationship,
-        mood: activeCharacter.mood,
-        activity: activeCharacter.activity,
-        likes: activeCharacter.likes,
-        dislikes: activeCharacter.dislikes,
-        scenario: activeCharacter.scenario,
-        roleplayMode: settings.roleplayMode,
-        initiative: activeCharacter.initiative,
-        narrationStyle: activeCharacter.narrationStyle,
-        emojiFrequency: activeCharacter.emojiFrequency,
-        questionFrequency: activeCharacter.questionFrequency
-      },
-      messages: [
-        {
-          role: 'system',
-          content: buildRuntimeSystemPrompt(includeVision)
-        },
-        ...buildRecentTurns(includeVision)
-      ]
-    })
-
+    const provider = createProvider(generationContext.modelSettings)
+    let currentModelSettings = generationContext.modelSettings
     let response: ChatResponse
     let debugTrace: PromptDebugTrace | undefined
     let providerId = provider.id
     let usedModel = currentModelSettings.model
     let providerNotice = ''
-    const cumulativeTokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, successfulCalls: 0 }
+    const cumulativeTokenUsage = createGenerationTokenUsage()
     const collectTokenUsage = (result: ChatResponse) => {
-      cumulativeTokenUsage.successfulCalls += 1
-      cumulativeTokenUsage.promptTokens += result.usage?.promptTokens || 0
-      cumulativeTokenUsage.completionTokens += result.usage?.completionTokens || 0
-      cumulativeTokenUsage.totalTokens += result.usage?.totalTokens || ((result.usage?.promptTokens || 0) + (result.usage?.completionTokens || 0))
+      accumulateGenerationTokenUsage(cumulativeTokenUsage, result)
+    }
+    const createRequest = (includeVision: boolean): ChatRequest => cloneChatRequest(
+      includeVision
+        ? generationContext.requests.withVision
+        : generationContext.requests.withoutVision
+    )
+
+    streamSession.preserveRawOutput = generationContext.preserveRawOutput
+    streamSession.suppressPreview = generationContext.suppressStreamingPreview
+    visualMessage = generationContext.visualMessage
+    visionUsed = generationContext.mayUseVision
+    visionFallback = Boolean(visualMessage) && !generationContext.mayUseVision
+
+    if (visualMessage) {
+      visionImageCount.value = getMessageImageUrls(visualMessage).length
+      visionStage.value = 'checking'
+    }
+    if (visualMessage && !generationContext.mayUseVision) {
+      visionStage.value = 'text-only'
+      noticeMessage.value = '当前模型已标记为不支持图片理解，将根据图片说明继续回应。'
     }
 
-    const runProvider = async (
-      activeProvider: ModelProvider,
-      request: ChatRequest
-    ) => {
-      if (!debugTrace && settings.promptDebugEnabled) {
-        const systemPrompt = chatTurnContentText(request.messages[0]?.content || '')
-        const recentMessages = request.messages.slice(1).map(turn => ({ role: turn.role, content: chatTurnContentText(turn.content) }))
-        const promptSections = analyzePromptSections(systemPrompt, recentMessages)
-        const cardRuntime = buildCharacterRuntimeManifest(activeCharacter)
-        try {
-          debugTrace = await savePromptDebugTrace({
-            conversationId: activeConversation.id,
-            characterId: activeCharacter.id,
-            provider: activeProvider.id,
-            model: request.model,
-            roleplayMode: settings.roleplayMode,
-            personaName: persona.name,
-            systemPrompt,
-            recentMessages,
-            activatedLorebook: lorebook.activated.map(item => ({ id: item.id, title: item.title, reason: item.activationReason })),
-            resourceRouting: lorebook.routingDecisions,
-            estimatedSavedCharacters: lorebook.estimatedSavedCharacters,
-            characterCardRuntime: {
-              family: cardRuntime.family,
-              sourceLabel: cardRuntime.sourceLabel,
-              macroCharacterName: cardRuntime.macroCharacterName,
-              systemPromptMode: cardRuntime.systemPromptMode,
-              postHistoryMode: cardRuntime.postHistoryMode,
-              creatorNotesInPrompt: false,
-              greetingCount: cardRuntime.greetings.length,
-              notes: cardRuntime.notes
-            },
-            lorebookEngine: lorebook.engineDebug,
-            memoryHits: memoryHitDetails.map(item => ({ id: item.memory.id, content: item.memory.content, importance: item.memory.importance, layer: item.memory.layer, score: item.score, reason: item.reasons.join('；') })),
-            imageCount: includeVisionCount(request),
-            estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages),
-            protocolEnabled: runtimeProfile.useNativeInteractionProtocol,
-            promptSections,
-            truncations: buildTruncationNotes({ allMessageCount: messages.value.length, includedMessageCount: recentMessages.length, systemPrompt, sections: promptSections }),
-            ruleInfluences: buildRuleInfluences(systemPrompt)
-          })
-        } catch (debugError) {
-          // Prompt 调试是旁路诊断能力，写库失败绝不能中断正常聊天。
-          console.warn('保存 Prompt 调试记录失败：', debugError)
-          debugTrace = undefined
-        }
-      }
-      streamSession.provider = activeProvider.id
-      streamSession.model = request.model
-
-      if (visualMessage && visionUsed) visionStage.value = 'analyzing'
-
-      if (!useStreaming) {
-        const result = await activeProvider.chat(request)
-        collectTokenUsage(result)
-        if (visualMessage) visionStage.value = 'replying'
-        return result
-      }
-
-      const result = await activeProvider.chatStream(
-        request,
-        {
-          onDelta: chunk => {
-            if (visualMessage) visionStage.value = 'replying'
-            return appendStreamChunk(streamSession, chunk)
-          }
-        }
-      )
-      collectTokenUsage(result)
-      return result
-    }
-
-    try {
+    const prepareDebugTrace = async (activeProvider: { id: string }, request: ChatRequest) => {
+      if (debugTrace || !settings.promptDebugEnabled) return
+      const systemPrompt = chatTurnContentText(request.messages[0]?.content || '')
+      const recentMessages = request.messages.slice(1).map(turn => ({
+        role: turn.role,
+        content: chatTurnContentText(turn.content)
+      }))
+      const promptSections = analyzePromptSections(systemPrompt, recentMessages)
+      const cardRuntime = generationContext.cardRuntime
       try {
-        response = await runProvider(
-          provider,
-          createRequest(mayUseVision)
-        )
-
-        if (
-          mayUseVision &&
-          currentModelSettings.visionMode === 'auto'
-        ) {
-          currentModelSettings = await saveVisionCapability(
-            currentModelSettings,
-            true
-          )
-          modelSettings.value = currentModelSettings
-        }
-      } catch (providerError) {
-        if (isAbortError(providerError)) throw providerError
-
-        const canRetryWithoutVision =
-          !streamSession.text &&
-          mayUseVision &&
-          currentModelSettings.visionMode === 'auto' &&
-          isVisionUnsupportedError(providerError)
-
-        if (!canRetryWithoutVision) throw providerError
-
-        visionUsed = false
-        visionFallback = true
-        response = await runProvider(
-          provider,
-          createRequest(false)
-        )
-        currentModelSettings = await saveVisionCapability(
-          currentModelSettings,
-          false
-        )
-        modelSettings.value = currentModelSettings
-        visionStage.value = 'text-only'
-        providerNotice = '当前模型不支持图片理解，本次只把文字部分交给同一 AI 继续处理；没有使用本地角色回复。'
-        noticeMessage.value = providerNotice
+        debugTrace = await savePromptDebugTrace({
+          conversationId: activeConversation.id,
+          characterId: activeCharacter.id,
+          generationId,
+          sourceMessageId: options?.sourceMessageId,
+          contextCreatedAt: generationContext.contextCreatedAt,
+          provider: activeProvider.id,
+          model: request.model,
+          roleplayMode: settings.roleplayMode,
+          personaName: persona.name,
+          systemPrompt,
+          recentMessages,
+          activatedLorebook: lorebook.activated.map(item => ({
+            id: item.id,
+            title: item.title,
+            reason: item.activationReason
+          })),
+          resourceRouting: lorebook.routingDecisions,
+          estimatedSavedCharacters: lorebook.estimatedSavedCharacters,
+          characterCardRuntime: {
+            family: cardRuntime.family,
+            sourceLabel: cardRuntime.sourceLabel,
+            macroCharacterName: cardRuntime.macroCharacterName,
+            systemPromptMode: cardRuntime.systemPromptMode,
+            postHistoryMode: cardRuntime.postHistoryMode,
+            creatorNotesInPrompt: false,
+            greetingCount: cardRuntime.greetings.length,
+            notes: cardRuntime.notes
+          },
+          lorebookEngine: lorebook.engineDebug,
+          memoryHits: memoryHitDetails.map(item => ({
+            id: item.memory.id,
+            content: item.memory.content,
+            importance: item.memory.importance,
+            layer: item.memory.layer,
+            score: item.score,
+            reason: item.reasons.join('；')
+          })),
+          imageCount: includeVisionCount(request),
+          estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages),
+          protocolEnabled: runtimeProfile.useNativeInteractionProtocol,
+          promptSections,
+          truncations: buildTruncationNotes({
+            allMessageCount: generationContext.messages.length,
+            includedMessageCount: recentMessages.length,
+            systemPrompt,
+            sections: promptSections
+          }),
+          ruleInfluences: buildRuleInfluences(systemPrompt)
+        })
+      } catch (debugError) {
+        // Prompt 调试是旁路诊断能力，写库失败绝不能中断正常聊天。
+        console.warn('保存 Prompt 调试记录失败：', debugError)
+        debugTrace = undefined
       }
-    } catch (providerError) {
-      if (isAbortError(providerError)) throw providerError
-      // 真实 AI 失败就停止。本地不生成角色回复，也不使用任何模拟模型兜底。
-      throw providerError
     }
+
+    const providerRun = await runGenerationProvider({
+      context: generationContext,
+      provider,
+      useStreaming,
+      usage: cumulativeTokenUsage,
+      onBeforeRequest: async (activeProvider, request) => {
+        streamSession.provider = activeProvider.id
+        streamSession.model = request.model
+        await prepareDebugTrace(activeProvider, request)
+      },
+      onDelta: chunk => appendStreamChunk(streamSession, chunk),
+      onVisionStage: stage => {
+        visionStage.value = stage
+      },
+      canRetryWithoutVision: () => !streamSession.text
+    })
+    response = providerRun.response
+    providerId = providerRun.providerId
+    usedModel = providerRun.model
+    currentModelSettings = providerRun.modelSettings
+    modelSettings.value = currentModelSettings
+    providerNotice = providerRun.providerNotice
+    visionUsed = providerRun.visionUsed
+    visionFallback = providerRun.visionFallback
+    streamSession.provider = providerId
+    streamSession.model = usedModel
+    if (providerNotice) noticeMessage.value = providerNotice
 
     if (options?.proactivePrompt && /<no_proactive_message\s*\/?\s*>/i.test(response.text)) {
       await discardStreamingMessage(streamSession)
@@ -1803,7 +1639,7 @@ async function requestAssistantReply(options?: {
       // Regex/XML 型状态 UI 最常见的失败不是“正文没生成”，而是模型偶尔漏掉状态字段。
       // 先尝试只复用最近历史里 AI 自己已经生成过的同名字段；当前正文与当前字段始终优先。
       // 这是 UI 状态延续，不是本地编剧情；合并后的作者结构会写入 rawContent，供后续 Regex/UI 状态连续性使用。
-      const previousCommunityRawOutputs = [...messages.value]
+      const previousCommunityRawOutputs = [...generationContext.messages]
         .filter(item => item.senderId !== 'user' && !item.recalledAt)
         .reverse()
         .map(item => item.rawContent || item.content)
@@ -1844,7 +1680,7 @@ async function requestAssistantReply(options?: {
             const tagNeedles = communityUiContract.requiredTagNames.map(name => name.toLocaleLowerCase())
             const relevantAuthorRules = lorebook.activated
               .map(entry => ({
-                content: applyWorldRegex(entry.content || ''),
+                content: generationContext.applyWorldRegex(entry.content || ''),
                 score: tagNeedles.reduce((count, tag) => count + ((entry.content || '').toLocaleLowerCase().includes(tag) ? 1 : 0), 0)
                   + (entry.activationReason.includes('作者每轮') ? 8 : 0)
               }))
@@ -1864,7 +1700,7 @@ async function requestAssistantReply(options?: {
               currentOutput: assistantCanonicalText,
               authorRules: relevantAuthorRules,
               roleContext,
-              conversationState: buildConversationStatePrompt(conversationState.value),
+              conversationState: buildConversationStatePrompt(generationContext.conversationState),
               latestUserText
             })
             const uiRepairRequest: ChatRequest = {
@@ -1950,7 +1786,7 @@ async function requestAssistantReply(options?: {
     }
 
     if (richReplyHtml) {
-      const realUserMessages = messages.value
+      const realUserMessages = generationContext.messages
         .filter(item => item.senderId === 'user' && !item.recalledAt)
         .slice(-24)
         .map(item => item.content)
@@ -1985,8 +1821,8 @@ async function requestAssistantReply(options?: {
     }
 
     const renderStateForDisplay = parsedOutput.status?.presence
-      ? ({ ...(conversationState.value || {}), presence: parsedOutput.status.presence } as ConversationState)
-      : conversationState.value
+      ? ({ ...(generationContext.conversationState || {}), presence: parsedOutput.status.presence } as ConversationState)
+      : generationContext.conversationState
     const projectedActions = runtimeProfile.allowNativeMessageReshaping
       ? shapeCompanionActions(parsedOutput.messages.slice(), activeCharacter, settings, Boolean(parsedOutput.rawPacket), renderStateForDisplay)
       : parsedOutput.messages.slice()
@@ -2042,9 +1878,9 @@ async function requestAssistantReply(options?: {
             text: finalVisibleOutput,
             character: activeCharacter,
             latestUserText,
-            relationshipNote: conversationState.value?.relationshipNote,
+            relationshipNote: generationContext.conversationState?.relationshipNote,
             imageCount: visualMessage ? getMessageImageUrls(visualMessage).length : 0,
-            recentAssistantMessages: messages.value.filter(item => item.senderId !== 'user')
+            recentAssistantMessages: generationContext.messages.filter(item => item.senderId !== 'user')
           })
         })
       } catch (debugError) {
@@ -2065,8 +1901,8 @@ async function requestAssistantReply(options?: {
       ? { lorebookRuntime: lorebook.nextRuntimeState }
       : {}
 
-    if (!options?.alternativeTargetId && conversationState.value && (parsedOutput.status || Object.keys(resourceSessionPatch).length || Object.keys(lorebookRuntimePatch).length)) {
-      const beforeState = conversationState.value
+    if (!options?.alternativeTargetId && generationContext.conversationState && (parsedOutput.status || Object.keys(resourceSessionPatch).length || Object.keys(lorebookRuntimePatch).length)) {
+      const beforeState = generationContext.conversationState
       const statePatch = {
         ...(parsedOutput.status ? mergeStatusIntoConversationState(beforeState, parsedOutput.status, parsedOutput.presenceResolution) : {}),
         ...resourceSessionPatch,
@@ -2104,23 +1940,31 @@ async function requestAssistantReply(options?: {
     if (options?.alternativeTargetId) {
       const target = messages.value.find(item => item.id === options.alternativeTargetId)
       if (!target) throw new Error('没有找到需要添加候选回复的消息。')
-      const baseAlternatives = target.alternatives?.length ? target.alternatives.slice() : [target.content]
-      const candidate = finalVisibleOutput.trim()
-      const alternatives = baseAlternatives.includes(candidate) ? baseAlternatives : [...baseAlternatives, candidate]
-      const activeAlternativeIndex = Math.max(0, alternatives.indexOf(candidate))
-      const patch: Partial<Message> = { content: candidate, alternatives, activeAlternativeIndex, provider: providerId, model: usedModel, status: 'delivered' }
-      await db.messages.update(target.id, patch)
+      const { patch, activeAlternativeIndex } = await persistAlternativeReply({
+        target,
+        content: finalVisibleOutput,
+        provider: providerId,
+        model: usedModel,
+        generationId
+      })
       const targetIndex = messages.value.findIndex(item => item.id === target.id)
       if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], ...patch }
       noticeMessage.value = `已生成第 ${activeAlternativeIndex + 1} 个候选回复。`
     } else if (richReplyHtml) {
       await saveRichAssistantMessage({
+        conversation: activeConversation,
+        senderId: activeCharacter.id,
         html: richReplyHtml,
         rawContent: assistantCanonicalText,
         modelOutput: initialAiResponse.text,
         provider: providerId,
         model: usedModel,
-        source: regexDisplay.applied.length ? 'regex' : 'worldbook-ui',
+        generationId,
+        source: regexDisplay.applied.some(name => activeAssistantRegex.some(script => script.name === name && regexProducesRichUi(script)))
+          ? 'regex'
+          : communityUiContract.active
+            ? 'worldbook-ui'
+            : 'card-ui',
         replaceMessageId: streamSession.messageId,
         proactiveSource: options?.proactiveSource,
         regexApplied: assistantRegexApplied
@@ -2132,9 +1976,13 @@ async function requestAssistantReply(options?: {
         ? (communityUiText || sanitizeCommunityUiText(assistantRegexView.displayText))
         : finalVisibleOutput
       await saveAssistantActions({
+        conversation: activeConversation,
+        character: activeCharacter,
+        settings,
         actions: [{ kind: 'text', content: assistantCanonicalText }],
         provider: providerId,
         model: usedModel,
+        generationId,
         type: options?.type,
         signal,
         replaceMessageId: streamSession.messageId,
@@ -2148,13 +1996,24 @@ async function requestAssistantReply(options?: {
       streamSession.messageId = undefined
     } else if (useStreaming) {
       streamSession.provider = providerId; streamSession.model = usedModel
-      await finishStreamingMessage(streamSession, parsedOutput, settings.multiBubble, runtimeProfile.allowNativeMessageReshaping)
+      await finishStreamingMessage(
+        streamSession,
+        parsedOutput,
+        activeCharacter,
+        settings,
+        generationContext.conversationState,
+        runtimeProfile.allowNativeMessageReshaping
+      )
     } else {
       if (settings.naturalDelay) await wait(240 + Math.min(900, parsedOutput.visibleText.length * 9), signal)
       await saveAssistantActions({
+        conversation: activeConversation,
+        character: activeCharacter,
+        settings,
         actions: projectedActions,
         provider: providerId,
         model: usedModel,
+        generationId,
         type: options?.type,
         signal,
         roleCardUi: visibleRoleCardUi,
@@ -2411,7 +2270,7 @@ async function send() {
       })
       memoryWriteNotice = buildMemoryWriteNotice(memoryWrite, canonicalUserText)
       await refreshMemoryList()
-      if (memoryWrite.conflicts.length) noticeMessage.value = '发现一组记忆冲突，可在“记忆管理”中确认正确版本。'
+      if (memoryWrite.conflicts.length) noticeMessage.value = '发现一组记忆冲突，可在主屏幕“记忆”中确认正确版本。'
     }
     if (images.length) {
       visionImageCount.value = images.length
@@ -2603,7 +2462,16 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
   const greetingActivity = inferCardInitialActivity(macroResolved)
   const greetingRelationship = inferCardInitialRelationship(macroResolved)
   const greetingPresentationHidesUi = chatSettings.value?.conversationPresentationMode !== 'scene-merged'
-  const greetingAssistantRegex = await listActiveRegexScripts(character.value.id, 'assistant-output')
+  const openingUiRuntime = await resolveOpeningCommunityUiRuntime({
+    conversation: conversation.value,
+    character: character.value,
+    settings: chatSettings.value || await getChatSettings(conversation.value.id),
+    persona: activePersona.value,
+    greetingText: macroResolved
+  })
+  const greetingAssistantRegex = openingUiRuntime.assistantRegex
+  const greetingCommunityUiContract = openingUiRuntime.contract
+
   const greetingDisplayScripts = greetingPresentationHidesUi
     ? greetingAssistantRegex.filter(item => !regexProducesRichUi(item))
     : greetingAssistantRegex
@@ -2616,9 +2484,29 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
     macros: { user: userName, char: characterMacroName(character.value) }
   })
   const rawIsRich = greetingRegexView.rich || looksLikeRichHtml(greetingRegexView.displayText)
+  const greetingAppliedRegex = [...greetingRegexView.storageApplied, ...greetingRegexView.displayApplied]
+  const greetingRichRegexNames = new Set(
+    greetingAssistantRegex.filter(regexProducesRichUi).map(item => item.name)
+  )
+  const greetingRichCameFromRegex = greetingAppliedRegex.some(name => greetingRichRegexNames.has(name))
   let isRich = !greetingPresentationHidesUi && rawIsRich
   let displayText = isRich ? greetingRegexView.displayText : normalizeCommunityPlainText(greetingRegexView.displayText)
   let richHtml = isRich ? normalizeRichHtml(displayText) : undefined
+  let greetingRichSource: Message['richSource'] | undefined = isRich
+    ? (greetingRichCameFromRegex ? 'regex' : greetingCommunityUiContract.active ? 'worldbook-ui' : 'card-ui')
+    : undefined
+
+  // Greeting UI Compatibility：如果作者的 WorldBook 声明了固定 HTML UI，而 first_mes 只是
+  // 同一套状态数据的纯文本/<br> 版本，本地只把已有内容填回作者模板，不生成任何剧情。
+  if (!greetingPresentationHidesUi && !isRich && greetingCommunityUiContract.active) {
+    const repairedGreeting = tryRepairCommunityUiLocally(greetingCommunityUiContract, greetingRegexView.displayText)
+    if (repairedGreeting.repaired) {
+      displayText = repairedGreeting.text
+      richHtml = normalizeRichHtml(repairedGreeting.text)
+      isRich = true
+      greetingRichSource = 'worldbook-ui'
+    }
+  }
 
   if (greetingPresentationHidesUi && chatSettings.value && greetingRuntimeProfile?.allowNativeMessageReshaping) {
     const parsedGreeting = parseCompanionOutput(greetingRegexView.displayText, { interpretNativeProtocol: true, userName })
@@ -2662,8 +2550,8 @@ async function applyCharacterGreeting(greeting: string, greetingIndex: number, s
       display: greetingRegexView.displayApplied
     },
     richHtml,
-    richSource: isRich ? (greetingRegexView.displayApplied.length || greetingRegexView.storageApplied.length ? 'regex' : 'card-ui') : undefined,
-    roleCardUi: !greetingPresentationHidesUi && greetingRuntimeProfile?.compatibilityMode === 'phone-enhanced' && isRich ? greetingUi : undefined,
+    richSource: isRich ? greetingRichSource : undefined,
+    roleCardUi: !greetingPresentationHidesUi && greetingRuntimeProfile?.compatibilityMode === 'phone-enhanced' && !greetingCommunityUiContract.active && !isRich ? greetingUi : undefined,
     isGreetingSeed: true,
     greetingIndex,
     status: 'delivered',
@@ -2779,40 +2667,6 @@ async function persistChatSettings() {
   activePersona.value = await getPersonaForChat(chatSettings.value)
 }
 
-async function addManualMemory() {
-  if (!conversation.value || !character.value) return
-  const content = newMemoryText.value.trim()
-  if (!content) return
-
-  await addMemory({
-    conversationId: conversation.value.id,
-    characterId: character.value.id,
-    content
-  })
-
-  newMemoryText.value = ''
-  await refreshMemoryList()
-}
-
-async function deleteMemory(id: string) {
-  await removeMemory(id)
-  await refreshMemoryList()
-}
-
-async function clearAllMemories() {
-  if (!conversation.value) return
-  if (!window.confirm('确定清除这个角色记住的全部内容吗？')) return
-
-  await clearMemories(conversation.value.id)
-  conversationState.value = await patchConversationState(
-    conversation.value.id,
-    {
-      summary: '',
-      summaryMessageCount: 0
-    }
-  )
-  await refreshMemoryList()
-}
 
 async function clearConversationMessages() {
   if (!conversation.value || !character.value) return
@@ -3538,9 +3392,6 @@ onUnmounted(() => {
           :title="title"
           :tab="settingsTab"
           :chat-settings="chatSettings"
-          :memories="memories"
-          :new-memory-text="newMemoryText"
-          :memory-category-names="memoryCategoryNames"
           :speech-playback-available="speechPlaybackAvailable"
           :speech-voices="speechVoices"
           :provider-label="providerLabel"
@@ -3551,23 +3402,18 @@ onUnmounted(() => {
           :greetings="availableGreetings"
           :panel-style="panelStyle"
           @update:tab="settingsTab = $event"
-          @update:new-memory-text="newMemoryText = $event"
           @drag-start="beginPanelDrag"
           @drag-move="movePanelDrag"
           @drag-end="endPanelDrag"
           @close="activePanel = null"
           @persist="persistChatSettings"
           @preview-voice="previewCurrentVoice"
-          @add-memory="addManualMemory"
-          @delete-memory="deleteMemory"
-          @clear-memories="clearAllMemories"
           @clear-conversation="clearConversationMessages"
           @open-model-settings="router.push('/settings/models')"
           @open-personas="router.push('/settings/personas')"
           @open-lorebook="router.push({ path: '/world', query: { character: character?.id || '', tab: 'lorebooks' } })"
           @open-character-card="character && router.push(`/characters/${character.id}/card`)"
           @open-prompt-debug="conversation && router.push(`/chat/${conversation.id}/debug`)"
-          @open-memory-manager="conversation && router.push(`/chat/${conversation.id}/memory`)"
           @use-greeting="switchCharacterGreeting"
           @use-free-greeting="useFreeOpening"
         />
@@ -4122,38 +3968,6 @@ onUnmounted(() => {
   background: #fff;
 }
 .setting-switch > input { width: 20px; height: 20px; accent-color: #78add8; }
-
-.memory-add {
-  display: grid;
-  grid-template-columns: 1fr 58px;
-  gap: 7px;
-  margin: 14px 0;
-}
-.memory-add input,
-.memory-add button {
-  padding: 10px;
-  border: 1px solid rgba(80,50,62,.1);
-  border-radius: 12px;
-}
-.memory-add button { background: #78add8; color: #fff; border: 0; }
-
-.memory-list article {
-  position: relative;
-  margin: 9px 0;
-  padding: 12px 48px 12px 13px;
-  border-radius: 14px;
-  background: #eef6fc;
-}
-.memory-list article small { color: #7f98ae; }
-.memory-list article p { margin: 5px 0 0; line-height: 1.55; }
-.memory-list article button {
-  position: absolute;
-  top: 12px;
-  right: 10px;
-  border: 0;
-  background: transparent;
-  color: #6b91b4;
-}
 
 .danger-row {
   width: 100%;

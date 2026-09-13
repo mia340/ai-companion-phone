@@ -860,7 +860,7 @@ export class CompanionDatabase extends Dexie {
       momentComments: 'id, worldId, momentId, createdAt'
     })
 
-    // V16：主屏幕 App 图标个性化。只增加一张表，不改既有索引。
+    // V16：主屏幕 App 图标与外观个性化。只增加一张表，不改既有索引。
     this.version(16).stores({
       appCustomizations: 'id, worldId, appKey, updatedAt'
     })

@@ -6,9 +6,11 @@ import {
   onUnmounted,
   ref
 } from 'vue'
+import { useRouter } from 'vue-router'
 import PhoneFrame from '../components/PhoneFrame.vue'
 import CharacterAvatar from '../components/CharacterAvatar.vue'
 import { db } from '../db/database'
+import { deleteConversationConsistently } from '../runtime/conversation/conversationMutationService'
 import type {
   Character,
   Conversation,
@@ -21,8 +23,26 @@ interface ChatListItem {
   lastMessage?: Message
 }
 
+interface SwipeGesture {
+  id: string
+  pointerId: number
+  startX: number
+  startY: number
+  startOffset: number
+  startedAt: number
+  axis: 'pending' | 'horizontal' | 'vertical'
+  moved: boolean
+}
+
+const DELETE_REVEAL = 86
+const router = useRouter()
 const chatItems = ref<ChatListItem[]>([])
 const searchText = ref('')
+const openSwipeId = ref('')
+const swipeOffsets = ref<Record<string, number>>({})
+const deletingId = ref('')
+let gesture: SwipeGesture | undefined
+let suppressClickUntil = 0
 
 let subscription:
   | { unsubscribe: () => void }
@@ -63,6 +83,141 @@ function formatTime(value: string) {
   })
 }
 
+function currentOffset(id: string) {
+  return swipeOffsets.value[id] ?? (openSwipeId.value === id ? -DELETE_REVEAL : 0)
+}
+
+function setOffset(id: string, offset: number) {
+  swipeOffsets.value = {
+    ...swipeOffsets.value,
+    [id]: offset
+  }
+}
+
+function closeSwipe(id = openSwipeId.value) {
+  if (!id) return
+  setOffset(id, 0)
+  if (openSwipeId.value === id) openSwipeId.value = ''
+}
+
+function settleSwipe(id: string, open: boolean) {
+  setOffset(id, open ? -DELETE_REVEAL : 0)
+  openSwipeId.value = open ? id : ''
+}
+
+function swipeStyle(id: string) {
+  return {
+    transform: `translate3d(${currentOffset(id)}px, 0, 0)`
+  }
+}
+
+function onPointerDown(event: PointerEvent, id: string) {
+  if (deletingId.value) return
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+  if (openSwipeId.value && openSwipeId.value !== id) closeSwipe(openSwipeId.value)
+
+  gesture = {
+    id,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    startOffset: currentOffset(id),
+    startedAt: performance.now(),
+    axis: 'pending',
+    moved: false
+  }
+
+  try {
+    ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  } catch {
+    // 部分旧 WebView 不支持 pointer capture；不影响基础点击与 CSS 回弹。
+  }
+}
+
+function onPointerMove(event: PointerEvent, id: string) {
+  if (!gesture || gesture.id !== id || gesture.pointerId !== event.pointerId) return
+  const dx = event.clientX - gesture.startX
+  const dy = event.clientY - gesture.startY
+  const absX = Math.abs(dx)
+  const absY = Math.abs(dy)
+
+  if (gesture.axis === 'pending') {
+    if (Math.max(absX, absY) < 5) return
+    gesture.axis = absX > absY + 2 ? 'horizontal' : 'vertical'
+  }
+  if (gesture.axis !== 'horizontal') return
+
+  gesture.moved = gesture.moved || absX > 7
+  event.preventDefault()
+  let next = gesture.startOffset + dx
+  next = Math.max(-DELETE_REVEAL - 16, Math.min(14, next))
+  if (next > 0) next *= 0.25
+  setOffset(id, next)
+}
+
+function finishPointerGesture(event: PointerEvent, id: string, cancelled = false) {
+  if (!gesture || gesture.id !== id || gesture.pointerId !== event.pointerId) return
+  const active = gesture
+  gesture = undefined
+
+  if (active.axis !== 'horizontal' || cancelled) {
+    settleSwipe(id, openSwipeId.value === id)
+    return
+  }
+
+  if (active.moved) suppressClickUntil = performance.now() + 360
+  const elapsed = Math.max(1, performance.now() - active.startedAt)
+  const velocityX = (event.clientX - active.startX) / elapsed
+  const offset = currentOffset(id)
+  const shouldOpen = velocityX < -0.45
+    ? true
+    : velocityX > 0.45
+      ? false
+      : offset < -DELETE_REVEAL * 0.5
+  settleSwipe(id, shouldOpen)
+}
+
+function onPointerUp(event: PointerEvent, id: string) {
+  finishPointerGesture(event, id)
+}
+
+function onPointerCancel(event: PointerEvent, id: string) {
+  finishPointerGesture(event, id, true)
+}
+
+function openConversation(id: string) {
+  if (performance.now() < suppressClickUntil) return
+  if (openSwipeId.value === id) {
+    closeSwipe(id)
+    return
+  }
+  void router.push(`/chat/${id}`)
+}
+
+async function deleteChat(item: ChatListItem) {
+  const id = item.conversation.id
+  if (deletingId.value) return
+  const name = item.character?.name || item.conversation.title || '这个聊天'
+  const confirmed = window.confirm(
+    `删除与“${name}”的这份聊天吗？\n\n聊天消息、当前剧情状态、聊天内记忆和调试记录会删除；角色的跨聊天共享记忆会保留。`
+  )
+  if (!confirmed) {
+    closeSwipe(id)
+    return
+  }
+
+  deletingId.value = id
+  try {
+    await deleteConversationConsistently(id)
+    closeSwipe(id)
+  } catch (error) {
+    console.error('删除聊天失败：', error)
+    window.alert(error instanceof Error ? `删除失败：${error.message}` : '删除聊天失败，请稍后重试。')
+  } finally {
+    deletingId.value = ''
+  }
+}
+
 onMounted(() => {
   subscription = liveQuery(async () => {
     const conversations = await db.conversations.orderBy('updatedAt').reverse().toArray()
@@ -87,6 +242,9 @@ onMounted(() => {
     )
   }).subscribe(rows => {
     chatItems.value = rows
+    if (openSwipeId.value && !rows.some(item => item.conversation.id === openSwipeId.value)) {
+      openSwipeId.value = ''
+    }
   })
 })
 
@@ -105,6 +263,7 @@ onUnmounted(() => {
           type="search"
           placeholder="搜索"
           aria-label="搜索角色或聊天内容"
+          @focus="closeSwipe()"
         />
         <button
           v-if="searchText"
@@ -117,36 +276,63 @@ onUnmounted(() => {
       </label>
 
       <section v-if="filteredChatItems.length" class="conversation-list">
-        <button
+        <div
           v-for="item in filteredChatItems"
           :key="item.conversation.id"
-          class="chat-row"
-          :class="{ 'chat-row--pinned': item.conversation.pinned }"
-          type="button"
-          @click="$router.push(`/chat/${item.conversation.id}`)"
+          class="swipe-row"
+          :class="{
+            'swipe-row--open': openSwipeId === item.conversation.id,
+            'swipe-row--deleting': deletingId === item.conversation.id
+          }"
         >
-          <CharacterAvatar
-            :avatar="item.character?.avatar || '💬'"
-            :name="item.character?.name || item.conversation.title"
-            :size="54"
-          />
+          <button
+            class="delete-action"
+            type="button"
+            :disabled="Boolean(deletingId)"
+            :aria-label="`删除与${item.character?.name || item.conversation.title}的聊天`"
+            @click.stop="deleteChat(item)"
+          >
+            <span aria-hidden="true">⌫</span>
+            <b>{{ deletingId === item.conversation.id ? '删除中' : '删除' }}</b>
+          </button>
 
-          <span class="chat-main">
-            <span class="chat-title-line">
-              <b>{{ item.character?.name || item.conversation.title }}</b>
-              <small>{{ formatTime(item.conversation.updatedAt) }}</small>
-            </span>
+          <button
+            class="chat-row"
+            :class="{
+              'chat-row--pinned': item.conversation.pinned,
+              'chat-row--dragging': gesture?.id === item.conversation.id && gesture.axis === 'horizontal'
+            }"
+            :style="swipeStyle(item.conversation.id)"
+            type="button"
+            @pointerdown="onPointerDown($event, item.conversation.id)"
+            @pointermove="onPointerMove($event, item.conversation.id)"
+            @pointerup="onPointerUp($event, item.conversation.id)"
+            @pointercancel="onPointerCancel($event, item.conversation.id)"
+            @click="openConversation(item.conversation.id)"
+          >
+            <CharacterAvatar
+              :avatar="item.character?.avatar || '💬'"
+              :name="item.character?.name || item.conversation.title"
+              :size="54"
+            />
 
-            <span class="chat-preview-line">
-              <span class="message-preview">
-                {{ item.lastMessage?.content || '还没有消息，去和角色聊聊吧。' }}
+            <span class="chat-main">
+              <span class="chat-title-line">
+                <b>{{ item.character?.name || item.conversation.title }}</b>
+                <small>{{ formatTime(item.conversation.updatedAt) }}</small>
               </span>
-              <span v-if="item.conversation.unread" class="unread">
-                {{ item.conversation.unread > 99 ? '99+' : item.conversation.unread }}
+
+              <span class="chat-preview-line">
+                <span class="message-preview">
+                  {{ item.lastMessage?.content || '还没有消息，去和角色聊聊吧。' }}
+                </span>
+                <span v-if="item.conversation.unread" class="unread">
+                  {{ item.conversation.unread > 99 ? '99+' : item.conversation.unread }}
+                </span>
               </span>
             </span>
-          </span>
-        </button>
+          </button>
+        </div>
       </section>
 
       <div v-else class="empty-state">
@@ -213,13 +399,52 @@ onUnmounted(() => {
 }
 
 .conversation-list {
+  overflow: hidden;
   background: #fff;
   border-top: 1px solid rgba(48, 78, 103, .07);
   border-bottom: 1px solid rgba(48, 78, 103, .07);
 }
 
+.swipe-row {
+  position: relative;
+  overflow: hidden;
+  background: #e9514c;
+}
+
+.delete-action {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 86px;
+  display: grid;
+  place-content: center;
+  gap: 3px;
+  border: 0;
+  background: #e9514c;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.delete-action span {
+  font-size: 21px;
+  line-height: 1;
+}
+
+.delete-action b {
+  font-size: 12px;
+}
+
+.delete-action:active {
+  background: #d84440;
+}
+
+.delete-action:disabled {
+  opacity: .72;
+}
+
 .chat-row {
   position: relative;
+  z-index: 1;
   width: 100%;
   min-height: 76px;
   padding: 10px 14px;
@@ -230,9 +455,18 @@ onUnmounted(() => {
   background: #fff;
   color: inherit;
   text-align: left;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  will-change: transform;
+  transition: transform 180ms cubic-bezier(.22,.72,.24,1), background 120ms ease;
 }
 
-.chat-row::after {
+.chat-row--dragging {
+  transition: none;
+}
+
+.swipe-row:not(:last-child) .chat-row::after {
   content: '';
   position: absolute;
   left: 80px;
@@ -242,16 +476,21 @@ onUnmounted(() => {
   background: rgba(48, 78, 103, .08);
 }
 
-.chat-row:last-child::after {
-  display: none;
-}
-
 .chat-row:active {
   background: #eef4f8;
 }
 
 .chat-row--pinned {
   background: #f8fbfd;
+}
+
+.swipe-row--open .chat-row {
+  box-shadow: 8px 0 18px rgba(45, 55, 65, .08);
+}
+
+.swipe-row--deleting .chat-row {
+  pointer-events: none;
+  opacity: .78;
 }
 
 .chat-main {

@@ -56,6 +56,8 @@ watch(conversationId, load)
           <article><small>上下文字符</small><b>{{ selected.estimatedCharacters }}</b></article>
           <article><small>世界书</small><b>{{ selected.activatedLorebook.length }} 条</b></article>
           <article><small>记忆命中</small><b>{{ selected.memoryHits.length }} 条</b></article>
+          <article><small>Generation</small><b>{{ selected.generationId ? selected.generationId.slice(0, 8) : '旧记录' }}</b></article>
+          <article><small>Context 冻结</small><b>{{ selected.contextCreatedAt ? formatTime(selected.contextCreatedAt) : '旧记录' }}</b></article>
         </section>
 
         <details open class="debug-section">
@@ -68,6 +70,8 @@ watch(conversationId, load)
             <small v-if="selected.presenceResolution.reportedPresence">模型报告：{{ selected.presenceResolution.reportedPresence === 'together' ? '同场景' : '远程' }}</small>
             <small v-if="selected.presenceResolution.uiSurroundings">角色卡周围：{{ selected.presenceResolution.uiSurroundings }}</small>
           </div>
+          <p v-if="selected.generationId"><b>Generation ID：</b><code>{{ selected.generationId }}</code></p>
+          <p v-if="selected.sourceMessageId"><b>触发消息：</b><code>{{ selected.sourceMessageId }}</code></p>
           <p><b>图片：</b>{{ selected.imageCount }} 张</p>
           <p><b>互动协议：</b>{{ selected.protocolEnabled ? '已启用' : '未启用' }}</p>
           <div v-if="selected.naturalnessWarnings?.length" class="warnings"><b>自然度提醒</b><span v-for="warning in selected.naturalnessWarnings" :key="warning">{{ warning }}</span></div>

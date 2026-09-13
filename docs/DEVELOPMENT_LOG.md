@@ -1,3 +1,59 @@
+## 2026-09-13 · V0.5.0-alpha.4.2.1｜Windows Build Hotfix + 参考项目学习基线
+
+### 输入
+
+- Windows `npm test`：30/30 test files、272/272 tests 通过。
+- Windows `npm run build`：唯一报错为 `HomeScreen.vue:142 TS2322`，浏览器 `window.setTimeout()` 的 `number` 无法赋给被 Node typings 解析出的 `Timeout`。
+- 用户补充 10 个公开 GitHub 小手机项目与多组在线部署样本，要求后续开发用于毕业设计对比学习。
+
+### 改动
+
+- `HomeScreen.vue` 将 `longPressTimer` 显式声明为 `number | undefined`，保持浏览器定时器语义。
+- 应用版本提升为 `0.5.0-alpha.4.2.1`；IndexedDB V16 / Backup V11 不变。
+- 新增 `REFERENCE_STUDY_2026-09-13.md`，记录 StoryPhone、AI Virtual Phone、InternalBeyond、Melt、Miya、HiPhone、汪汪机等项目的可吸收工程思路与毕业前优先级。
+- 明确参考原则：学习问题建模与工程边界，不复制第三方实现；后续优先 Runtime、Memory、Capability、测试与论文证据，不以 App 数量为目标。
+
+### 验证
+
+- 本环境已确认源码只发生预期的一行运行时代码类型修复，其余改动均为版本/文档。
+- 容器依赖安装因网络长时间未完成，未宣称容器内完整 Vitest / Vite Build 通过。
+- Windows 仍需重新执行 `npm test` + `npm run build`，再部署。
+
+## 2026-09-13 · V0.5.0-alpha.4.2｜Community Chat Compatibility
+
+本轮把“聊天消息内容由谁拥有”明确下来：**手机壳归 App，角色消息内部的作者 UI 归社区资源。** 不再为作者卡额外发明一套默认私有状态卡。
+
+- `first_mes`、后续 AI 回复、WorldBook HTML、Regex UI 进入同一套 Presentation Contract 识别路径。
+- 新增 Opening UI Runtime：读取角色卡、启用的 assistant-output / world-info Regex、Prompt Preset 与 WorldBook，判断开场应按哪一种作者 UI 呈现。
+- WorldBook 已声明固定 HTML UI 时，纯文本/`<br>` 开场可由本地 Compiler 填入作者模板；只做呈现变换，不改 `rawContent`，也不生成剧情。
+- 旧聊天中的 `isGreetingSeed` 会在加载时自动升级，避免必须重新建对话才能看到修复。
+- 修复 `<br>` 变成 `&lt;br&gt;`；作者 HTML 根节点限制在手机宽度内；带 `<style>` 的作者 UI 不再被额外白气泡包裹。
+- 聊天设置文案改成社区语义：默认“原卡 / 社区 UI”，纯聊天气泡和动作/台词拆分成为玩家显式覆盖选项。
+- 增加 2 个 Community UI 测试；当前静态测试矩阵为 **30 files / 272 tests**。
+- 当前容器完成 TypeScript/Vue script 语法检查，并用用户提供的苏玉尘 JSON 做本地 Compiler 实样回归；容器依赖目录不完整（`vitest` 不存在），完整 Vitest + vue-tsc + Vite Build 需在 Windows 验收。
+
+## 2026-09-13 · V0.5.0-alpha.4.1｜主屏幕 / 美化 / 记忆入口标准化
+
+本轮不继续发明新的桌面交互，而是对齐真实手机与现有“小手机”社区已经形成的使用习惯。
+
+- 删除 Home 常驻“编辑”按钮；首页只承担 App Launcher 职责。
+- 新增 `AppearanceSettingsView`，把壁纸、App 图标、图标大小、名称显示集中到 `设置 → 桌面与外观`。
+- 主屏空白处长按作为快速入口，不再要求玩家先理解项目自己的“编辑模式”。
+- `appCustomizations` 继续承担外观持久化；新增 appearance reserved row，但不新增索引，因此 DB 仍为 V16。
+- 新增 `MemoryCenterView`，主屏“记忆”现在是真实一级 App；按角色汇总共享 / 当前聊天记忆与冲突。
+- Chat Settings 只保留记忆行为设置，不再承担逐条 CRUD；完整记忆管理统一从 Memory App 进入。
+- 参考 Miya、AI Virtual Phone、InternalBeyond / Lulu Phone 与 iPhone Home Screen 交互后，确立“Launcher / Appearance / Memory 三层职责”作为后续手机壳 UI 基线。
+- 当前环境完成改动文件 TypeScript/Vue script 语法检查；完整 Vitest + vue-tsc + Vite Build 仍要求 Windows 验收。
+
+## 2026-09-11 · V0.5.0-alpha.4.0｜Generation Runtime 第一阶段 + 左滑删除
+
+- 冻结单轮 Generation Context，给异步生成建立稳定输入快照。
+- Provider/Streaming 编排与 Response Persistence 开始脱离 `ChatRoom.vue`。
+- Prompt Debug / Message 增加 generation provenance。
+- ChatList 增加左滑删除，Conversation Runtime 增加完整删除计划与 branch/shared-memory 一致性处理。
+- 新增 9 个测试，源码测试矩阵 30 files / 270 cases。
+- DB V16 / Backup V11 不变。
+
 ## 2026-09-10 · V0.5.0-alpha.3.5｜App Icon + 多聊天记忆归属
 
 - 首页 App 图标从 Emoji 占位升级为统一 SVG 图标系统，Dock 同步复用。

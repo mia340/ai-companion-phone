@@ -1,3 +1,42 @@
+## V0.5.0-alpha.4.2.1 · Windows Build Hotfix
+
+- 修复 `src/views/HomeScreen.vue` 长按计时器类型冲突：将 `ReturnType<typeof window.setTimeout> | undefined` 收敛为浏览器语义明确的 `number | undefined`。
+- 解决 `vue-tsc -b` 的 `TS2322: Type 'number' is not assignable to type 'Timeout'`。
+- 用户 Windows 已验证 alpha.4.2 的 **30/30 测试文件、272/272 用例通过**；本热修只修改类型声明，不改变定时器行为。
+- IndexedDB **V16** / Backup **V11** 不变。
+
+## V0.5.0-alpha.4.2 · Community Chat Compatibility
+
+- 聊天展示改为 **community-first**：富文本 Regex → WorldBook HTML 合同 → 作者直接 HTML → 作者结构化/纯文本 → 原生手机气泡；默认不再把作者内容强制改造成小手机私有 UI。
+- `first_mes` / `alternate_greetings` 现在与后续回复共用同一套 Community UI Contract 检测：若作者 WorldBook 声明固定 HTML 状态栏，而开场只是“结构化文本 + `<br>`”，本地 Compiler 会把已有开场数据填回作者模板，不生成新剧情。
+- 已存在的旧会话开场也会在加载时做一次安全升级；成功适配后持久化为 `rich`，后续不重复编译。
+- 修复社区状态栏 `<br>` 被 escape 成可见 `&lt;br&gt;` 的问题；HTML Compiler 先恢复逻辑换行，再进行字段转义与模板填充。
+- `SafeRichHtml` 为作者根节点增加 `max-width:100%` 约束，固定宽度 UI 在手机窄屏内自适应；含 `<style>` 的作者 UI 被视为自带 Surface，避免再套一层白色聊天气泡。
+- Rich 来源区分更准确：真正由富文本 Regex 产生记为 `regex`，WorldBook HTML 合同记为 `worldbook-ui`，作者直接 HTML 记为 `card-ui`。
+- 新增 2 个 Community UI 回归测试，当前静态定义为 **30 个测试文件 / 272 个用例**。
+- IndexedDB **V16** / Backup **V11** 不变。
+
+## V0.5.0-alpha.4.1 · 主屏幕真实手机化 + 美化中心 + 记忆 App
+
+- 首页移除常驻右上角“编辑”胶囊，不再把桌面设置暴露成普通按钮；主屏幕回归纯导航 Surface。
+- 新增 `设置 → 桌面与外观`：玩家可统一设置主屏幕壁纸、任意 App 自定义图标、图标大小与名称显示；主屏空白处长按可快速进入。
+- 自定义壁纸在本地压缩为 WebP 后保存到现有 `appCustomizations`，不新增 IndexedDB 版本；图标与外观继续进入 Backup V11。
+- 主屏幕“记忆”从占位页升级为真实 Memory Center，按角色汇总角色共享记忆、聊天内记忆、冲突数与多会话入口。
+- 聊天设置中的逐条添加/删除/清空记忆入口移除，只保留“是否记忆 / 记忆强度 / 最近聊天范围”；完整编辑、冲突处理与 Scope 切换统一进入主屏“记忆”。
+- UI 决策对齐社区与真实手机的共同习惯：桌面用于打开 App，美化集中管理，长按作为桌面编辑快捷手势；Memory 作为一级功能入口，而不是藏在聊天设置深层。
+- IndexedDB **V16** / Backup **V11** 不变；测试定义仍为 **30 个测试文件 / 270 个用例**。
+
+## V0.5.0-alpha.4.0 · Generation Runtime + 聊天左滑删除
+
+- 新建 `src/runtime/generation/`，把 AI 生成主链第一阶段从 `ChatRoom.vue` 抽离为 Generation Context / Context Builder / Provider Orchestrator / Response Persistence。
+- 每轮请求新增 `generationId` 与 `contextCreatedAt`，冻结角色、Persona、会话、状态、记忆、消息、模型配置等上下文，减少异步生成期间的状态漂移。
+- Prompt Debug 增加 generation provenance；Streaming、普通回复、Rich/Community UI、候选回复持久化均写入 `generationId`。
+- 保留现有真实 Provider/Streaming 与 Vision 自动降级语义，不引入本地假回复。
+- 聊天列表新增左滑删除：支持 Pointer Events、方向锁定、拖动/甩动打开、回弹、误触保护，并保留纵向滚动。
+- 删除聊天改走统一 Runtime 清理：删除当前聊天消息、局部记忆、状态历史、Prompt Debug、聊天级资源绑定；朋友圈仅解除来源引用；角色共享记忆保留并在可能时迁移到同角色的其他聊天。
+- 删除 branch 根/中间节点时同步修复 surviving branch 的 parent/root 引用。
+- 新增 9 个 Generation / Conversation Delete 回归用例；源码定义 **30 个测试文件 / 270 个用例**。IndexedDB **V16** / Backup **V11** 不变。
+
 ## V0.5.0-alpha.3.5 · App Icon 系统与多聊天记忆归属
 
 - 首页 12 个 App 从 Emoji 占位升级为统一 SVG 图标系统：轻量、清晰、淡蓝系双色渐变与一致高光，Dock 同步复用。

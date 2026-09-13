@@ -15,12 +15,14 @@ import CharacterCardEditorView from '../views/CharacterCardEditorView.vue'
 import UserProfileView from '../views/UserProfileView.vue'
 import DataBackupView from '../views/DataBackupView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import AppearanceSettingsView from '../views/AppearanceSettingsView.vue'
 import ModelSettingsView from '../views/ModelSettingsView.vue'
 import PersonaManagerView from '../views/PersonaManagerView.vue'
 import LorebookView from '../views/LorebookView.vue'
 import WorldCenterView from '../views/WorldCenterView.vue'
 import PromptDebugView from '../views/PromptDebugView.vue'
 import MemoryManagerView from '../views/MemoryManagerView.vue'
+import MemoryCenterView from '../views/MemoryCenterView.vue'
 import PlaceholderApp from '../views/PlaceholderApp.vue'
 
 // 新增的重交互 App 按路由懒加载，避免朋友圈/音乐/海龟汤全部挤进首屏主包。
@@ -44,6 +46,10 @@ export const router = createRouter({
     {
       path: '/chat',
       component: ChatList
+    },
+    {
+      path: '/memory',
+      component: MemoryCenterView
     },
     {
       path: '/chat/:id/debug',
@@ -87,6 +93,10 @@ export const router = createRouter({
     {
       path: '/backup',
       component: DataBackupView
+    },
+    {
+      path: '/settings/appearance',
+      component: AppearanceSettingsView
     },
     {
       path: '/settings/models',

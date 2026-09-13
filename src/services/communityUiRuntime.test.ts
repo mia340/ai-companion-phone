@@ -258,3 +258,34 @@ it('V0.4.7.1 本地 HTML Compiler 识别“【状态栏】”标题并恢复作�
   expect(repaired.text).toContain('对不起什么')
   expect(repaired.text).not.toContain('【状态栏】')
 })
+
+it('V0.5.0-alpha.4.2 把社区 first_mes 的 <br> 当作状态栏换行，而不是转义成可见文本', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    lorebookPrompt: `每次回复正文开头必须携带状态栏格式UI，严格遵守。状态栏格式UI如下:
+<div style="width:260px;border:1px solid #E8C8D8"><details><summary>状态信息</summary><div><div>状态占位</div></div></details><div><div>正文</div><div>正文占位</div></div><details><summary>角色互动</summary><div><div>互动占位</div></div></details><details><summary>场外观众席</summary><div><div>观众占位</div></div></details></div>`
+  })
+  const firstMes = '📆景和三年 腊月十五｜19:30｜阴雪夜寒<br>🗺明月楼-摘星台<br>😶衣着:素白交领厚缎袍<br>💛体位:抬手抚琴.<br>▪关系:主客<br>▪亲密状态:未发生<br>▪恋爱纪念日:无<br>❤内心:……<br><br>苏玉尘指尖轻轻拂过琴弦,却未敢发出声响.'
+  const repaired = tryRepairCommunityUiLocally(contract, firstMes)
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('景和三年 腊月十五')
+  expect(repaired.text).toContain('明月楼-摘星台')
+  expect(repaired.text).toContain('苏玉尘指尖轻轻拂过琴弦')
+  expect(repaired.text).toContain('<br>🗺明月楼-摘星台')
+  expect(repaired.text).not.toContain('&lt;br&gt;')
+  expect(repaired.text).not.toContain('状态占位')
+})
+
+it('V0.5.0-alpha.4.2 作者 HTML 合同只负责套原模板，不把结构化纯文本改造成小手机私有 UI', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    lorebookPrompt: `每轮回复必须使用状态栏格式UI：<div style="background:#fff"><details><summary>状态信息</summary><div><div>状态占位</div></div></details><div><div>正文</div><div>正文占位</div></div></div>`
+  })
+  const repaired = tryRepairCommunityUiLocally(contract, '📆今天｜08:20\n🗺家\n♥内心:平静\n\n【正文】\n早上好。')
+  expect(contract.mode).toBe('html-contract')
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('background:#fff')
+  expect(repaired.text).toContain('早上好。')
+  expect(repaired.text).not.toContain('role-card-ui')
+  expect(repaired.text).not.toContain('scene_action')
+})

@@ -5,6 +5,10 @@ export interface AppCustomization {
   worldId: UUID
   appKey: string
   iconDataUrl?: string
+  /** Reserved appearance record fields. Kept in the same object store so V16 needs no schema migration. */
+  wallpaperDataUrl?: string
+  iconScale?: number
+  showAppLabels?: boolean
   updatedAt: string
 }
 
@@ -425,6 +429,8 @@ export interface Message {
 
   provider?: string
   model?: string
+  /** V0.5 Generation Runtime：把同一次生成请求与流式占位、最终消息、调试记录串起来。 */
+  generationId?: UUID
   errorText?: string
   replyGroupId?: UUID
   replySequence?: number
@@ -630,6 +636,12 @@ export interface PromptDebugTrace {
   id: UUID
   conversationId: UUID
   characterId: UUID
+  /** 与最终消息共享的生成请求 ID，便于从 Prompt Trace 追到落库结果。 */
+  generationId?: UUID
+  /** 触发本轮生成的用户消息；主动消息等场景可以为空。 */
+  sourceMessageId?: UUID
+  /** Generation Context 冻结完成的时间。 */
+  contextCreatedAt?: string
   createdAt: string
   provider: string
   model: string

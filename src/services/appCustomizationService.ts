@@ -24,6 +24,19 @@ export interface HomeAppDefinition {
   tone: [string, string]
 }
 
+export interface HomeAppearancePreferences {
+  wallpaperDataUrl?: string
+  iconScale: number
+  showAppLabels: boolean
+}
+
+export const DEFAULT_HOME_APPEARANCE: HomeAppearancePreferences = {
+  iconScale: 1,
+  showAppLabels: true
+}
+
+const APPEARANCE_APP_KEY = '__home-appearance__'
+
 export const HOME_APPS: HomeAppDefinition[] = [
   { key: 'chat', label: '聊天', route: '/chat', icon: 'chat', tone: ['#79b7ee', '#a8d8f7'] },
   { key: 'contacts', label: '通讯录', route: '/contacts', icon: 'contacts', tone: ['#71cdbd', '#a8e4d5'] },
@@ -33,7 +46,7 @@ export const HOME_APPS: HomeAppDefinition[] = [
   { key: 'wallet', label: '钱包', route: '/app/钱包', icon: 'wallet', tone: ['#82c5a0', '#b6dfc5'] },
   { key: 'turtle-soup', label: '海龟汤', route: '/app/海龟汤', icon: 'turtle-soup', tone: ['#75bcc4', '#a8d8d3'] },
   { key: 'profile', label: '我的资料', route: '/profile', icon: 'profile', tone: ['#9aa6df', '#c5cdf0'] },
-  { key: 'memory', label: '记忆', route: '/app/记忆管理', icon: 'memory', tone: ['#a8a1dc', '#d0c9ee'] },
+  { key: 'memory', label: '记忆', route: '/memory', icon: 'memory', tone: ['#a8a1dc', '#d0c9ee'] },
   { key: 'world', label: '世界', route: '/world', icon: 'world', tone: ['#7eafd6', '#b6d5ea'] },
   { key: 'backup', label: '数据备份', route: '/backup', icon: 'backup', tone: ['#9caebb', '#c8d3dc'] },
   { key: 'settings', label: '设置', route: '/settings', icon: 'settings', tone: ['#a7b4c3', '#d1d9e2'] }
@@ -46,7 +59,11 @@ export const DOCK_APPS: HomeAppDefinition[] = [
   HOME_APPS[11]
 ]
 
-function customizationId(worldId: string, appKey: HomeAppKey) {
+export const CUSTOMIZABLE_APPS: HomeAppDefinition[] = Array.from(
+  new Map([...HOME_APPS, ...DOCK_APPS].map(app => [app.key, app])).values()
+)
+
+function customizationId(worldId: string, appKey: string) {
   return `${worldId}:${appKey}`
 }
 
@@ -71,7 +88,40 @@ export async function resetAppIcon(worldId: string, appKey: HomeAppKey) {
   await db.appCustomizations.delete(customizationId(worldId, appKey))
 }
 
-function readAsDataUrl(file: File) {
+export async function loadHomeAppearance(worldId: string): Promise<HomeAppearancePreferences> {
+  const row = await db.appCustomizations.get(customizationId(worldId, APPEARANCE_APP_KEY))
+  return {
+    wallpaperDataUrl: row?.wallpaperDataUrl,
+    iconScale: clampIconScale(row?.iconScale),
+    showAppLabels: row?.showAppLabels !== false
+  }
+}
+
+export async function saveHomeAppearance(worldId: string, value: HomeAppearancePreferences) {
+  const row: AppCustomization = {
+    id: customizationId(worldId, APPEARANCE_APP_KEY),
+    worldId,
+    appKey: APPEARANCE_APP_KEY,
+    wallpaperDataUrl: value.wallpaperDataUrl,
+    iconScale: clampIconScale(value.iconScale),
+    showAppLabels: value.showAppLabels,
+    updatedAt: new Date().toISOString()
+  }
+  await db.appCustomizations.put(row)
+  return row
+}
+
+export async function resetHomeWallpaper(worldId: string) {
+  const current = await loadHomeAppearance(worldId)
+  await saveHomeAppearance(worldId, { ...current, wallpaperDataUrl: undefined })
+}
+
+function clampIconScale(value?: number) {
+  if (!Number.isFinite(value)) return DEFAULT_HOME_APPEARANCE.iconScale
+  return Math.max(0.88, Math.min(1.12, Number(value)))
+}
+
+function readAsDataUrl(file: File | Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result || ''))
@@ -128,5 +178,41 @@ export async function prepareAppIcon(file: File) {
 
   if (!blob) throw new Error('图标编码失败。')
   if (blob.size > 420 * 1024) throw new Error('这张图片压缩后仍然过大，请换一张更简单的图片。')
-  return readAsDataUrl(new File([blob], file.name || 'app-icon.webp', { type: 'image/webp' }))
+  return readAsDataUrl(blob)
+}
+
+/**
+ * Home wallpapers are resized before entering IndexedDB so a single photo does
+ * not bloat backup files or make the simulated phone sluggish on mobile Safari.
+ */
+export async function prepareHomeWallpaper(file: File) {
+  if (!file.type.startsWith('image/')) throw new Error('请选择图片文件。')
+  if (file.size > 16 * 1024 * 1024) throw new Error('壁纸图片不能超过 16 MB。')
+
+  const dataUrl = await readAsDataUrl(file)
+  const image = await loadImage(dataUrl)
+  if (!image.naturalWidth || !image.naturalHeight) throw new Error('图片尺寸无效。')
+
+  const maxWidth = 1440
+  const maxHeight = 2560
+  const scale = Math.min(1, maxWidth / image.naturalWidth, maxHeight / image.naturalHeight)
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('当前浏览器无法处理图片。')
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+  let quality = 0.88
+  let blob: Blob | null = null
+  while (quality >= 0.56) {
+    blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', quality))
+    if (blob && blob.size <= 1.35 * 1024 * 1024) break
+    quality -= 0.08
+  }
+  if (!blob) throw new Error('壁纸编码失败。')
+  if (blob.size > 1.6 * 1024 * 1024) throw new Error('壁纸压缩后仍然过大，请换一张尺寸较小的图片。')
+  return readAsDataUrl(blob)
 }

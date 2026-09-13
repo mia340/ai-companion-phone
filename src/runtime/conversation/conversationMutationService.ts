@@ -3,9 +3,12 @@ import { createDefaultConversationState } from '../../services/chatSettings'
 import { memoryScopeFor } from '../../services/memoryService'
 import type {
   CharacterMemory,
+  Conversation,
   ConversationStateHistory,
   Message,
-  PromptDebugTrace
+  MomentPost,
+  PromptDebugTrace,
+  ResourceBinding
 } from '../../types/domain'
 
 export interface MemoryCleanupPatch {
@@ -296,4 +299,207 @@ export async function resetConversationRuntime(options: {
     preservedMemoryIds: memoryRows.filter(row => !memoryIds.includes(row.id)).map(row => row.id),
     updatedAt: now
   }
+}
+
+export interface ConversationDeletionPlan {
+  conversationId: string
+  messageIdsToDelete: string[]
+  localMemoryIdsToDelete: string[]
+  preservedCharacterMemoryIds: string[]
+  sharedMemoryConversationPatches: Array<{ id: string; conversationId: string; updatedAt: string }>
+  stateHistoryIdsToDelete: string[]
+  promptDebugTraceIdsToDelete: string[]
+  conversationBindingIdsToDelete: string[]
+  momentPostIdsToDetach: string[]
+  branchPatches: Array<{
+    id: string
+    parentConversationId?: string
+    rootConversationId?: string
+    branchFromMessageId?: string
+    updatedAt: string
+  }>
+}
+
+export function buildConversationDeletionPlan(options: {
+  conversation: Conversation
+  allConversations: Conversation[]
+  messages: Message[]
+  memories: CharacterMemory[]
+  stateHistory: ConversationStateHistory[]
+  promptDebugTraces: PromptDebugTrace[]
+  resourceBindings: ResourceBinding[]
+  momentPosts: MomentPost[]
+  now?: string
+}): ConversationDeletionPlan {
+  const target = options.conversation
+  const now = options.now ?? new Date().toISOString()
+  const survivors = options.allConversations.filter(row => row.id !== target.id)
+  const survivorsById = new Map(survivors.map(row => [row.id, row]))
+  const directChildren = survivors.filter(row => row.parentConversationId === target.id)
+  const branchPatches = new Map<string, ConversationDeletionPlan['branchPatches'][number]>()
+  const survivingParentId = target.parentConversationId && survivorsById.has(target.parentConversationId)
+    ? target.parentConversationId
+    : undefined
+
+  if (survivingParentId) {
+    for (const child of directChildren) {
+      branchPatches.set(child.id, {
+        id: child.id,
+        parentConversationId: survivingParentId,
+        rootConversationId: child.rootConversationId === target.id
+          ? (survivorsById.get(survivingParentId)?.rootConversationId || survivingParentId)
+          : child.rootConversationId,
+        branchFromMessageId: undefined,
+        updatedAt: now
+      })
+    }
+  } else {
+    const childrenByParent = new Map<string, Conversation[]>()
+    for (const row of survivors) {
+      if (!row.parentConversationId) continue
+      const rows = childrenByParent.get(row.parentConversationId) || []
+      rows.push(row)
+      childrenByParent.set(row.parentConversationId, rows)
+    }
+    for (const child of directChildren) {
+      branchPatches.set(child.id, {
+        id: child.id,
+        parentConversationId: undefined,
+        rootConversationId: undefined,
+        branchFromMessageId: undefined,
+        updatedAt: now
+      })
+      const queue = [...(childrenByParent.get(child.id) || [])]
+      const seen = new Set<string>()
+      while (queue.length) {
+        const descendant = queue.shift()!
+        if (seen.has(descendant.id)) continue
+        seen.add(descendant.id)
+        branchPatches.set(descendant.id, {
+          id: descendant.id,
+          parentConversationId: descendant.parentConversationId,
+          rootConversationId: child.id,
+          branchFromMessageId: descendant.branchFromMessageId,
+          updatedAt: now
+        })
+        queue.push(...(childrenByParent.get(descendant.id) || []))
+      }
+    }
+  }
+
+  const localMemoryIdsToDelete: string[] = []
+  const preservedCharacterMemoryIds: string[] = []
+  const sharedMemoryConversationPatches: ConversationDeletionPlan['sharedMemoryConversationPatches'] = []
+  for (const row of options.memories) {
+    if (memoryScopeFor(row) !== 'character') {
+      localMemoryIdsToDelete.push(row.id)
+      continue
+    }
+    preservedCharacterMemoryIds.push(row.id)
+    const rehome = survivors
+      .filter(conversation => conversation.memberIds.includes(row.characterId))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+    if (rehome) {
+      sharedMemoryConversationPatches.push({
+        id: row.id,
+        conversationId: rehome.id,
+        updatedAt: now
+      })
+    }
+  }
+
+  return {
+    conversationId: target.id,
+    messageIdsToDelete: options.messages.map(row => row.id),
+    localMemoryIdsToDelete,
+    preservedCharacterMemoryIds,
+    sharedMemoryConversationPatches,
+    stateHistoryIdsToDelete: options.stateHistory.map(row => row.id),
+    promptDebugTraceIdsToDelete: options.promptDebugTraces.map(row => row.id),
+    conversationBindingIdsToDelete: options.resourceBindings
+      .filter(row => row.scope === 'conversation' && row.scopeId === target.id)
+      .map(row => row.id),
+    momentPostIdsToDetach: options.momentPosts
+      .filter(row => row.conversationId === target.id)
+      .map(row => row.id),
+    branchPatches: Array.from(branchPatches.values())
+  }
+}
+
+/**
+ * Remove one chat and every conversation-local runtime artifact atomically.
+ * Character-scoped memory survives the deletion and is re-homed to another
+ * chat with that character when possible. Moments are preserved but detached
+ * from the deleted chat so their cards never point at a dead route.
+ */
+export async function deleteConversationConsistently(conversationId: string) {
+  const conversation = await db.conversations.get(conversationId)
+  if (!conversation) return undefined
+
+  const [allConversations, messages, memories, stateHistory, promptDebugTraces, resourceBindings, momentPosts] = await Promise.all([
+    db.conversations.toArray(),
+    db.messages.where('conversationId').equals(conversationId).toArray(),
+    db.memories.where('conversationId').equals(conversationId).toArray(),
+    db.conversationStateHistory.where('conversationId').equals(conversationId).toArray(),
+    db.promptDebugTraces.where('conversationId').equals(conversationId).toArray(),
+    db.resourceBindings.where('scopeId').equals(conversationId).toArray(),
+    db.momentPosts.where('conversationId').equals(conversationId).toArray()
+  ])
+  const plan = buildConversationDeletionPlan({
+    conversation,
+    allConversations,
+    messages,
+    memories,
+    stateHistory,
+    promptDebugTraces,
+    resourceBindings,
+    momentPosts
+  })
+  const deletedAt = new Date().toISOString()
+
+  await db.transaction(
+    'rw',
+    [
+      db.conversations,
+      db.messages,
+      db.memories,
+      db.chatSettings,
+      db.conversationStates,
+      db.conversationStateHistory,
+      db.musicStates,
+      db.promptDebugTraces,
+      db.resourceBindings,
+      db.momentPosts
+    ],
+    async () => {
+      if (plan.messageIdsToDelete.length) await db.messages.bulkDelete(plan.messageIdsToDelete)
+      if (plan.localMemoryIdsToDelete.length) await db.memories.bulkDelete(plan.localMemoryIdsToDelete)
+      for (const patch of plan.sharedMemoryConversationPatches) {
+        await db.memories.update(patch.id, {
+          conversationId: patch.conversationId,
+          updatedAt: patch.updatedAt
+        })
+      }
+      if (plan.stateHistoryIdsToDelete.length) await db.conversationStateHistory.bulkDelete(plan.stateHistoryIdsToDelete)
+      if (plan.promptDebugTraceIdsToDelete.length) await db.promptDebugTraces.bulkDelete(plan.promptDebugTraceIdsToDelete)
+      if (plan.conversationBindingIdsToDelete.length) await db.resourceBindings.bulkDelete(plan.conversationBindingIdsToDelete)
+      for (const momentId of plan.momentPostIdsToDetach) {
+        await db.momentPosts.update(momentId, { conversationId: undefined, updatedAt: deletedAt })
+      }
+      await db.chatSettings.delete(conversationId)
+      await db.conversationStates.delete(conversationId)
+      await db.musicStates.delete(conversationId)
+      for (const patch of plan.branchPatches) {
+        await db.conversations.update(patch.id, {
+          parentConversationId: patch.parentConversationId,
+          rootConversationId: patch.rootConversationId,
+          branchFromMessageId: patch.branchFromMessageId,
+          updatedAt: patch.updatedAt
+        })
+      }
+      await db.conversations.delete(conversationId)
+    }
+  )
+
+  return plan
 }

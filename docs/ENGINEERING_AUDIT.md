@@ -1,5 +1,11 @@
 # AI Companion Phone 工程审查与 V0.5.0 重构路线图
 
+## 0.0.5 V0.5.0-alpha.4.2 社区聊天兼容审查结论
+
+本轮修正的是 Presentation Ownership，而不是新增视觉特效：社区卡已有 Regex / WorldBook HTML / 作者 HTML 时，默认保留作者呈现；App 只负责手机 Shell、安全渲染和响应式约束。`first_mes` 与后续回复统一到同一 Contract 后，苏玉尘这类“开场纯文本 `<br>`、后续 WorldBook HTML”资源可以保持视觉连续。
+
+当前仍有一个明确的架构债务：Opening Community UI Runtime 的 orchestration 暂时位于 `ChatRoom.vue`。完成兼容回归后，应把 Contract Resolve / Greeting Presentation 迁入 Runtime/Presentation 层，继续降低 View 的资源调度职责。静态测试矩阵为 **30 files / 272 tests**。
+
 ## 0.0.3 V0.5.0-alpha.3.4 展示层收敛结论
 
 本轮是低风险 Presentation 重构：主要修改 scoped CSS / 页面布局与通讯录搜索，不改变 IndexedDB、Backup、Conversation Runtime 或 Provider。下一阶段仍应优先做 Character Shared Memory，再进入 Generation Runtime。

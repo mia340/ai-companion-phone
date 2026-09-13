@@ -35,7 +35,8 @@ const richHtmlHasOwnSurface = computed(() => {
   if (!html.trim()) return false
   // 作者已经为 UI 声明背景/边框/阴影时，外层保持透明，避免二次套卡。
   // 只有 bare markup（常见于老卡 first_mes 的 details/br）才由小手机提供中性承载面。
-  return /(?:background(?:-color)?|border(?:-color|-width|-style)?|box-shadow)\s*:/i.test(html)
+  return /<style\b/i.test(html)
+    || /(?:background(?:-color)?|border(?:-color|-width|-style)?|box-shadow)\s*:/i.test(html)
 })
 const alternativeCount = computed(() => props.message.alternatives?.length || 0)
 const alternativeIndex = computed(() => Math.min(

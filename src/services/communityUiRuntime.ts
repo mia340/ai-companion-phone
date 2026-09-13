@@ -369,6 +369,11 @@ export function tryRepairCommunityUiLocally(contract: CommunityUiContract, rawTe
   const source = rawText
     .replace(/^```(?:html|text)?\s*/i, '')
     .replace(/\s*```$/i, '')
+    // 社区卡常把 first_mes / 状态栏写成“纯文本 + <br>”。这不是一整块 Rich HTML，
+    // 但如果直接 escape 会把 <br> 变成 &lt;br&gt;，导致作者状态栏挤成一行。
+    // 本地 Compiler 只在确定要填作者 HTML 外壳时，把这些换行标记还原成真实行边界。
+    .replace(/(?:<br\s*\/?\s*>|&lt;br\s*\/?\s*&gt;)/gi, '\n')
+    .replace(/&nbsp;|&#160;/gi, ' ')
     .trim()
   if (!source) return { repaired: false, text: rawText, reason: '' }
 

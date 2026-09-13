@@ -3,13 +3,77 @@
 ## 当前版本
 
 ```text
-开发线：V0.5.0-alpha.3.5
-IndexedDB：V16（新增主屏幕 App 图标个性化）
-Backup：V11（含朋友圈动态、评论与 App 图标个性化）
+开发线：V0.5.0-alpha.4.2.1
+IndexedDB：V16（主屏幕图标与外观个性化）
+Backup：V11（含朋友圈动态、评论与 App 外观个性化）
 原始审查基线：用户上传 V0.4.7.1
 本轮输入基线：用户上传 alpha.3 RAR（已包含朋友圈 / 音乐 / 海龟汤）
 ```
 
+
+
+## V0.5.0-alpha.4.2.1 当前状态
+
+本轮是 Windows Build 热修：`HomeScreen.vue` 的 `longPressTimer` 原声明为 `ReturnType<typeof window.setTimeout>`，在项目同时存在 DOM 与 Node 类型时被解析为 Node `Timeout`，而浏览器 `window.setTimeout()` 返回 `number`，导致 `vue-tsc -b` 报 TS2322。现改为显式 `number | undefined`。
+
+- 用户 Windows 实测：**30 个测试文件 / 272 个用例全部通过**。
+- alpha.4.2 原始 Build 唯一阻塞：`HomeScreen.vue:142 TS2322`。
+- 本热修不改 IndexedDB **V16** / Backup **V11**，不改业务行为。
+- 完整 Build 仍需在 Windows 工作区重新执行 `npm test` + `npm run build` 验收。
+
+## V0.5.0-alpha.4.2 当前状态
+
+### Community Chat Compatibility
+
+```text
+Phone Shell（头像 / 气泡 / 输入框 / 长按菜单）
+  ↓
+Community Presentation Contract
+  1. 富文本 Regex UI
+  2. WorldBook HTML UI
+  3. 作者直接 HTML
+  4. 作者结构化 / 纯文本
+  5. 原生手机气泡 fallback
+```
+
+- `first_mes` / 备用开场与后续生成共享角色卡、WorldBook、Preset、Regex 的 UI Contract 检测。
+- WorldBook 明确要求固定 HTML 状态栏时，本地 Compiler 可把纯文本开场的数据填回作者模板；不会要求第二次模型调用，也不会创造剧情。
+- 旧 `isGreetingSeed` 可在加载会话时升级到作者 Rich UI。
+- 修复 `<br>` 可见转义；作者固定宽度 HTML 在手机 Surface 内响应式收缩；作者已有 Surface 时不再套第二层聊天气泡。
+- 默认 `scene-merged` 语义明确为“原卡 / 社区 UI”；`phone-text`、`phone-split` 仅作为玩家主动选择的手机化覆盖。
+- IndexedDB **V16** / Backup **V11** 不变。
+
+### 验证状态
+
+- 静态定义：**30 个测试文件 / 272 个用例**。
+- 改动 TypeScript / Vue script 语法检查通过。
+- 使用用户提供的苏玉尘角色卡实样执行 Community UI Compiler：识别为 `html-contract`，本地修复成功，`&lt;br&gt;` 不再出现，状态栏与正文都保留。
+- 当前容器 `node_modules` 不完整，`vitest` 不存在，因此完整 `npm test` 与 `npm run build` 必须以 Windows 验收结果为准。
+
+## V0.5.0-alpha.4.1 当前状态
+
+本轮是 **App Shell / Navigation 规范化**，目标是减少“项目自己发明的手机交互”，让玩家按真实手机与主流小手机的既有习惯直接上手。
+
+- Home 顶部不再常驻“编辑”按钮；桌面只保留日期 / 问候 / 世界摘要与 App 网格。
+- `设置 → 桌面与外观` 统一承接壁纸、App 自定义图标、图标大小与标签显示；空白处长按可快速进入。
+- 自定义壁纸与外观偏好复用 V16 `appCustomizations`，不升级数据库；Backup V11 继续自动包含这些记录。
+- 主屏“记忆”改为 `MemoryCenterView`，按角色显示角色共享、聊天内、冲突记忆数量，并可进入对应聊天的完整管理页。
+- Chat Settings 的 Memory Tab 只保留自动记忆行为开关/强度/最近消息范围；逐条 CRUD、冲突解决、Scope 切换全部归入 Memory App。
+- 社区 UI 基线确定为：**桌面 = Launcher；美化 = 集中设置；记忆 = 一级 App；Native App UI 由本地 Surface 负责。**
+- 测试定义未增加，仍为 **30 个测试文件 / 272 个用例**；本轮沙箱完成改动文件语法检查与相对 named import/export 一致性检查，`npm ci` 因环境超时未完整结束，Windows 仍需重新执行 `npm test` 与 `npm run build`。
+
+## V0.5.0-alpha.4.0 当前状态
+
+本轮正式进入 **Generation Runtime**。核心目标不是继续扩大 App 数量，而是把 AI 回复主链从 `ChatRoom.vue` 中拆成可测试、可追踪、可继续迁移的 Runtime。
+
+- 新增 `src/runtime/generation/generationContext.ts` 与 `generationContextBuilder.ts`，为每轮请求冻结 Character、Persona、Conversation、ChatSettings、ConversationState、Memory、Messages、ModelSettings 以及生成选项。
+- 新增 `generationOrchestrator.ts`，统一现有 Provider / Streaming 调用与 Vision 自动降级；真实 Provider 错误继续上抛，不生成假的本地角色回复。
+- 新增 `responsePersistenceService.ts`，承接 streaming placeholder、普通 AI 消息、Rich/Community UI 消息与 alternative reply 的持久化。
+- Message / Prompt Debug 增加 `generationId`，Prompt Debug 同时记录 Context 冻结时间与触发消息来源，方便定位“一条回复到底基于哪一轮上下文”。
+- 聊天列表加入左滑删除手势；删除走 `deleteConversationConsistently()`，统一处理消息、局部记忆、状态、Prompt Debug、聊天级资源绑定、朋友圈引用与分支关系；Character Scope 共享记忆保留。
+- 新增 9 个回归用例，源码定义为 **30 个测试文件 / 270 个用例**。IndexedDB **V16** / Backup **V11** 不变。
+
+沙箱依赖安装受网络环境影响，当前只完成 TypeScript/Vue script 语法级检查；正式交付仍要求在 Windows 工作区执行 `npm install`、`npm test`、`npm run build`，三步全部绿灯后再推送 `main`。
 
 ## V0.5.0-alpha.3.5 当前状态
 

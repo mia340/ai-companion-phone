@@ -2,7 +2,6 @@
 import type { CSSProperties } from 'vue'
 
 import type {
-  CharacterMemory,
   ChatSettings,
   ConversationState,
   UserPersona
@@ -15,9 +14,6 @@ defineProps<{
   title: string
   tab: ChatSettingsTab
   chatSettings?: ChatSettings
-  memories: CharacterMemory[]
-  newMemoryText: string
-  memoryCategoryNames: Record<CharacterMemory['category'], string>
   speechPlaybackAvailable: boolean
   speechVoices: SpeechSynthesisVoice[]
   providerLabel: string
@@ -31,23 +27,18 @@ defineProps<{
 
 const emit = defineEmits<{
   'update:tab': [tab: ChatSettingsTab]
-  'update:newMemoryText': [value: string]
   dragStart: [event: PointerEvent]
   dragMove: [event: PointerEvent]
   dragEnd: []
   close: []
   persist: []
   previewVoice: []
-  addMemory: []
-  deleteMemory: [id: string]
-  clearMemories: []
   clearConversation: []
   openModelSettings: []
   openPersonas: []
   openLorebook: []
   openCharacterCard: []
   openPromptDebug: []
-  openMemoryManager: []
   useGreeting: [greeting: string]
   useFreeGreeting: []
 }>()
@@ -228,11 +219,11 @@ const emit = defineEmits<{
       </label>
 
       <label class="setting-control">
-        <span><b>聊天呈现方式</b><small>只决定你怎么看回复，不再改变“是否同一现场”的世界事实；场景合并保留原 UI，手机式模式不把状态 UI 混进聊天流</small></span>
+        <span><b>聊天呈现方式</b><small>默认跟随社区角色卡：作者 HTML / Regex / 状态栏原样显示；只有你主动选择纯手机模式时才隐藏这些 UI</small></span>
         <select v-model="chatSettings.conversationPresentationMode" @change="emit('persist')">
-          <option value="scene-merged">场景合并 · 动作与台词同气泡</option>
-          <option value="phone-text">纯手机消息 · 只显示角色语句</option>
-          <option value="phone-split">动作 / 台词分开</option>
+          <option value="scene-merged">原卡 / 社区 UI · 推荐</option>
+          <option value="phone-text">纯聊天气泡 · 仅角色语句</option>
+          <option value="phone-split">剧情气泡 · 动作 / 台词分开</option>
         </select>
       </label>
 
@@ -268,8 +259,8 @@ const emit = defineEmits<{
       <label class="setting-control">
         <span><b>角色卡兼容策略</b><small>自动模式对所有角色都保持 AI / 原卡原样输出；只有手动选择“小手机增强”才启用额外整形</small></span>
         <select v-model="chatSettings.compatibilityMode" @change="emit('persist')">
-          <option value="auto">自动识别</option>
-          <option value="card-first">原卡优先</option>
+          <option value="auto">自动识别 · 推荐</option>
+          <option value="card-first">严格原卡</option>
           <option value="phone-enhanced">小手机增强</option>
         </select>
       </label>
@@ -316,26 +307,7 @@ const emit = defineEmits<{
         <input v-model.number="chatSettings.recentMessageLimit" type="number" min="6" max="60" @change="emit('persist')" />
       </label>
 
-      <form class="memory-add" @submit.prevent="emit('addMemory')">
-        <input
-          :value="newMemoryText"
-          placeholder="手动添加一条记忆"
-          @input="emit('update:newMemoryText', ($event.target as HTMLInputElement).value)"
-        />
-        <button type="submit">添加</button>
-      </form>
-
-      <div v-if="memories.length" class="memory-list">
-        <article v-for="memory in memories" :key="memory.id">
-          <small>{{ memoryCategoryNames[memory.category] }} · 重要度 {{ memory.importance }}</small>
-          <p>{{ memory.content }}</p>
-          <button type="button" @click="emit('deleteMemory', memory.id)">删除</button>
-        </article>
-      </div>
-      <p v-else class="panel-empty">还没有保存任何重要记忆。</p>
-
-      <button class="debug-button" type="button" @click="emit('openMemoryManager')">打开完整记忆管理</button>
-      <button class="danger-row" type="button" @click="emit('clearMemories')">清除全部记忆</button>
+      <p class="memory-manage-note">记忆开关与强度保留在当前聊天设置中；具体记忆的查看、编辑、冲突处理与跨聊天共享，统一从主屏幕「记忆」进入。</p>
     </div>
 
     <div v-else class="settings-content advanced-content">
@@ -490,43 +462,11 @@ const emit = defineEmits<{
   accent-color: #78add8;
 }
 
-.memory-add {
-  display: grid;
-  grid-template-columns: 1fr 58px;
-  gap: 7px;
-  margin: 14px 0;
-}
-
-.memory-add input,
-.memory-add button {
-  padding: 10px;
-  border: 1px solid rgba(80,50,62,.1);
-  border-radius: 12px;
-}
-
-.memory-add button {
-  border: 0;
-  background: #78add8;
-  color: #fff;
-}
-
-.memory-list article {
-  position: relative;
-  margin: 9px 0;
-  padding: 12px 48px 12px 13px;
-  border-radius: 14px;
-  background: #eef6fc;
-}
-
-.memory-list article small { color: #7f98ae; }
-.memory-list article p { margin: 5px 0 0; line-height: 1.55; }
-.memory-list article button {
-  position: absolute;
-  top: 12px;
-  right: 10px;
-  border: 0;
-  background: transparent;
-  color: #6b91b4;
+.memory-manage-note {
+  margin: 10px 2px 0;
+  color: #8a9bad;
+  font-size: 10px;
+  line-height: 1.55;
 }
 
 .danger-row {

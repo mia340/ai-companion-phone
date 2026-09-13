@@ -3,9 +3,14 @@ import { useRouter } from 'vue-router'
 import AppIcon from './AppIcon.vue'
 import type { HomeAppDefinition } from '../services/appCustomizationService'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   apps: readonly (HomeAppDefinition & { badge?: number; customImage?: string })[]
-}>()
+  iconSize?: number
+  showLabels?: boolean
+}>(), {
+  iconSize: 50,
+  showLabels: true
+})
 
 const router = useRouter()
 </script>
@@ -20,10 +25,10 @@ const router = useRouter()
       @click="router.push(app.route)"
     >
       <span class="hm-dock-tile">
-        <AppIcon :icon="app.icon" :custom-image="app.customImage" :tones="app.tone" :size="50" />
+        <AppIcon :icon="app.icon" :custom-image="app.customImage" :tones="app.tone" :size="props.iconSize" />
         <b v-if="app.badge" class="hm-dock-badge">{{ app.badge }}</b>
       </span>
-      <span class="hm-dock-label">{{ app.label }}</span>
+      <span v-if="props.showLabels" class="hm-dock-label">{{ app.label }}</span>
     </button>
   </nav>
 </template>

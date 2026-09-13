@@ -22,7 +22,7 @@ const sections: SettingSection[] = [
   {
     label: '体验',
     items: [
-      { icon: '◐', tone: 'blue', title: '外观设置', description: '壁纸、图标、布局与聊天气泡' },
+      { icon: '◐', tone: 'blue', title: '桌面与外观', description: '壁纸、App 图标、大小与名称显示', path: '/settings/appearance' },
       { icon: 'Aa', tone: 'cyan', title: '字体设置', description: '系统字体与字号' }
     ]
   },
@@ -44,7 +44,7 @@ const sections: SettingSection[] = [
   {
     label: '关于',
     items: [
-      { icon: 'i', tone: 'gray', title: 'AI Companion Phone', description: '本地优先的 AI 陪伴手机', value: '0.5.0-alpha.3.4.1' }
+      { icon: 'i', tone: 'gray', title: 'AI Companion Phone', description: '本地优先的 AI 陪伴手机', value: '0.5.0-alpha.4.1' }
     ]
   }
 ]

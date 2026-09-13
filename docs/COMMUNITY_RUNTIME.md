@@ -1,8 +1,34 @@
 # Community Runtime｜社区资源兼容运行时
 
+> V0.5.0-alpha.4.2 当前规则：**手机壳归 App，消息内部 UI 默认归社区作者资源**。Rich Regex / WorldBook HTML / 作者直接 HTML 优先于原生气泡；`first_mes` 与后续回复共享同一 Presentation Contract。
+
 > V0.5.0-alpha.3.2 明确 Presentation 边界：**Chat 继续完整承载 Character Card / WorldBook / Regex / Community UI；朋友圈、音乐、海龟汤等原生 App 不执行或展示模型生成的第二层 UI**。旧兼容 fallback 仍以“不改作者原资源、不执行未知脚本”为边界。
 
 > 当前文档只描述通用协议与运行边界。测试角色卡只能作为回归样本，生产逻辑禁止按角色名、作者名、卡 ID 或文件名特判。
+
+
+## 0. V0.5.0-alpha.4.2 Presentation Priority
+
+默认 `scene-merged` 下按以下顺序选择显示路径：
+
+```text
+1. assistant-output Regex 生成的 Rich HTML
+2. WorldBook / Preset 声明的固定 HTML UI contract
+3. 角色作者直接输出的 HTML
+4. 作者结构化 / 纯文本内容
+5. 原生手机聊天气泡
+```
+
+约束：
+
+- Regex 只做显示投影时不改 canonical / raw 存储；富文本 Regex 的来源标记为 `regex`。
+- WorldBook 固定 HTML 合同只允许本地 Compiler 把已有状态 / 正文填入作者模板，来源标记为 `worldbook-ui`。
+- 作者直接 HTML 来源标记为 `card-ui`。
+- `first_mes` 与 alternate greetings 会先解析角色卡、Preset、WorldBook、assistant-output / world-info Regex，再决定展示；这保证开场与后续回复连续。
+- 对历史 `isGreetingSeed`，加载会话时允许做一次确定性呈现升级；不会生成新文本。
+- `<br>` / `&lt;br&gt;` 在进入固定作者模板前只作为逻辑换行解析，之后再安全 escape，避免字面量泄漏。
+- HTML 仍经过 `SafeRichHtml`；未知脚本不执行，固定宽度内容受手机 Surface 宽度约束。
+- `phone-text` / `phone-split` 属于用户主动 presentation override，可以明确关闭作者 Rich UI。
 
 ## 1. 目标
 
