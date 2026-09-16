@@ -175,7 +175,7 @@ async function importData() {
 
           <p>
             导出角色、头像、聊天记录、
-            世界设置、“我的资料”、聊天偏好、角色记忆与关系成长记录。
+            世界设置、“我的资料”、聊天偏好、角色记忆、朋友圈与好友社交权限。
           </p>
 
           <label class="image-export-option">
@@ -309,6 +309,11 @@ async function importData() {
           <span>
             <b>{{ summary.momentComments }}</b>
             条朋友圈评论
+          </span>
+
+          <span>
+            <b>{{ summary.socialProfiles }}</b>
+            份好友社交设置
           </span>
         </div>
 

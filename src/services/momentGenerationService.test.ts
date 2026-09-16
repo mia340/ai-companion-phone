@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCharacterCommentMessages,
   buildCharacterPostMessages,
+  buildCharacterReactToPostMessages,
+  buildCharacterThreadReplyMessages,
   momentProfileFromCharacter,
   sanitizeMomentText,
   truncateBySentence
@@ -176,5 +178,35 @@ describe('sanitizeMomentText', () => {
   it('模型误生成 HTML/UI 时只保留朋友圈正文', () => {
     expect(sanitizeMomentText('<style>.card{color:red}</style><div class="card">今晚风很轻。</div>'))
       .toBe('今晚风很轻。')
+  })
+})
+
+
+describe('Social Runtime comment prompts', () => {
+  const profile = momentProfileFromCharacter(makeCharacter())
+
+  it('角色可以评论另一角色的动态，而不是把对方硬当用户', () => {
+    const messages = buildCharacterReactToPostMessages(profile, '小林', '今天终于把报告交了。')
+    const content = String(messages[1].content)
+    expect(content).toContain('「小林」')
+    expect(content).toContain('今天终于把报告交了')
+    expect(content).toContain('不要擅自假设')
+  })
+
+  it('角色回复评论时明确目标作者并保留最近评论串', () => {
+    const messages = buildCharacterThreadReplyMessages(profile, {
+      postAuthorName: '我',
+      postText: '今天加班。',
+      targetAuthorName: '小林',
+      targetComment: '又加班？',
+      threadContext: [
+        { authorName: '阿明', content: '早点回去。' },
+        { authorName: '小林', content: '又加班？' }
+      ]
+    })
+    const content = String(messages[1].content)
+    expect(content).toContain('直接回复「小林」')
+    expect(content).toContain('阿明：早点回去。')
+    expect(content).toContain('小林：又加班？')
   })
 })

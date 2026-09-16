@@ -179,8 +179,18 @@ function looksLikePersonaTemplateContent(value: string) {
   return /(?:^|\n)\s*(?:[-*•·]\s*)?(?:姓名|名字|年龄|性别|生日|身高|职业|工作|身份|外貌|性格|背景|经历|爱好|兴趣|习惯|边界|name|age|gender|sex|birthday|height|occupation|profession|job|identity|appearance|personality|background|history|relationship|interests?|hobbies|habits|boundaries)\s*[:：]/iu.test(readable)
 }
 
+function normalizePersonaNameToken(value: string) {
+  return value
+    .trim()
+    .replace(/^[\s"'“”‘’`]+/u, '')
+    .replace(/[\s"'“”‘’`]+$/u, '')
+    .replace(/^[\[{（【「『〈《<]+/u, '')
+    .replace(/[}\]）】」』〉》>]+$/u, '')
+    .trim()
+}
+
 function looksLikePersonaNameToken(value: string) {
-  const token = value.trim().replace(/^[\[{（【]|[}\]）】]$/g, '')
+  const token = normalizePersonaNameToken(value)
   if (!token || token.length > 30) return false
   if (/^(?:用户|user|我|你)$/i.test(token)) return false
   if (/(?:要求|身份|关系|故事|网恋|年龄|状态|内心|外观|计划|好感|工作|职业|已经|已发生|希望|可以|应该|不能|不高|自卑|唯一|秘密|例外|们|的|被|让|对于|关于|作为|为“|为")/u.test(token)) return false
@@ -190,15 +200,19 @@ function looksLikePersonaNameToken(value: string) {
 }
 
 function inferNaturalPersonaName(value: string) {
+  const readable = stripPersonaMarkup(value)
+  const mappedUserName = readable.match(/^\s*\{\{user\}\}\s*(?:固定(?:对应|为)|对应|即|就是|是)\s*[:：]?\s*([^,，。；;\n:：]{1,30})/iu)?.[1]?.trim()
+  if (mappedUserName && looksLikePersonaNameToken(mappedUserName)) return normalizePersonaNameToken(mappedUserName)
+
   const raw = stripUserMarker(value)
     .replace(/^\s*(?:\[(?:用户|user)\]\s*)/i, '')
     .replace(/^\s*[\[{（【]\s*/, '')
   const labeled = raw.match(/(?:^|\n)\s*(?:姓名|名字|本名|现代名|穿越后身份名)\s*[:：]\s*(?!\{\{user\}\})([^,，。；;\n<]{1,30})/iu)?.[1]?.trim()
-  if (labeled) return labeled
+  if (labeled && looksLikePersonaNameToken(labeled)) return normalizePersonaNameToken(labeled)
   const explicit = raw.match(/^\s*(?:我(?:是|叫|名为)|是)\s*[\[{（【]?\s*([^,，。；;\n}\]）】]{1,30})/u)?.[1]?.trim()
-  if (explicit && !/^\{\{user\}\}$/i.test(explicit)) return explicit
+  if (explicit && !/^\{\{user\}\}$/i.test(explicit) && looksLikePersonaNameToken(explicit)) return normalizePersonaNameToken(explicit)
   const first = raw.match(/^\s*([^,，。；;\n:：{}\[\]（）【】]{1,30})\s*[,，]/u)?.[1]?.trim()
-  if (first && looksLikePersonaNameToken(first) && looksLikeDirectPersonaLine(raw)) return first
+  if (first && looksLikePersonaNameToken(first) && looksLikeDirectPersonaLine(raw)) return normalizePersonaNameToken(first)
   return ''
 }
 
@@ -271,9 +285,20 @@ export function extractEmbeddedUserTemplate(sourceText: string): string {
 
     const direct = tail.replace(/^\{\{user\}\}\s*(?:\[(?:用户|user)\]\s*)?/i, '').trim()
     const explicitDeclaration = /^(?:我(?:是|叫|名为)|姓名\s*[:：]|名字\s*[:：])/u.test(direct)
-    const structuredIsDeclaration = /^是\s*[\[{（【]/u.test(direct) && looksLikeDirectPersonaLine(direct)
+    const structuredIsDeclaration = /^是\s*[\[{（【「『〈《<]/u.test(direct) && looksLikeDirectPersonaLine(direct)
+    const mappedDeclaration = /^(?:固定(?:对应|为)|对应|即|就是)\s*[:：]?\s*[\[{（【「『〈《<]?\s*[^,，。；;\n:：]{1,30}/u.test(direct)
     const bareMatch = direct.match(/^(?:是\s*)?([^,，。；;\n]{1,30})[,，]/u)
     const directNameProfile = Boolean(bareMatch?.[1] && looksLikePersonaNameToken(bareMatch[1]) && looksLikeDirectPersonaLine(direct.slice(0, 180)))
+
+    if (mappedDeclaration) {
+      const continuation = extractIndentedUserBlock(lines, markerIndex, indent, '')
+      const raw = `${tail.trim()}${continuation ? `\n${continuation}` : ''}`
+      if (looksLikePersonaTemplateContent(stripUserMarker(raw))) {
+        candidates.push({ raw, score: 145 })
+      }
+      continue
+    }
+
     if (explicitDeclaration || structuredIsDeclaration || directNameProfile) {
       candidates.push({ raw: tail.trim(), score: explicitDeclaration ? 140 : structuredIsDeclaration ? 135 : 125 })
     }
@@ -431,6 +456,7 @@ function userPersonaEntryScore(entry: Record<string, unknown>): number {
   const label = [asText(entry.name), asText(entry.comment), asText(entry.title)].filter(Boolean).join(' ').toLowerCase()
   const compactLabel = label.replace(/[\s_\-<>/\\]+/g, '')
   const content = asText(entry.content)
+  const readableContent = stripPersonaMarkup(content)
 
   // “user 的房间 / 座驾 / 衣橱 / NPC”等是世界资料，不是 Persona。
   if (/(?:personalroom|房间|住址|住所|居住|座驾|车辆|出行|衣橱|穿搭|单位|公司|npc|联系人|手机|相册|日记)/i.test(compactLabel)) return -100
@@ -438,11 +464,15 @@ function userPersonaEntryScore(entry: Record<string, unknown>): number {
   let score = 0
   if (/^(?:user|用户|玩家|主控|主角|自机|\{\{user\}\})(?:人设|设定|persona|profile|人物设定|人物档案|基本情况|基本信息|档案|资料)$/i.test(compactLabel)) score += 130
   if (/(?:user人设|用户人设|玩家人设|主控人设|主角人设|自机人设|userpersona(?![a-z])|user设定|用户设定|玩家设定|主控设定|主角设定|自机设定|user人物设定|用户人物设定|user基本情况|用户基本情况|user基本信息|用户基本信息|用户档案|用户资料|我的设定|\{\{user\}\}人设)/i.test(compactLabel)) score += 110
+  // 社区常见写法会把实际用户名夹在 {{user}} 与“设定/档案”之间，例如 {{user}}某某设定。
+  // 只看语义结构，不依赖某一个姓名。
+  if (/\{\{user\}\}.{1,30}(?:人设|设定|persona|profile|人物档案|档案|资料|基本情况|基本信息)/iu.test(compactLabel)) score += 115
   if (/(?:user人设辅助|用户人设辅助|userprofile(?![a-z])|playerprofile(?![a-z])|关于user$|关于用户$|关于玩家$)/i.test(compactLabel)) score += 85
-  if (/^\s*\{\{user\}\}/i.test(content)) score += 35
-  if (/^\s*(?:\[(?:用户|user)\]\s*)?\{\{user\}\}\s*(?:\[(?:用户|user)\]\s*)?(?:我(?:是|叫|名为)|是|姓名\s*[:：])/i.test(content)) score += 45
-  if (looksLikeNaturalPersona(stripPersonaMarkup(content))) score += 25
-  if (/(?:姓名|年龄|性别|身高|职业|身份)\s*[:：]/u.test(stripPersonaMarkup(content))) score += 15
+  if (/<\s*(?:user[_-]?(?:profile|persona|character)|player[_-]?(?:profile|persona))\b/i.test(content)) score += 110
+  if (/^\s*\{\{user\}\}/i.test(readableContent)) score += 35
+  if (/^\s*(?:\[(?:用户|user)\]\s*)?\{\{user\}\}\s*(?:\[(?:用户|user)\]\s*)?(?:我(?:是|叫|名为)|是|姓名\s*[:：]|固定(?:对应|为)|对应|即|就是)/iu.test(readableContent)) score += 55
+  if (looksLikeNaturalPersona(readableContent)) score += 25
+  if (/(?:姓名|年龄|性别|身高|职业|身份)\s*[:：]/u.test(readableContent)) score += 15
   return score
 }
 

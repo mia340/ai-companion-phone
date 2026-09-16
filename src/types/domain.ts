@@ -762,3 +762,73 @@ export interface MomentComment {
   source: MomentSource
   createdAt: string
 }
+
+export type SocialActivityKind =
+  | 'moment-comment'
+  | 'moment-reply'
+  | 'moment-like'
+
+export type SocialActivityStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled'
+
+export type SocialInteractionLevel = 'quiet' | 'normal' | 'active'
+
+/** 每位角色在朋友圈里的可见性与自主互动权限。 */
+export interface CharacterSocialProfile {
+  id: UUID
+  worldId: UUID
+  characterId: UUID
+  canViewMoments: boolean
+  canLikeMoments: boolean
+  canCommentMoments: boolean
+  canReplyToComments: boolean
+  canPostMoments: boolean
+  interactionLevel: SocialInteractionLevel
+  createdAt: string
+  updatedAt: string
+}
+
+export type SocialNotificationType = 'moment-comment' | 'moment-reply'
+
+/** 朋友圈里的未读互动。正文/评论本身仍以 Moment 表为事实源。 */
+export interface SocialNotification {
+  id: UUID
+  worldId: UUID
+  channel: 'moments'
+  type: SocialNotificationType
+  actorCharacterId: UUID
+  momentId: UUID
+  commentId?: UUID
+  preview: string
+  read: boolean
+  createdAt: string
+}
+
+/**
+ * Social Runtime 的持久活动队列。
+ *
+ * 当前只承载朋友圈，但结构故意保留 channel / actor / target，
+ * 后续群聊可以复用同一套“谁在什么社交空间里对谁做什么”的调度思路。
+ */
+export interface SocialActivity {
+  id: UUID
+  worldId: UUID
+  channel: 'moments'
+  kind: SocialActivityKind
+  status: SocialActivityStatus
+  /** 执行动作的角色；当前 Social Runtime 只让角色自动行动。 */
+  actorCharacterId: UUID
+  /** 所属动态。 */
+  momentId: UUID
+  /** 回复目标评论；moment-comment 可为空。 */
+  targetCommentId?: UUID
+  /** 为评论线程保留的深度，防止角色互聊无限递归。 */
+  threadDepth?: number
+  /** 计划执行时间；App 离开朋友圈页仍保留，重新打开时补执行。 */
+  dueAt: string
+  /** 幂等键：避免同一触发被重复排队。 */
+  dedupeKey?: string
+  attempts: number
+  lastError?: string
+  createdAt: string
+  updatedAt: string
+}

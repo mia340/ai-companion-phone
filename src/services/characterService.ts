@@ -319,6 +319,8 @@ export async function deleteCharacterSafely(
         db.conversationStateHistory.where('characterId').equals(characterId).delete(),
         db.promptDebugTraces.where('characterId').equals(characterId).delete(),
         db.personas.toCollection().filter(persona => persona.boundCharacterId === characterId).delete(),
+        db.socialProfiles.delete(characterId),
+        db.socialNotifications.where('actorCharacterId').equals(characterId).delete(),
         db.resourceBindings.where('characterId').equals(characterId).delete(),
         db.resourceBindings.where('scopeId').equals(characterId).delete()
       ])

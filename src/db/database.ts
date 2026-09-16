@@ -13,6 +13,9 @@ import type {
   Message,
   MomentComment,
   MomentPost,
+  SocialActivity,
+  CharacterSocialProfile,
+  SocialNotification,
   MusicState,
   UserProfile,
   UserPersona,
@@ -52,6 +55,9 @@ export class CompanionDatabase extends Dexie {
   conversationStateHistory!: EntityTable<ConversationStateHistory, 'id'>
   momentPosts!: EntityTable<MomentPost, 'id'>
   momentComments!: EntityTable<MomentComment, 'id'>
+  socialActivities!: EntityTable<SocialActivity, 'id'>
+  socialProfiles!: EntityTable<CharacterSocialProfile, 'id'>
+  socialNotifications!: EntityTable<SocialNotification, 'id'>
   appCustomizations!: EntityTable<AppCustomization, 'id'>
 
   constructor() {
@@ -863,6 +869,19 @@ export class CompanionDatabase extends Dexie {
     // V16：主屏幕 App 图标与外观个性化。只增加一张表，不改既有索引。
     this.version(16).stores({
       appCustomizations: 'id, worldId, appKey, updatedAt'
+    })
+
+    // V17：Social Runtime 持久活动队列。
+    // 队列是运行时调度元数据，不改变朋友圈正文/评论结构；旧 V16 数据原样保留。
+    this.version(17).stores({
+      socialActivities: 'id, worldId, channel, kind, status, actorCharacterId, momentId, targetCommentId, dueAt, createdAt, updatedAt'
+    })
+
+    // V18：Social Runtime V2。角色朋友圈权限/活跃度属于用户配置；
+    // 通知表只保存“哪些互动还没看”，朋友圈正文仍由 momentPosts / momentComments 负责。
+    this.version(18).stores({
+      socialProfiles: 'id, worldId, characterId, interactionLevel, updatedAt',
+      socialNotifications: 'id, worldId, channel, read, actorCharacterId, momentId, createdAt'
     })
 
   }

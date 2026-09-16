@@ -144,6 +144,25 @@ it('识别多种社区 description 内联 Persona 写法，但不把普通 {{use
   expect(ordinary.embeddedUser).toBeUndefined()
 })
 
+it('归一化社区 Persona 姓名外层包裹符，不把括号本身写进姓名', () => {
+  const cases = [
+    ['{{user}}是{洛梨,女,20岁,170cm,影阁二把手。', '洛梨'],
+    ['{{user}}固定对应【北柠】\n年龄: 26岁\n职业: 核心剧情策划', '北柠'],
+    ['{{user}}是「Alex」, male, 29 years old, 181cm, photographer.', 'Alex']
+  ] as const
+
+  for (const [description, name] of cases) {
+    const result = parseCharacterCardJson(JSON.stringify({ spec: 'chara_card_v2', data: { name: '测试', description } }))
+    expect(result.embeddedUser?.patch.name).toBe(name)
+  }
+
+  const ordinaryMappingSentence = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    data: { name: '普通关系句', description: '{{user}}就是朋友。{{char}}一直把{{user}}当作重要伙伴。' }
+  }))
+  expect(ordinaryMappingSentence.embeddedUser).toBeUndefined()
+})
+
 it('识别 user基本情况 / user设定 世界书，同时忽略 user_personal_room 等环境资源', () => {
   const result = parseCharacterCardJson(JSON.stringify({
     spec: 'chara_card_v2',
@@ -250,6 +269,43 @@ it('兼容社区常见用户 Persona 标签与字段，而不是针对单一卡�
   expect(englishCommunityField.embeddedUser?.patch.name).toBe('Casey')
   expect(englishCommunityField.embeddedUser?.patch.age).toBe('31')
   expect(englishCommunityField.embeddedUser?.patch.height).toBe('172cm')
+})
+
+it('识别带用户名的 {{user}}xxx设定 与 <user_profile> 包装，不依赖具体姓名', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v2',
+    spec_version: '2.0',
+    data: {
+      name: '社区卡E',
+      description: '{{char}}与{{user}}长期相处。',
+      character_book: {
+        entries: [
+          {
+            id: 1,
+            name: '{{user}}若宁设定',
+            comment: '{{user}}若宁设定',
+            keys: [],
+            constant: true,
+            enabled: true,
+            content: [
+              '<user_profile>',
+              '{{user}}固定对应若宁:',
+              '  年龄: "26岁"',
+              '  职业: "核心剧情策划"',
+              '  性格:',
+              '    - "温暖、细腻、观察力强。"',
+              '</user_profile>'
+            ].join('\n')
+          }
+        ]
+      }
+    }
+  }))
+
+  expect(result.embeddedUser?.patch.name).toBe('若宁')
+  expect(result.embeddedUser?.patch.age).toBe('26')
+  expect(result.embeddedUser?.patch.occupation).toBe('核心剧情策划')
+  expect(result.notes.some(note => note.includes('内嵌世界书 user 人设条目'))).toBe(true)
 })
 
 it('“user 人设自拟/请填写用户设定”只有提示词时不会伪造 Persona', () => {

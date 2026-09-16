@@ -3,14 +3,39 @@
 ## 当前版本
 
 ```text
-开发线：V0.5.0-alpha.4.4.1
-IndexedDB：V16（主屏幕图标与外观个性化）
-Backup：V11（含朋友圈动态、评论与 App 外观个性化）
+开发线：V0.5.0-alpha.5.0
+IndexedDB：V17（Social Runtime 持久活动队列）
+Backup：V11（不导出可重建社交队列）
 原始审查基线：用户上传 V0.4.7.1
-本轮输入基线：用户上传 alpha.3 RAR（已包含朋友圈 / 音乐 / 海龟汤）
 ```
 
+## V0.5.0-alpha.5.0 当前状态
 
+朋友圈已从“页面生命周期内定时器”升级为 App 级 Social Runtime。用户发动态、回复角色评论、角色自主发动态后，后续 AI 社交行为都先进入 `socialActivities` 持久队列，再由全局运行时消费。
+
+核心能力：
+
+- 离开朋友圈页面后，已排队评论/回复不会取消；
+- 用户回复角色后，被回复角色继续接话；
+- 角色之间可以在同一评论区互相回复；
+- 通过热度、线程深度、幂等和重试约束控制社交节奏；
+- Web/PWA 被系统挂起期间不强行后台请求，恢复后补执行；
+- 事件模型使用 `channel + actor + target + dueAt`，为后续群聊 Social Channel 留接口。
+
+静态测试目标：**32 files / 289 tests**。修改 TS / Vue script 已通过 TypeScript `transpileModule` 语法检查；完整 `npm run verify` 仍以 Windows/CI 为发布门禁。
+
+## V0.5.0-alpha.4.5 当前状态
+
+真实 Prompt Debug 暴露出两个相互关联的问题：模型把 user-profile 中“她”的资料性写法误当成旁白人称风格；同时默认 Persona UI 名“我”会被直接替换进社区卡 `{{user}}` 宏，形成“与我年龄差 / 我固定对应北柠”等不自然系统文本。
+
+本版把“当前用户的人称”提升为显式 Runtime 规则：没有原资源明确第三人称指令时，旁白/动作使用第二人称“你”；资料中的她/他/TA不构成人称指令。默认 Persona 的通用展示名不再污染 `{{user}}` 宏。
+
+同时根据新的社区样本补齐 `{{user}}某某设定 + <user_profile> + {{user}}固定对应某姓名` 的通用 Persona 识别，并让旧角色编辑页扫描已绑定世界书恢复 Persona 预览。
+
+- 静态测试定义目标：**31 files / 280 tests**。
+- 改动 TS 与 CharacterCardEditor `<script setup>` 已通过 TypeScript transpile 语法检查。
+- 当前容器离线 npm cache 缺失 `zod` tarball，无法完成完整 Vitest/vue-tsc/Vite；Windows `npm run verify` 仍是最终发布门禁。
+- IndexedDB **V16** / Backup **V11** 不变。
 
 ## V0.5.0-alpha.4.4.1 当前状态
 

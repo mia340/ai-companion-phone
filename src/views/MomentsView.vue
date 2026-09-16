@@ -16,16 +16,13 @@ import { findSingleConversation } from '../services/characterService'
 import { prepareChatImage } from '../services/imageService'
 import {
   MomentAiUnconfiguredError,
-  generateCharacterComment,
-  generateCharacterPost,
-  generateCharacterReactionToUserPost
+  generateCharacterPost
 } from '../services/momentGenerationService'
 import {
   MOMENT_MAX_COMMENT_LENGTH,
   MOMENT_MAX_CONTENT_LENGTH,
   MOMENT_MAX_IMAGES,
   addMomentComment,
-  addMomentExternalLike,
   createCharacterMoment,
   createUserMoment,
   deleteMomentPost,
@@ -35,18 +32,39 @@ import {
   toggleMomentLike
 } from '../services/momentService'
 import {
+  isAutoMomentsEnabled,
+  setAutoMomentsEnabled
+} from '../services/momentAutoActivityService'
+import {
   REPLY_HEAT_OPTIONS,
   getReplyHeat,
-  isAutoMomentsEnabled,
-  pickUserPostReactionAuthors,
-  planReplyCount,
-  setAutoMomentsEnabled,
   setReplyHeat
-} from '../services/momentAutoActivityService'
-import type { MomentReplyHeat } from '../services/momentAutoActivityService'
+} from '../services/momentSocialSettings'
+import type { MomentReplyHeat } from '../services/momentSocialSettings'
+import {
+  scheduleCharacterReplyToUserComment,
+  scheduleSocialForCharacterPost,
+  scheduleSocialForUserPost
+} from '../services/socialRuntimeService'
+import {
+  SOCIAL_LEVEL_LABELS,
+  defaultCharacterSocialProfile,
+  saveCharacterSocialProfile
+} from '../services/socialPresenceService'
+import {
+  markAllSocialNotificationsRead,
+  markSocialNotificationRead
+} from '../services/socialNotificationService'
 
 import type { MomentCommentItem, MomentFeedItem } from '../services/momentService'
-import type { Character, MomentComment, MomentPost, MomentPostImage } from '../types/domain'
+import type {
+  Character,
+  CharacterSocialProfile,
+  MomentComment,
+  MomentPostImage,
+  SocialInteractionLevel,
+  SocialNotification
+} from '../types/domain'
 
 type ComposerMode = 'none' | 'mine' | 'character'
 
@@ -55,6 +73,25 @@ const worldCharacters = ref<Character[]>([])
 const selfDisplay = ref({ name: '我', avatar: '🙂' })
 const activeWorldId = ref('world-default')
 const router = useRouter()
+
+const socialProfiles = ref<Record<string, CharacterSocialProfile>>({})
+const socialNotifications = ref<SocialNotification[]>([])
+const showCreateMenu = ref(false)
+const showSocialSettings = ref(false)
+const showNotifications = ref(false)
+const selectedSocialCharacterId = ref('')
+
+const unreadSocialCount = computed(() => socialNotifications.value.filter(item => !item.read).length)
+const socialLevelLabels = SOCIAL_LEVEL_LABELS
+const socialLevelOptions: SocialInteractionLevel[] = ['quiet', 'normal', 'active']
+const selectedSocialCharacter = computed(() =>
+  worldCharacters.value.find(character => character.id === selectedSocialCharacterId.value)
+)
+const selectedSocialProfile = computed(() => {
+  const character = selectedSocialCharacter.value
+  if (!character) return undefined
+  return socialProfiles.value[character.id] ?? defaultCharacterSocialProfile(character)
+})
 
 let subscription: { unsubscribe: () => void } | undefined
 
@@ -70,7 +107,6 @@ const showSettingsHint = ref(false)
 
 // 角色“偶尔自己发朋友圈”的开关（驱动在 main 里全局跑，这里只是给个控制）
 const autoMomentsOn = ref(isAutoMomentsEnabled())
-const showMomentControls = ref(false)
 
 function toggleAutoMoments() {
   autoMomentsOn.value = !autoMomentsOn.value
@@ -114,9 +150,6 @@ const replyTarget = ref<{
   authorName: string
   content: string
 } | null>(null)
-const replyingMomentId = ref<string | null>(null)
-const replyingCharacterName = ref('')
-const replyingCharacterAvatar = ref('🙂')
 
 const noticeText = ref('')
 const noticeKind = ref<'ok' | 'warn' | 'error'>('ok')
@@ -143,12 +176,14 @@ function isOwnPost(item: MomentFeedItem) {
 }
 
 function openSelfComposer() {
+  showCreateMenu.value = false
   composerMode.value = 'mine'
   aiHint.value = ''
   showSettingsHint.value = false
 }
 
 function openCharacterComposer() {
+  showCreateMenu.value = false
   composerMode.value = 'character'
   aiHint.value = ''
   showSettingsHint.value = false
@@ -163,6 +198,65 @@ function cancelComposer() {
   myImages.value = []
   aiHint.value = ''
   showSettingsHint.value = false
+}
+
+function socialProfileFor(character: Character): CharacterSocialProfile {
+  return socialProfiles.value[character.id] ?? defaultCharacterSocialProfile(character)
+}
+
+async function updateSocialProfile(
+  character: Character,
+  patch: Partial<Pick<CharacterSocialProfile,
+    'canViewMoments' | 'canLikeMoments' | 'canCommentMoments' | 'canReplyToComments' | 'canPostMoments' | 'interactionLevel'>>
+) {
+  try {
+    await saveCharacterSocialProfile(character, patch)
+  } catch (error) {
+    showNotice(error instanceof Error ? error.message : '社交设置保存失败。', 'error')
+  }
+}
+
+function openSocialCharacter(character: Character) {
+  selectedSocialCharacterId.value = character.id
+}
+
+function closeSocialCharacter() {
+  selectedSocialCharacterId.value = ''
+}
+
+async function openNotificationCenter() {
+  showCreateMenu.value = false
+  showSocialSettings.value = false
+  showNotifications.value = true
+  if (unreadSocialCount.value) {
+    await markAllSocialNotificationsRead(activeWorldId.value).catch(() => 0)
+  }
+}
+
+async function jumpToNotification(notification: SocialNotification) {
+  await markSocialNotificationRead(notification.id).catch(() => undefined)
+  showNotifications.value = false
+  window.setTimeout(() => {
+    document.querySelector(`[data-moment-id="${notification.momentId}"]`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center'
+    })
+  }, 80)
+}
+
+function notificationActor(notification: SocialNotification) {
+  return worldCharacters.value.find(character => character.id === notification.actorCharacterId)
+}
+
+function notificationLabel(notification: SocialNotification) {
+  return notification.type === 'moment-reply' ? '回复了你的评论' : '评论了你的朋友圈'
+}
+
+function openSocialSettingsSheet() {
+  showCreateMenu.value = false
+  showNotifications.value = false
+  selectedSocialCharacterId.value = ''
+  showSocialSettings.value = true
 }
 
 function myRemaining() {
@@ -223,8 +317,13 @@ async function publishMyMoment() {
     myDraft.value = ''
     myImages.value = []
     composerMode.value = 'none'
-    showNotice('发布成功，好友们会看到的。', 'ok')
-    scheduleReactionsTo(post)
+    try {
+      await scheduleSocialForUserPost(post, worldCharacters.value, replyHeat.value)
+      showNotice('发布成功。即使离开朋友圈，好友互动也会继续排队。', 'ok')
+    } catch (queueError) {
+      console.warn('朋友圈已发布，但 Social Runtime 排队失败：', queueError)
+      showNotice('动态已发布，但这次后台好友互动没有成功排队。', 'warn')
+    }
   } catch (error) {
     showNotice(error instanceof Error ? error.message : '发布失败。', 'error')
   } finally {
@@ -232,74 +331,7 @@ async function publishMyMoment() {
   }
 }
 
-// —— 我发动态后，好友可能“路过评论” ——
-// 与“好友自主发动态”开关独立；离开本页时清掉所有已排的定时器。
-const reactionTimers = new Set<number>()
-
-/** 随热度档位决定这次有没有人来、来几位（0 = 冷场）。 */
-function rollReactionAuthors(): Character[] {
-  if (!worldCharacters.value.length) return []
-  const count = planReplyCount(replyHeat.value, worldCharacters.value.length)
-  if (!count) return []
-  return pickUserPostReactionAuthors(worldCharacters.value, count) as Character[]
-}
-
-function scheduleReactionsTo(post: MomentPost) {
-  // ‘好友自主发动态’和‘好友回应我的动态’是两件事。
-  // 用户主动发布后是否有人来互动，只由回复热度决定，不再被自主发动态开关误伤。
-  const authors = rollReactionAuthors()
-  if (!authors.length) return
-
-  // 第一位约 2.5~6 秒后到；后续好友错峰出现，评论区更像真实多人互动。
-  let delayMs = 2500 + Math.floor(Math.random() * 3500)
-  for (const author of authors) {
-    scheduleOneReaction(author, post, delayMs)
-    delayMs += 4500 + Math.floor(Math.random() * 3500)
-  }
-}
-
-function scheduleOneReaction(
-  character: Character,
-  post: MomentPost,
-  delayMs: number
-) {
-  const timer = window.setTimeout(() => {
-    reactionTimers.delete(timer)
-    void runReaction(character, post)
-  }, delayMs)
-  reactionTimers.add(timer)
-}
-
-async function runReaction(character: Character, post: MomentPost) {
-  try {
-    const reply = await generateCharacterReactionToUserPost(
-      character,
-      selfDisplay.value.name,
-      post.content || (post.images?.length ? '（发了一组图片，没有配文字。）' : '')
-    )
-    await addMomentExternalLike(post.id)
-    await addMomentComment({
-      momentId: post.id,
-      worldId: post.worldId,
-      authorType: 'character',
-      authorId: character.id,
-      content: reply.text,
-      source: 'ai'
-    })
-    showNotice(`${character.name} 评论了你的动态。`, 'ok')
-  } catch (error) {
-    if (error instanceof MomentAiUnconfiguredError) {
-      // 别让“好友想回但没配好 AI”变成无声失败——直接告诉用户去哪配。
-      showNotice(
-        `有人正想评论，但还没配好 AI。去「设置 → API 与模型」填好就能回你了。`,
-        'warn'
-      )
-    } else {
-      // 动态已被删、瞬时网络错也别打扰。
-      console.warn(`${character.name} 路过评论失败：`, error)
-    }
-  }
-}
+// 好友评论 / 角色互评由全局 Social Runtime 持久队列处理；离开本页不会取消。
 
 function formatNowLabel(): string {
   const now = new Date()
@@ -342,7 +374,7 @@ async function publishCharacterMoment() {
     // 如果 TA 已经和你有单聊，把动态和那份聊天绑定，方便看完直接去聊。
     const conversation = await findSingleConversation(character.id, character.worldId)
 
-    await createCharacterMoment({
+    const post = await createCharacterMoment({
       characterId: character.id,
       worldId: activeWorldId.value,
       content: generated.text,
@@ -350,9 +382,14 @@ async function publishCharacterMoment() {
       aiModel: generated.model,
       conversationId: conversation?.id
     })
+    try {
+      await scheduleSocialForCharacterPost(post, worldCharacters.value)
+    } catch (queueError) {
+      console.warn('角色动态已发布，但 Social Runtime 排队失败：', queueError)
+    }
 
     composerMode.value = 'none'
-    showNotice(`${character.name} 发了一条新动态。`, 'ok')
+    showNotice(`${character.name} 发了一条新动态，其他好友可能会来串门。`, 'ok')
   } catch (error) {
     if (error instanceof MomentAiUnconfiguredError) {
       aiHint.value = error.message
@@ -424,8 +461,6 @@ function setCommentDraft(item: MomentFeedItem, value: string) {
 }
 
 async function submitComment(item: MomentFeedItem) {
-  if (replyingMomentId.value === item.post.id) return
-
   const content = commentDraftOf(item).trim()
   if (!content) {
     showNotice('评论内容不能为空。', 'warn')
@@ -474,40 +509,21 @@ async function submitComment(item: MomentFeedItem) {
   const character = await db.characters.get(responderId)
   if (!character) return
 
-  replyingMomentId.value = item.post.id
-  replyingCharacterName.value = character.name
-  replyingCharacterAvatar.value = character.avatar || '🙂'
   try {
-    const reply = await generateCharacterComment(
-      character,
-      item.post.content || (item.post.images?.length ? '（这是一条图片动态。）' : ''),
-      selfDisplay.value.name,
-      content,
-      {
-        memoryHints: (await listCharacterSharedMemories(character.id)).map(memory => memory.content),
-        replyToComment: target?.authorId === character.id ? target.content : undefined
-      }
-    )
-    await addMomentComment({
-      momentId: item.post.id,
-      worldId: item.post.worldId,
-      authorType: 'character',
-      authorId: character.id,
-      replyToCommentId: sentComment.id,
-      content: reply.text,
-      source: 'ai'
+    const scheduled = await scheduleCharacterReplyToUserComment({
+      post: item.post,
+      userComment: sentComment,
+      characterId: character.id,
+      threadDepth: target ? 1 : 0
     })
-    showNotice(`${character.name} 回了你。`, 'ok')
+    showNotice(
+      scheduled
+        ? `已发送，${character.name} 会继续接你的评论。`
+        : `已发送；${character.name} 的自动回复已在社交设置里关闭。`,
+      scheduled ? 'ok' : 'warn'
+    )
   } catch (error) {
-    if (error instanceof MomentAiUnconfiguredError) {
-      showNotice(`已发送。${character.name} 本来想回你，但还没配好 AI（见设置）。`, 'warn')
-    } else {
-      showNotice(error instanceof Error ? error.message : '回评失败。', 'error')
-    }
-  } finally {
-    replyingMomentId.value = null
-    replyingCharacterName.value = ''
-    replyingCharacterAvatar.value = '🙂'
+    showNotice(error instanceof Error ? error.message : '回复已发送，但后台接话排队失败。', 'warn')
   }
 }
 
@@ -551,10 +567,12 @@ function formatTime(value: string) {
 onMounted(() => {
   subscription = liveQuery(async () => {
     const worldId = await getActiveWorldId()
-    const [feed, characters, self] = await Promise.all([
+    const [feed, characters, self, profiles, notifications] = await Promise.all([
       loadMomentFeed(worldId),
       db.characters.where('worldId').equals(worldId).toArray(),
-      resolveSelfDisplay()
+      resolveSelfDisplay(),
+      db.socialProfiles.where('worldId').equals(worldId).toArray(),
+      db.socialNotifications.where('worldId').equals(worldId).reverse().sortBy('createdAt')
     ])
 
     // 极老数据可能没有 worldId；没有该世界角色时退回全局角色，保证入口可用。
@@ -562,98 +580,52 @@ onMounted(() => {
       ? characters
       : await db.characters.toArray()
 
-    return { worldId, feed, characters: fallbackCharacters, self }
+    return { worldId, feed, characters: fallbackCharacters, self, profiles, notifications }
   }).subscribe(rows => {
     activeWorldId.value = rows.worldId
     feedItems.value = rows.feed
     worldCharacters.value = rows.characters
     selfDisplay.value = rows.self
+    socialProfiles.value = Object.fromEntries(rows.profiles.map(profile => [profile.characterId, profile]))
+    socialNotifications.value = [...rows.notifications].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   })
 })
 
 onUnmounted(() => {
   subscription?.unsubscribe()
   if (noticeTimer) window.clearTimeout(noticeTimer)
-  reactionTimers.forEach(timer => window.clearTimeout(timer))
-  reactionTimers.clear()
 })
 </script>
 
 <template>
-  <PhoneFrame title="朋友圈" show-back>
-    <section class="moments-page">
-      <!-- 顶部工具栏（吸顶） -->
-      <div class="moments-toolbar">
-        <button
-          class="tool-action"
-          :class="{ active: composerMode === 'mine' }"
-          type="button"
-          @click="openSelfComposer"
-        >
-          <span class="tool-icon">＋</span>
-          发布
-        </button>
-
-        <button
-          class="tool-action"
-          :class="{ active: composerMode === 'character' }"
-          type="button"
-          @click="openCharacterComposer"
-        >
-          <span class="tool-icon">✦</span>
-          好友动态
-        </button>
-
-        <button
-          class="tool-more"
-          :class="{ active: showMomentControls }"
-          type="button"
-          aria-label="朋友圈设置"
-          @click="showMomentControls = !showMomentControls"
-        >
-          •••
-        </button>
+  <PhoneFrame>
+    <template #header>
+      <div class="wechat-header">
+        <button class="wechat-back" type="button" aria-label="返回" @click="router.back()">‹</button>
+        <strong>朋友圈</strong>
+        <div class="wechat-header-actions">
+          <button class="header-icon-btn notification-button" type="button" aria-label="新互动" @click="openNotificationCenter">
+            <svg class="bell-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.8 9.7a5.2 5.2 0 0 1 10.4 0c0 5 1.7 5.7 2.2 6.5H4.6c.5-.8 2.2-1.5 2.2-6.5Z"/><path d="M10 18.2a2.2 2.2 0 0 0 4 0"/></svg>
+            <em v-if="unreadSocialCount">{{ unreadSocialCount > 99 ? '99+' : unreadSocialCount }}</em>
+          </button>
+          <button class="header-icon-btn" type="button" aria-label="发布" @click="showCreateMenu = !showCreateMenu">＋</button>
+          <button class="header-icon-btn more" type="button" aria-label="朋友圈设置" @click="openSocialSettingsSheet">•••</button>
+        </div>
       </div>
+    </template>
 
-      <!-- 自主朋友圈 / 回复热度属于行为设置，默认收起，避免信息流顶部长期堆控件。 -->
+    <section class="moments-page">
       <Transition name="controls-fold">
-        <section v-if="showMomentControls" class="moment-controls-card">
-          <div class="control-row">
-            <div>
-              <b>好友自主动态</b>
-              <small>开启后，在线时好友会偶尔自己发朋友圈</small>
-            </div>
-            <button
-              class="native-switch"
-              :class="{ on: autoMomentsOn }"
-              type="button"
-              :aria-pressed="autoMomentsOn"
-              @click="toggleAutoMoments"
-            >
-              <span></span>
-            </button>
-          </div>
-
-          <div class="heat-setting">
-            <div class="heat-setting-head">
-              <b>回复热度</b>
-              <small>你发动态后，好友来评论的积极程度</small>
-            </div>
-            <div class="heat-options">
-              <button
-                v-for="option in replyHeatOptions"
-                :key="option.key"
-                class="heat-chip"
-                :class="{ active: replyHeat === option.key }"
-                type="button"
-                :title="option.desc"
-                @click="pickReplyHeat(option.key)"
-              >
-                {{ option.emoji }} {{ option.label }}
-              </button>
-            </div>
-          </div>
-        </section>
+        <div v-if="showCreateMenu" class="create-popover">
+          <button type="button" @click="openSelfComposer">
+            <span class="create-popover-icon">✎</span>
+            <span><b>发朋友圈</b><small>文字、照片，使用当前 Persona</small></span>
+          </button>
+          <button type="button" @click="openCharacterComposer">
+            <span class="create-popover-icon">✦</span>
+            <span><b>让好友发一条</b><small>按角色人设与记忆生成</small></span>
+          </button>
+        </div>
       </Transition>
 
       <!-- 我自己发 -->
@@ -812,6 +784,7 @@ onUnmounted(() => {
           v-for="item in feedItems"
           :key="item.post.id"
           class="moment-card"
+          :data-moment-id="item.post.id"
         >
           <header class="moment-head">
             <CharacterAvatar
@@ -895,7 +868,7 @@ onUnmounted(() => {
 
           <!-- 评论 -->
           <div
-            v-if="item.comments.length || replyingMomentId === item.post.id"
+            v-if="item.comments.length"
             class="comment-area"
           >
             <div
@@ -920,18 +893,6 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div
-              v-if="replyingMomentId === item.post.id"
-              class="reply-pending"
-            >
-              <CharacterAvatar
-                :avatar="replyingCharacterAvatar"
-                :name="replyingCharacterName"
-                :size="26"
-              />
-
-              <span>{{ replyingCharacterName }} 正在回你…</span>
-            </div>
           </div>
 
           <!-- 评论输入框 -->
@@ -965,7 +926,6 @@ onUnmounted(() => {
             <button
               class="mini-btn primary send-btn"
               type="button"
-              :disabled="replyingMomentId === item.post.id"
               @click="submitComment(item)"
             >
               发送
@@ -992,6 +952,122 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <!-- 新互动：只保存未读状态，正文事实仍来自朋友圈评论。 -->
+      <Transition name="fade">
+        <div v-if="showNotifications" class="sheet-backdrop" @click.self="showNotifications = false">
+          <section class="wechat-sheet notification-sheet">
+            <header class="sheet-head">
+              <div>
+                <b>新互动</b>
+                <small>{{ socialNotifications.length ? '最近的朋友圈评论与回复' : '暂时没有新互动' }}</small>
+              </div>
+              <button type="button" @click="showNotifications = false">完成</button>
+            </header>
+
+            <div v-if="socialNotifications.length" class="notification-list">
+              <button
+                v-for="notification in socialNotifications.slice(0, 40)"
+                :key="notification.id"
+                class="notification-row"
+                type="button"
+                @click="jumpToNotification(notification)"
+              >
+                <CharacterAvatar
+                  :avatar="notificationActor(notification)?.avatar || '🙂'"
+                  :name="notificationActor(notification)?.name || '好友'"
+                  :size="42"
+                />
+                <span class="notification-copy">
+                  <b>{{ notificationActor(notification)?.name || '好友' }}</b>
+                  <small>{{ notificationLabel(notification) }} · {{ formatTime(notification.createdAt) }}</small>
+                  <span>{{ notification.preview }}</span>
+                </span>
+                <i v-if="!notification.read"></i>
+              </button>
+            </div>
+            <div v-else class="sheet-empty">还没有新的评论或回复。</div>
+          </section>
+        </div>
+      </Transition>
+
+      <!-- Social Runtime V2：全局节奏 + 每位好友权限，采用微信式底部设置面板。 -->
+      <Transition name="fade">
+        <div v-if="showSocialSettings" class="sheet-backdrop" @click.self="showSocialSettings = false">
+          <section class="wechat-sheet social-settings-sheet">
+            <template v-if="!selectedSocialCharacter">
+              <header class="sheet-head">
+                <div>
+                  <b>朋友圈设置</b>
+                  <small>控制整体节奏，以及每位好友是否会看、评、回、发</small>
+                </div>
+                <button type="button" @click="showSocialSettings = false">完成</button>
+              </header>
+
+              <div class="sheet-section">
+                <div class="settings-line">
+                  <span><b>好友自主动态</b><small>App 前台运行时，允许角色偶尔自己发朋友圈</small></span>
+                  <button class="native-switch" :class="{ on: autoMomentsOn }" type="button" :aria-pressed="autoMomentsOn" @click="toggleAutoMoments"><span></span></button>
+                </div>
+                <div class="settings-block">
+                  <span class="settings-title"><b>整体互动热度</b><small>决定这一条朋友圈大概会有多少人参与</small></span>
+                  <div class="heat-options heat-options--sheet">
+                    <button v-for="option in replyHeatOptions" :key="option.key" class="heat-chip" :class="{ active: replyHeat === option.key }" type="button" @click="pickReplyHeat(option.key)">{{ option.emoji }} {{ option.label }}</button>
+                  </div>
+                </div>
+              </div>
+
+              <p class="social-decision-note">谁会出现，不再随机平均分配：Social Runtime 会综合最近聊天、共享记忆、这条内容的相关性，以及角色自己的互动冷却。</p>
+
+              <div class="sheet-section friend-social-section">
+                <div class="section-caption">好友社交权限</div>
+                <button v-for="character in worldCharacters" :key="character.id" class="friend-social-row" type="button" @click="openSocialCharacter(character)">
+                  <CharacterAvatar :avatar="character.avatar" :name="character.name" :size="42" />
+                  <span>
+                    <b>{{ character.name }}</b>
+                    <small>{{ socialLevelLabels[socialProfileFor(character).interactionLevel].label }} · {{ socialProfileFor(character).canViewMoments ? '可看朋友圈' : '不可见朋友圈' }}</small>
+                  </span>
+                  <em>›</em>
+                </button>
+                <div v-if="!worldCharacters.length" class="sheet-empty compact">还没有角色。</div>
+              </div>
+            </template>
+
+            <template v-else-if="selectedSocialCharacter && selectedSocialProfile">
+              <header class="sheet-head detail-head">
+                <button class="sheet-back" type="button" @click="closeSocialCharacter">‹</button>
+                <div>
+                  <b>{{ selectedSocialCharacter.name }}</b>
+                  <small>朋友圈社交权限</small>
+                </div>
+                <span></span>
+              </header>
+
+              <div class="friend-profile-hero">
+                <CharacterAvatar :avatar="selectedSocialCharacter.avatar" :name="selectedSocialCharacter.name" :size="54" />
+                <div><b>{{ selectedSocialCharacter.name }}</b><small>这些开关只影响自动社交，不限制你手动让 TA 发动态。</small></div>
+              </div>
+
+              <div class="sheet-section permission-list">
+                <div class="settings-line"><span><b>可以看朋友圈</b><small>关闭后 TA 不会自动参与朋友圈</small></span><button class="native-switch" :class="{ on: selectedSocialProfile.canViewMoments }" type="button" @click="updateSocialProfile(selectedSocialCharacter, { canViewMoments: !selectedSocialProfile.canViewMoments })"><span></span></button></div>
+                <div class="settings-line"><span><b>可以点赞</b><small>路过时可能只点个赞，不一定评论</small></span><button class="native-switch" :class="{ on: selectedSocialProfile.canLikeMoments }" type="button" @click="updateSocialProfile(selectedSocialCharacter, { canLikeMoments: !selectedSocialProfile.canLikeMoments })"><span></span></button></div>
+                <div class="settings-line"><span><b>可以评论</b><small>允许 TA 对动态生成评论</small></span><button class="native-switch" :class="{ on: selectedSocialProfile.canCommentMoments }" type="button" @click="updateSocialProfile(selectedSocialCharacter, { canCommentMoments: !selectedSocialProfile.canCommentMoments })"><span></span></button></div>
+                <div class="settings-line"><span><b>可以接话</b><small>允许回复你或其他角色的评论</small></span><button class="native-switch" :class="{ on: selectedSocialProfile.canReplyToComments }" type="button" @click="updateSocialProfile(selectedSocialCharacter, { canReplyToComments: !selectedSocialProfile.canReplyToComments })"><span></span></button></div>
+                <div class="settings-line"><span><b>可以主动发动态</b><small>仅影响“好友自主动态”后台行为</small></span><button class="native-switch" :class="{ on: selectedSocialProfile.canPostMoments }" type="button" @click="updateSocialProfile(selectedSocialCharacter, { canPostMoments: !selectedSocialProfile.canPostMoments })"><span></span></button></div>
+              </div>
+
+              <div class="sheet-section">
+                <div class="section-caption">互动频率</div>
+                <div class="level-segment">
+                  <button v-for="level in socialLevelOptions" :key="level" type="button" :class="{ active: selectedSocialProfile.interactionLevel === level }" @click="updateSocialProfile(selectedSocialCharacter, { interactionLevel: level })">
+                    <b>{{ socialLevelLabels[level].label }}</b><small>{{ socialLevelLabels[level].desc }}</small>
+                  </button>
+                </div>
+              </div>
+            </template>
+          </section>
+        </div>
+      </Transition>
+
       <!-- 顶部操作提示条 -->
       <Transition name="fade">
         <div
@@ -1009,7 +1085,7 @@ onUnmounted(() => {
 <style scoped>
 .moments-page{
   --mom-blue:#576b95;
-  --mom-primary:#5f9fd2;
+  --mom-primary:#07c160;
   --mom-ink:#1f2d3d;
   --mom-muted:#8b98a5;
   --mom-line:#edf1f4;
@@ -1059,7 +1135,7 @@ onUnmounted(() => {
 }
 .control-row{display:flex;align-items:center;gap:12px;padding:11px 12px;border-bottom:1px solid rgba(45,75,98,.06)}
 .control-row>div,.heat-setting-head{min-width:0;display:grid;gap:2px;flex:1}.control-row b,.heat-setting-head b{color:#40586b;font-size:12px}.control-row small,.heat-setting-head small{color:#91a0ac;font-size:10.5px;line-height:1.45}
-.native-switch{position:relative;width:44px;height:26px;flex:0 0 auto;padding:0;border:0;border-radius:999px;background:#d8dee3;cursor:pointer;transition:background .18s ease}.native-switch span{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(35,50,62,.20);transition:transform .18s ease}.native-switch.on{background:#6fa9d3}.native-switch.on span{transform:translateX(18px)}
+.native-switch{position:relative;width:44px;height:26px;flex:0 0 auto;padding:0;border:0;border-radius:999px;background:#d8dee3;cursor:pointer;transition:background .18s ease}.native-switch span{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(35,50,62,.20);transition:transform .18s ease}.native-switch.on{background:#07c160}.native-switch.on span{transform:translateX(18px)}
 .heat-setting{padding:10px 12px 11px}.heat-setting-head{margin-bottom:8px}.heat-options{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.heat-chip{min-width:0;padding:7px 4px;border:0;border-radius:9px;background:#fff;color:#8796a2;font-size:11px;white-space:nowrap;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(48,79,104,.06)}.heat-chip.active{background:#eaf3fa;color:#3d7ca9;font-weight:700;box-shadow:none}
 .controls-fold-enter-active,.controls-fold-leave-active{transition:opacity .16s ease,transform .16s ease}.controls-fold-enter-from,.controls-fold-leave-to{opacity:0;transform:translateY(-5px)}
 
@@ -1101,7 +1177,7 @@ onUnmounted(() => {
 .mini-btn{
   padding:8px 13px;border:1px solid #e2e8ed;border-radius:10px;background:#fff;color:#627484;font-size:13px;cursor:pointer
 }
-.mini-btn.primary{border-color:transparent;background:#5f9fd2;color:#fff;font-weight:700}
+.mini-btn.primary{border-color:transparent;background:#07c160;color:#fff;font-weight:700}
 .mini-btn:disabled{opacity:.5}
 .moments-hint{margin-top:12px}.link-btn{display:inline;border:0;background:none;padding:0;color:#4d8ebe;font-weight:700;cursor:pointer}
 
@@ -1154,6 +1230,39 @@ onUnmounted(() => {
 }
 .notice-toast.ok{background:rgba(55,120,88,.93)}.notice-toast.warn{background:rgba(172,125,55,.94)}.notice-toast.error{background:rgba(181,73,73,.94)}
 .fade-enter-active,.fade-leave-active{transition:opacity .2s ease}.fade-enter-from,.fade-leave-to{opacity:0}
+
+
+:deep(.app-header--custom){
+  display:block;
+  padding:0;
+  background:rgba(255,255,255,.96);
+  border-bottom:1px solid #ededed;
+}
+.wechat-header{height:52px;display:grid;grid-template-columns:52px 1fr auto;align-items:center;padding:0 10px 0 4px;background:#fff}
+.wechat-header>strong{text-align:center;color:#161616;font-size:16px;font-weight:650;letter-spacing:.01em}
+.wechat-back,.header-icon-btn{border:0;background:transparent;color:#111;cursor:pointer}
+.wechat-back{width:44px;height:44px;font-size:31px;font-weight:300;line-height:1}
+.wechat-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:1px}
+.header-icon-btn{position:relative;width:38px;height:38px;padding:0;border-radius:9px;font-size:24px;line-height:38px;text-align:center}
+.header-icon-btn.more{font-size:14px;letter-spacing:1px}.header-icon-btn:active{background:#f3f3f3}
+.bell-glyph{width:20px;height:20px;display:inline-block;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.notification-button em{position:absolute;right:0;top:1px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#fa5151;color:#fff;font-size:9px;font-style:normal;line-height:17px}
+
+.create-popover{margin:10px 0 2px;padding:4px;border:1px solid #ececec;border-radius:13px;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.08)}
+.create-popover button{width:100%;display:flex;align-items:center;gap:12px;padding:12px;border:0;border-bottom:1px solid #f1f1f1;background:transparent;text-align:left;color:#202020;cursor:pointer}.create-popover button:last-child{border-bottom:0}.create-popover button:active{background:#f7f7f7;border-radius:9px}
+.create-popover-icon{width:34px;height:34px;display:grid;place-items:center;border-radius:9px;background:#f4f5f6;color:#333;font-size:18px}.create-popover button>span:last-child{display:grid;gap:2px}.create-popover b{font-size:13px}.create-popover small{color:#999;font-size:11px}
+
+.moments-page{--mom-blue:#576b95;--mom-line:#ededed;--mom-soft:#f7f7f7;padding:0 16px 44px;color:#191919}
+.moment-card{padding:18px 0 17px;border-bottom-color:#ededed}.moment-head{align-items:flex-start}.moment-who b{color:#576b95;font-size:14.5px}.moment-who small{color:#b0b0b0;font-size:10.5px}.moment-text{color:#1c1c1c;font-size:15px;line-height:1.62}.moment-actions{justify-content:flex-end}.action-btn{padding:5px 8px;border-radius:5px;color:#576b95;background:#f7f7f7}.action-btn:hover{background:#f0f0f0}.action-btn.liked{color:#fa5151}.chat-btn{color:#576b95;background:transparent}.comment-area{margin-top:7px;padding:7px 9px;background:#f5f5f5;border-radius:3px}.comment-body b,.reply-label strong{color:#576b95}.comment-body span,.reply-label{color:#222}.comment-composer{border-top-color:#ededed}.comment-input{border-color:#e8e8e8;background:#f7f7f7;border-radius:8px}.comment-input:focus{border-color:#d7d7d7;box-shadow:none}.send-btn{background:#07c160!important;border-radius:6px}.photo-picker{border-color:#e6e6e6;color:#576b95}.photo-picker span{color:#07c160}.composer-card{border-bottom-color:#ededed}.composer-input,.composer-select{border-color:#e8e8e8;background:#f7f7f7;border-radius:8px}.composer-input:focus,.composer-select:focus{border-color:#d7d7d7;box-shadow:none}.mini-btn{border-radius:7px}.heat-chip{border-radius:7px}.heat-chip.active{background:#e8f7ef;color:#079d50}.native-switch{width:46px;height:28px}.native-switch span{top:3px;left:3px;width:22px;height:22px}.native-switch.on span{transform:translateX(18px)}
+
+.sheet-backdrop{position:fixed;z-index:80;inset:0;background:rgba(0,0,0,.28);display:flex;align-items:flex-end;justify-content:center;padding-bottom:max(0px,env(safe-area-inset-bottom))}
+.wechat-sheet{width:min(430px,100vw);max-height:min(76vh,650px);overflow:hidden;border-radius:18px 18px 0 0;background:#f5f5f5;box-shadow:0 -10px 40px rgba(0,0,0,.16);display:flex;flex-direction:column}
+.sheet-head{flex:0 0 auto;min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-bottom:1px solid #ececec;background:#fff}.sheet-head>div{min-width:0;display:grid;gap:2px}.sheet-head b{color:#111;font-size:15px}.sheet-head small{color:#999;font-size:10.5px}.sheet-head>button:not(.sheet-back){border:0;background:transparent;color:#07c160;font-size:13px;font-weight:650;cursor:pointer}.sheet-back{width:34px;height:34px;border:0;background:transparent;color:#111;font-size:29px;line-height:1}.detail-head{display:grid;grid-template-columns:38px 1fr 38px;text-align:center}.detail-head>div{justify-items:center}
+.sheet-section{margin-top:10px;background:#fff}.section-caption{padding:9px 16px 6px;color:#999;font-size:11px;background:#f5f5f5}.settings-line{min-height:58px;display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #efefef}.settings-line:last-child{border-bottom:0}.settings-line>span{min-width:0;display:grid;gap:2px;flex:1}.settings-line b,.settings-title b{color:#1b1b1b;font-size:13px}.settings-line small,.settings-title small{color:#999;font-size:10.5px;line-height:1.4}.settings-block{padding:12px 16px}.settings-title{display:grid;gap:2px;margin-bottom:10px}.heat-options--sheet{grid-template-columns:repeat(4,1fr)}
+.social-decision-note{margin:10px 16px 0;color:#999;font-size:10.5px;line-height:1.55}
+.friend-social-section{overflow:auto}.friend-social-row{width:100%;display:flex;align-items:center;gap:11px;padding:10px 16px;border:0;border-bottom:1px solid #efefef;background:#fff;text-align:left;cursor:pointer}.friend-social-row>span{min-width:0;flex:1;display:grid;gap:3px}.friend-social-row b{color:#1b1b1b;font-size:13px}.friend-social-row small{color:#999;font-size:10.5px}.friend-social-row em{color:#c2c2c2;font-style:normal;font-size:24px;font-weight:300}.friend-profile-hero{display:flex;align-items:center;gap:12px;padding:16px;background:#fff}.friend-profile-hero>div{display:grid;gap:4px}.friend-profile-hero b{font-size:15px;color:#111}.friend-profile-hero small{color:#999;font-size:10.5px;line-height:1.45}.permission-list{margin-top:10px;overflow:auto}
+.level-segment{display:grid;gap:0}.level-segment button{display:grid;gap:3px;padding:12px 16px;border:0;border-bottom:1px solid #efefef;background:#fff;text-align:left;cursor:pointer}.level-segment button:last-child{border-bottom:0}.level-segment b{font-size:13px;color:#222}.level-segment small{font-size:10.5px;color:#999}.level-segment button.active{position:relative;background:#fbfffc}.level-segment button.active::after{content:'✓';position:absolute;right:17px;top:50%;transform:translateY(-50%);color:#07c160;font-weight:800}
+.notification-list{overflow:auto;background:#fff}.notification-row{position:relative;width:100%;display:flex;align-items:flex-start;gap:11px;padding:12px 16px;border:0;border-bottom:1px solid #efefef;background:#fff;text-align:left;cursor:pointer}.notification-copy{min-width:0;flex:1;display:grid;gap:2px}.notification-copy b{font-size:13px;color:#222}.notification-copy small{font-size:10.5px;color:#999}.notification-copy>span{margin-top:2px;color:#555;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.notification-row i{position:absolute;right:14px;top:16px;width:7px;height:7px;border-radius:50%;background:#fa5151}.sheet-empty{padding:34px 20px;text-align:center;color:#aaa;font-size:12px}.sheet-empty.compact{padding:20px}
 
 @media(max-width:390px){
   .moments-toolbar{grid-template-columns:1fr 1fr 40px}

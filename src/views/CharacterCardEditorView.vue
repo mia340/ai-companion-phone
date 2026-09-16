@@ -11,6 +11,7 @@ import {
 import {
   parseEmbeddedUserPersonaTemplate,
   buildEmbeddedUserPreviewFromCreatorNotes,
+  buildEmbeddedUserPreviewFromCharacterBook,
   exportCharacterCardJson,
   extractEmbeddedUserTemplate,
   parseCharacterCardFile
@@ -36,6 +37,7 @@ const isLoading = ref(true)
 const isSaving = ref(false)
 const message = ref('')
 const cardFileInput = ref<HTMLInputElement>()
+const boundLorebookEmbeddedUserPreview = ref<ReturnType<typeof buildEmbeddedUserPreviewFromCharacterBook>>()
 
 const form = reactive({
   appearance: '',
@@ -73,6 +75,7 @@ const embeddedUserPreview = computed(() => {
     character.value.name
   )
   if (creatorNotesPersona) return creatorNotesPersona
+  if (boundLorebookEmbeddedUserPreview.value) return boundLorebookEmbeddedUserPreview.value
   const raw = extractEmbeddedUserTemplate(character.value.persona || '')
   return parseEmbeddedUserPersonaTemplate(raw, character.value.name)
 })
@@ -142,8 +145,17 @@ async function load() {
     const activeLorebookIds = new Set(bindings
       .filter(item => item.enabled && item.resourceType === 'lorebook')
       .map(item => item.resourceId))
+    const activeLorebookEntries = allEntries.filter(item => Boolean(item.lorebookId && activeLorebookIds.has(item.lorebookId)))
+    boundLorebookEmbeddedUserPreview.value = buildEmbeddedUserPreviewFromCharacterBook({
+      entries: activeLorebookEntries.map(item => ({
+        name: item.title,
+        comment: item.title,
+        content: item.content,
+        enabled: item.enabled
+      }))
+    }, row.name)
     resourceStats.value = {
-      lorebookEntries: allEntries.filter(item => Boolean(item.lorebookId && activeLorebookIds.has(item.lorebookId))).length,
+      lorebookEntries: activeLorebookEntries.length,
       regexScripts: bindings.filter(item => item.enabled && item.resourceType === 'regex').length,
       presets: bindings.filter(item => item.enabled && item.resourceType === 'preset').length
     }

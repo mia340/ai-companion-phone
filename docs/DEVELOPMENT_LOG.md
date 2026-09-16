@@ -1,3 +1,63 @@
+## 2026-09-16 · V0.5.0-alpha.5.0｜Social Runtime V1
+
+### 目标
+
+把朋友圈从页面内即时模拟升级为可持久、可恢复的多角色社交调度，并为后续群聊准备统一社交事件模型。
+
+### 架构改动
+
+- IndexedDB V17 新增 `socialActivities`。
+- `main.ts` 全局启动 Social Runtime，每 2.5 秒小批量消费到期活动。
+- `MomentsView.vue` 删除发布后 `reactionTimers`；页面只提交用户动作并排队后续社交。
+- 用户回复某角色评论后，写入 `moment-reply` 活动；被回复角色后续生成不再阻塞评论发送。
+- 角色评论产生后，按热度与线程深度有概率安排其他角色继续回复。
+- 自主角色动态也接入同一社交调度。
+
+### 可靠性
+
+- `dedupeKey` 防重复排队；
+- `attempts + retry` 处理瞬时 API 失败；
+- stale running 自动恢复；
+- 删除动态/评论/角色同步清队列；
+- 恢复备份清空社交队列，避免引用已替换的数据。
+
+### Web 后台语义
+
+浏览器/PWA 被系统真正挂起或关闭时，JS 无法可靠持续调用模型。因此“后台朋友圈”的产品语义为：离开朋友圈页面继续运行；App 被挂起期间任务持久保存，恢复/重开后补执行，而不是伪装成 OS 级永久后台。
+
+### 验证
+
+- TypeScript 5.8.3 `transpileModule` 检查修改 TS 与 MomentsView script：通过。
+- 静态测试定义：32 files / 289 tests。
+- 完整 Vitest / vue-tsc / Vite Build 等待 Windows `npm run verify`。
+
+## 2026-09-13 · V0.5.0-alpha.4.5｜叙事人称连续性 / 默认 Persona 宏污染 / Lorebook User Profile
+
+### 真实问题
+
+- Prompt Debug 中角色卡明确要求对 `{{user}}` 使用自然第二人称，但生成旁白仍出现“她 / 女生”，而对白又使用“你”，造成同一轮叙事视角不稳定。
+- 用户当前 Persona 显示为“我”。旧 Prompt Compiler 会把所有 `{{user}}` 宏直接替换为“我”，导致社区卡原文出现“与我年龄差”“我固定对应北柠”等系统视角混淆。
+- 新样本的内嵌用户档案命名为 `{{user}}北柠设定`，正文包在 `<user_profile>` 中，并用 `{{user}}固定对应北柠:` 建立名字映射。旧评分器只强识别 `user人设/user设定/{{user}}人设`，因此该结构仍可能漏掉。
+
+### Runtime 修复
+
+- 新增“叙事人称连续性”规则：除非原资源明确要求第三人称，否则旁白/动作中当前用户固定为第二人称“你”；user profile 里的“她/他/TA”明确归类为资料描述。
+- 默认 Persona 的“我/用户/User/匿名”等 UI 名不再替换 `{{user}}`；普通真实 Persona 姓名仍正常替换。Persona Prompt 同步声明“我”只是界面显示名，不是世界内专名或第一人称规则。
+- Prompt Debug 增加人称锁分区和规则影响提示。
+
+### 社区兼容修复
+
+- Lorebook Persona 评分支持 `{{user}} + 任意姓名 + 设定/人设/档案/profile/persona`。
+- `<user_profile>/<user_persona>/<player_profile>` 包装成为强 Persona 信号。
+- 支持 `{{user}}固定对应/对应/即/就是/是 + 姓名` 的通用姓名映射。
+- Character Card Editor 对旧角色扫描已绑定 Lorebook，恢复可安全识别的角色专属 Persona 预览。
+
+### 验证
+
+- 修改文件与新增测试通过 TypeScript 5.8.3 `transpileModule` 语法检查。
+- 用本轮真实卡结构做独立正则探针：`{{user}}北柠设定` 得分 355（阈值 80），姓名映射得到“北柠”；普通“当前时间线”仅 25 分，不会误判为 Persona。
+- 容器 npm 离线缓存缺少 `zod@3.25.76`，完整 `npm run verify` 留给 Windows/CI。
+
 ## 2026-09-13 · V0.5.0-alpha.4.4.1｜社区 Persona 归一化 + 发布探针清理
 
 ### Windows 实测暴露的问题
@@ -505,3 +565,12 @@ StoryPhone 一类项目允许更强 HTML 互动，而我们的安全边界是不
 ## 2026-09-13 · V0.5.0-alpha.4.4 社区 Persona 泛化
 
 用户明确要求不能针对某一张卡做特殊修补。本轮以用户提供的社区资源包作为兼容语料审计，49 份可读取 JSON 中观察到多种用户 Persona 表达：世界书 `user人设/user设定/user基本情况`、creator_notes `[用户设定]/[我的设定]`、HTML 人物档案、对象型 `user_profile/player_profile`，以及应排除的 `user_personal_room`、`user人设自拟`。因此实现改为语义标签 + Persona 内容信号 + 误判排除三层策略，不包含特定角色名/用户名硬编码。
+
+
+## 2026-09-16 · V0.5.0-alpha.5.0.2 正则语法热修复
+
+Windows 完整 `npm run verify` 暴露出 alpha.5.0.1 的 `normalizePersonaNameToken` 在 `/u` Unicode 正则中使用 `\"`，属于非法 identity escape；Vitest/Rollup 在测试收集阶段直接失败。修复为字符类中的普通双引号字面量，保持 Persona 名称包裹符归一化语义不变。
+
+## 2026-09-16 · V0.5.0-alpha.5.1 Social Runtime V2
+
+在 V1 评论持久队列跑通后，将“谁来互动”从均匀随机抽样升级为可解释社交决策。没有重新引入关系积分；只读取已有会话更新时间、共享记忆、当前内容相关性和 Social Runtime 冷却，并叠加用户显式设置的角色社交权限/活跃度。UI 同步改为微信式简洁白底，并新增新互动通知。该候选选择层将作为后续群聊 Speaker Scheduler 的共用基础。

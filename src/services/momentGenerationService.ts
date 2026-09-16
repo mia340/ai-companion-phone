@@ -302,6 +302,108 @@ export async function generateCharacterComment(
  * @param userName “我”在朋友圈显示的名字。
  * @param userPost 我发的动态原文。
  */
+export interface MomentThreadTurn {
+  authorName: string
+  content: string
+}
+
+/**
+ * 构建 Social Runtime 的通用评论回复 prompt。
+ * targetAuthorName 可以是用户，也可以是另一个角色；threadContext 只给最近几层，
+ * 让角色在评论区“接这句话”，而不是重新评价整条动态。
+ */
+export function buildCharacterThreadReplyMessages(
+  profile: MomentCharacterProfile,
+  input: {
+    postAuthorName: string
+    postText: string
+    targetAuthorName: string
+    targetComment: string
+    threadContext?: MomentThreadTurn[]
+    memoryHints?: string[]
+  }
+): ChatTurn[] {
+  const context = (input.threadContext ?? []).slice(-5)
+  const contextText = context.length
+    ? context.map(turn => `- ${turn.authorName}：${turn.content}`).join('\n')
+    : '（没有更早的评论上下文）'
+
+  return [
+    { role: 'system', content: MOMENT_POST_SYSTEM_RULES },
+    {
+      role: 'user',
+      content: [
+        `你是：\n${describeCharacter(profile)}`,
+        `你正在朋友圈评论区里参与一段多人对话。`,
+        `动态作者：${input.postAuthorName}`,
+        `动态正文：${input.postText}`,
+        `最近评论上下文：\n${contextText}`,
+        `现在「${input.targetAuthorName}」对评论区说：${input.targetComment}`,
+        '',
+        `请以「${profile.name}」的口吻直接回复「${input.targetAuthorName}」这句话。`,
+        '像真实熟人评论区：可以接梗、补一句、反驳、关心或回应，但不要强行抢话题。',
+        '15～70 字。只输出评论正文，不要加动作、旁白、引号、“回复XX：”前缀或角色名。',
+        input.memoryHints?.length
+          ? `可参考的长期记忆（只在自然相关时使用）：\n${input.memoryHints.slice(0, 6).map(item => `- ${item}`).join('\n')}`
+          : ''
+      ].filter(Boolean).join('\n\n')
+    }
+  ]
+}
+
+/** Social Runtime：角色回复用户或另一角色的某条评论。 */
+export async function generateCharacterThreadReply(
+  character: Character,
+  input: {
+    postAuthorName: string
+    postText: string
+    targetAuthorName: string
+    targetComment: string
+    threadContext?: MomentThreadTurn[]
+    memoryHints?: string[]
+  }
+): Promise<{ text: string; model: string }> {
+  const settings = await requireConfigured()
+  const provider = createProvider(settings)
+  const messages = buildCharacterThreadReplyMessages(momentProfileFromCharacter(character), input)
+
+  const response = await provider.chat({
+    model: settings.model,
+    temperature: clampTemperature(settings.temperature ?? 0.9),
+    messages
+  })
+
+  const text = sanitizeMomentText(response.text, MOMENT_COMMENT_MAX_CHARS)
+  if (!text) throw new Error('模型没有给出可用的评论回复，请再试一次。')
+  return { text, model: settings.model }
+}
+
+export function buildCharacterReactToPostMessages(
+  profile: MomentCharacterProfile,
+  postAuthorName: string,
+  postText: string
+): ChatTurn[] {
+  const rules = [
+    `你正在扮演上面描述的角色，正在朋友圈里刷到「${postAuthorName}」的一条动态：`,
+    `${postAuthorName}的动态：${postText}`,
+    '',
+    '请以角色的口吻评论这条动态：像刷到熟人的近况那样自然接话，贴合角色性格和你们可能的熟悉程度。',
+    '不要擅自假设你们有不存在的亲密经历；如果信息不足，就做轻量、自然的回应。',
+    '10～60 字。直接输出评论内容即可，不要加引号、括号、动作描述或“XX说”之类的旁白。'
+  ].join('\n')
+
+  return [
+    { role: 'system', content: MOMENT_POST_SYSTEM_RULES },
+    {
+      role: 'user',
+      content: [
+        `你是：\n${describeCharacter(profile)}`,
+        rules
+      ].join('\n\n')
+    }
+  ]
+}
+
 export function buildCharacterReactToUserPostMessages(
   profile: MomentCharacterProfile,
   userName: string,
@@ -333,6 +435,27 @@ export function buildCharacterReactToUserPostMessages(
 /**
  * 让我发的一条朋友圈，由某角色 AI 评论一条。返回净化后的评论与所用模型名。
  */
+export async function generateCharacterReactionToPost(
+  character: Character,
+  postAuthorName: string,
+  postText: string
+): Promise<{ text: string; model: string }> {
+  const settings = await requireConfigured()
+  const provider = createProvider(settings)
+  const profile = momentProfileFromCharacter(character)
+  const messages = buildCharacterReactToPostMessages(profile, postAuthorName, postText)
+
+  const response = await provider.chat({
+    model: settings.model,
+    temperature: clampTemperature(settings.temperature ?? 0.9),
+    messages
+  })
+
+  const text = sanitizeMomentText(response.text, MOMENT_COMMENT_MAX_CHARS)
+  if (!text) throw new Error('模型没有给出可用的评论，请再试一次。')
+  return { text, model: settings.model }
+}
+
 export async function generateCharacterReactionToUserPost(
   character: Character,
   userName: string,

@@ -40,7 +40,7 @@ const APPEARANCE_APP_KEY = '__home-appearance__'
 export const HOME_APPS: HomeAppDefinition[] = [
   { key: 'chat', label: '聊天', route: '/chat', icon: 'chat', tone: ['#79b7ee', '#a8d8f7'] },
   { key: 'contacts', label: '通讯录', route: '/contacts', icon: 'contacts', tone: ['#71cdbd', '#a8e4d5'] },
-  { key: 'moments', label: '朋友圈', route: '/app/朋友圈', icon: 'moments', tone: ['#ef9fbc', '#f7c2d7'] },
+  { key: 'moments', label: '朋友圈', route: '/app/朋友圈', icon: 'moments', tone: ['#07c160', '#53d78b'] },
   { key: 'diary', label: '日记', route: '/app/日记', icon: 'diary', tone: ['#e9bb83', '#f5d6a5'] },
   { key: 'music', label: '音乐', route: '/app/音乐', icon: 'music', tone: ['#8f9cde', '#b9c4ef'] },
   { key: 'wallet', label: '钱包', route: '/app/钱包', icon: 'wallet', tone: ['#82c5a0', '#b6dfc5'] },

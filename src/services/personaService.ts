@@ -196,6 +196,12 @@ export async function bindPersonaToCharacterChats(characterId: string, personaId
 }
 
 export function buildPersonaPrompt(persona: UserPersona): string {
+  const personaDisplayName = persona.name?.trim() || '我'
+  const genericDisplayName = /^(?:我|用户|user|默认(?:用户|人设|persona)?|未填写身份|匿名)$/iu.test(personaDisplayName)
+  const personaNameLine = genericDisplayName
+    ? `当前 Persona 使用默认界面名“${personaDisplayName}”；这不是角色世界中的用户专名，也不代表叙事第一人称。若角色卡/世界书另有明确 {{user}} 身份，以原资源为准。`
+    : `用户使用的人设名：${personaDisplayName}`
+
   const cardTemplateRaw = persona.isCardTemplate
     ? (persona.sourceUserTemplate?.trim() || persona.description?.trim() || '')
     : ''
@@ -204,7 +210,7 @@ export function buildPersonaPrompt(persona: UserPersona): string {
   // 本地为阅读/筛选解析出的年龄、职业、性格等字段不再和原模板重复注入，避免一份 User 人设占两遍 Token。
   if (cardTemplateRaw) {
     return [
-      `用户使用的人设名：${persona.name}`,
+      personaNameLine,
       persona.personaScope === 'character' && persona.boundCharacterName
         ? `这是“${persona.boundCharacterName}”角色卡专属 Persona，只在该角色相关聊天中作为用户身份使用。`
         : '',
@@ -242,7 +248,7 @@ export function buildPersonaPrompt(persona: UserPersona): string {
     ? `用户人设描述：${persona.description}`
     : ''
   return [
-    `用户使用的人设名：${persona.name}`,
+    personaNameLine,
     persona.personaScope === 'character' && persona.boundCharacterName
       ? `这是“${persona.boundCharacterName}”角色卡专属 Persona，只在该角色相关聊天中作为用户身份使用。`
       : '',

@@ -369,14 +369,20 @@ export async function deleteMomentPost(postId: string): Promise<void> {
   const post = await db.momentPosts.get(postId)
   if (!post) return
 
-  await db.transaction('rw', db.momentPosts, db.momentComments, async () => {
+  await db.transaction('rw', db.momentPosts, db.momentComments, db.socialActivities, db.socialNotifications, async () => {
     await db.momentComments.where('momentId').equals(postId).delete()
+    await db.socialActivities.where('momentId').equals(postId).delete()
+    await db.socialNotifications.where('momentId').equals(postId).delete()
     await db.momentPosts.delete(postId)
   })
 }
 
 export async function deleteMomentComment(commentId: string): Promise<void> {
-  await db.momentComments.delete(commentId)
+  await db.transaction('rw', db.momentComments, db.socialActivities, db.socialNotifications, async () => {
+    await db.socialActivities.where('targetCommentId').equals(commentId).delete()
+    await db.socialNotifications.toCollection().filter(row => row.commentId === commentId).delete()
+    await db.momentComments.delete(commentId)
+  })
 }
 
 /**
@@ -391,10 +397,20 @@ export async function deleteMomentsByAuthor(characterId: string): Promise<void> 
       comment.authorId === characterId ||
       postIds.includes(comment.momentId)
     ).delete()
+    await db.socialActivities.toCollection().filter(activity =>
+      activity.actorCharacterId === characterId ||
+      postIds.includes(activity.momentId)
+    ).delete()
+    await db.socialNotifications.toCollection().filter(notification =>
+      notification.actorCharacterId === characterId ||
+      postIds.includes(notification.momentId)
+    ).delete()
     await db.momentPosts.bulkDelete(postIds)
   } else {
     await db.momentComments.toCollection().filter(comment =>
       comment.authorId === characterId
     ).delete()
+    await db.socialActivities.where('actorCharacterId').equals(characterId).delete()
+    await db.socialNotifications.where('actorCharacterId').equals(characterId).delete()
   }
 }

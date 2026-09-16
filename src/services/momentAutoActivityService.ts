@@ -3,7 +3,18 @@ import { getModelSettings } from './modelSettings'
 import { createCharacterMoment, getActiveWorldId } from './momentService'
 import { generateCharacterPost } from './momentGenerationService'
 import { listCharacterSharedMemories } from './memoryService'
+import { scheduleSocialForCharacterPost } from './socialRuntimeService'
+import { listCharacterSocialProfiles, profileAllows } from './socialPresenceService'
 import type { Character, MomentPost } from '../types/domain'
+
+export {
+  REPLY_HEAT_OPTIONS,
+  getReplyHeat,
+  pickUserPostReactionAuthors,
+  planReplyCount,
+  setReplyHeat
+} from './momentSocialSettings'
+export type { MomentReplyHeat, ReplyHeatOption } from './momentSocialSettings'
 
 /**
  * 角色自主发朋友圈（“偶尔自己会发”）。
@@ -99,97 +110,6 @@ export function pickAutoAuthor(
   return list[index]
 }
 
-/**
- * 从候选里随机挑 count 位不重复的“来我动态下评论”的角色。纯函数。
- * rand 可注入便于测试；count 超过候选长度时全部返回。
- */
-export function pickUserPostReactionAuthors(
-  candidates: Array<Pick<Character, 'id'>>,
-  count: number,
-  rand: () => number = Math.random
-): Array<Pick<Character, 'id'>> {
-  const list = [...candidates]
-  for (let i = list.length - 1; i > 0; i -= 1) {
-    const j = Math.min(i, Math.floor(rand() * (i + 1)))
-    const swap = list[i]
-    list[i] = list[j]
-    list[j] = swap
-  }
-  const take = Math.max(0, Math.min(count, list.length))
-  return list.slice(0, take)
-}
-
-// ---------------------------------------------------------------------------
-// 好友“回复热度”：我发动态后，来评论的热情/人数档位，可在朋友圈页前端调节。
-// ---------------------------------------------------------------------------
-
-const REPLY_HEAT_KEY = 'moments.replyHeat'
-
-export type MomentReplyHeat = 'quiet' | 'mild' | 'lively' | 'party'
-
-export interface ReplyHeatOption {
-  key: MomentReplyHeat
-  emoji: string
-  label: string
-  /** 给用户看的档位说明（tooltip / 选择后的 toast）。 */
-  desc: string
-}
-
-/** 档位表：也直接驱动选择 UI。 */
-export const REPLY_HEAT_OPTIONS: ReplyHeatOption[] = [
-  { key: 'quiet', emoji: '🥶', label: '冷清', desc: '好友几乎不评论，安静为主' },
-  { key: 'mild', emoji: '🍃', label: '偶尔', desc: '偶尔有一两位好友路过评论' },
-  { key: 'lively', emoji: '🔥', label: '热闹', desc: '常态：通常 2～3 位好友来互动' },
-  { key: 'party', emoji: '🎉', label: '爆棚', desc: '一发动态通常 3～5 位好友来互动' }
-]
-
-/** 每档的概率参数：chance=会不会来人，extraChance=要不要再多一位，max=上限。 */
-const REPLY_HEAT_RULES: Record<
-  MomentReplyHeat,
-  { chance: number; min: number; extraChance: number; max: number }
-> = {
-  quiet: { chance: 0.12, min: 1, extraChance: 0, max: 1 },
-  mild: { chance: 0.68, min: 1, extraChance: 0.22, max: 2 },
-  // 默认档：让朋友圈有明显“多人社交”感，而不是永远只有一个角色来回。
-  lively: { chance: 1, min: 2, extraChance: 0.45, max: 3 },
-  party: { chance: 1, min: 3, extraChance: 0.7, max: 5 }
-}
-
-export function getReplyHeat(): MomentReplyHeat {
-  if (typeof localStorage === 'undefined') return 'lively'
-  const value = localStorage.getItem(REPLY_HEAT_KEY) as MomentReplyHeat | null
-  return value && REPLY_HEAT_RULES[value] ? value : 'lively'
-}
-
-export function setReplyHeat(heat: MomentReplyHeat): void {
-  if (typeof localStorage === 'undefined') return
-  localStorage.setItem(REPLY_HEAT_KEY, heat)
-}
-
-/**
- * 按热度档位决定“这次会有几位好友来评论”。纯函数，rand 可注入便于测试。
- * 返回 0 表示这次没人来（冷场），其余在 [1, min(max, 候选数)]。
- */
-export function planReplyCount(
-  heat: MomentReplyHeat,
-  candidateCount: number,
-  rand: () => number = Math.random
-): number {
-  if (candidateCount <= 0) return 0
-  const rule = REPLY_HEAT_RULES[heat]
-  // chance === 1 表示产品语义上的“保证至少一位回应”。
-  // Math.random() 本身不会返回 1，但测试/自定义随机源可能返回边界值 1；
-  // 因此只在概率小于 1 时进行冷场判定，避免把“必来”误判成 0 人。
-  if (rule.chance < 1 && rand() >= rule.chance) return 0
-
-  const cap = Math.min(rule.max, candidateCount)
-  let count = Math.min(cap, Math.max(1, rule.min))
-  while (count < cap && rand() < rule.extraChance) {
-    count += 1
-  }
-  return count
-}
-
 function formatNowLabel(): string {
   const now = new Date()
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -238,7 +158,12 @@ export async function runAutoActivityOnce(): Promise<AutoActivityOutcome | null>
     .where('worldId')
     .equals(worldId)
     .toArray()
-  const posters = characters.filter(characterHasVoice)
+  const profiles = await listCharacterSocialProfiles(characters)
+  const profileById = new Map(profiles.map(profile => [profile.characterId, profile]))
+  const posters = characters.filter(character => {
+    const profile = profileById.get(character.id)
+    return characterHasVoice(character) && Boolean(profile && profileAllows(profile, 'post'))
+  })
   if (!posters.length) return null
 
   // 首发预热：第一次跑时只记录基准时间，不凭空补发历史；
@@ -272,6 +197,9 @@ export async function runAutoActivityOnce(): Promise<AutoActivityOutcome | null>
         content: generated.text,
         source: 'ai',
         aiModel: generated.model
+      })
+      await scheduleSocialForCharacterPost(post, characters).catch(error => {
+        console.warn('角色动态已发布，但 Social Runtime 排队失败：', error)
       })
       posts.push(post)
       avoidId = author.id

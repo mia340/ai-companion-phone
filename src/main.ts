@@ -6,6 +6,7 @@ import { router } from './router'
 import { seedDatabase } from './db/seed'
 import { getModelSettings, MAX_OUTPUT_TOKENS, saveModelSettings } from './services/modelSettings'
 import { startAutoActivityLoop } from './services/momentAutoActivityService'
+import { startSocialRuntimeLoop } from './services/socialRuntimeService'
 import './assets/main.css'
 
 registerSW({ immediate: true })
@@ -56,3 +57,4 @@ await applyOnboardingKeyFromUrl()
 const app = createApp(App).use(createPinia()).use(router)
 app.mount('#app')
 startAutoActivityLoop()
+void startSocialRuntimeLoop()

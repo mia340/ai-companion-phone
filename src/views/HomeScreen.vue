@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { liveQuery } from 'dexie'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import CharacterAvatar from '../components/CharacterAvatar.vue'
@@ -19,6 +20,7 @@ import {
 const router = useRouter()
 
 const chatUnread = ref(0)
+const momentsUnread = ref(0)
 const worldName = ref('草莓云世界')
 const worldId = ref('world-default')
 const latestCharacterName = ref('')
@@ -28,18 +30,19 @@ const customIcons = ref<Record<string, string>>({})
 const appearance = ref<HomeAppearancePreferences>({ ...DEFAULT_HOME_APPEARANCE })
 
 let longPressTimer: number | undefined
+let socialBadgeSubscription: { unsubscribe: () => void } | undefined
 let longPressStartX = 0
 let longPressStartY = 0
 
 const apps = computed(() => HOME_APPS.map(app => ({
   ...app,
-  badge: app.key === 'chat' ? chatUnread.value : 0,
+  badge: app.key === 'chat' ? chatUnread.value : app.key === 'moments' ? momentsUnread.value : 0,
   customImage: customIcons.value[app.key]
 })))
 
 const dockApps = computed(() => DOCK_APPS.map(app => ({
   ...app,
-  badge: app.key === 'chat' ? chatUnread.value : 0,
+  badge: app.key === 'chat' ? chatUnread.value : app.key === 'moments' ? momentsUnread.value : 0,
   customImage: customIcons.value[app.key]
 })))
 
@@ -90,11 +93,13 @@ async function loadHomeState() {
         : world.eventLevel || '日常'
   }
 
-  const [conversations, savedIcons, savedAppearance] = await Promise.all([
+  const [conversations, savedIcons, savedAppearance, unreadMomentNotifications] = await Promise.all([
     db.conversations.toArray(),
     listAppCustomizations(worldId.value),
-    loadHomeAppearance(worldId.value)
+    loadHomeAppearance(worldId.value),
+    db.socialNotifications.where('worldId').equals(worldId.value).filter(item => !item.read).count()
   ])
+  momentsUnread.value = unreadMomentNotifications
   chatUnread.value = conversations.reduce(
     (sum, conversation) => sum + Number(conversation.unread || 0),
     0
@@ -150,8 +155,18 @@ function moveHomeLongPress(event: PointerEvent) {
   if (Math.hypot(event.clientX - longPressStartX, event.clientY - longPressStartY) > 8) cancelHomeLongPress()
 }
 
-onMounted(loadHomeState)
-onUnmounted(cancelHomeLongPress)
+onMounted(async () => {
+  await loadHomeState()
+  socialBadgeSubscription = liveQuery(() =>
+    db.socialNotifications.where('worldId').equals(worldId.value).filter(item => !item.read).count()
+  ).subscribe(count => {
+    momentsUnread.value = count
+  })
+})
+onUnmounted(() => {
+  cancelHomeLongPress()
+  socialBadgeSubscription?.unsubscribe()
+})
 </script>
 
 <template>

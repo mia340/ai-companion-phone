@@ -24,7 +24,8 @@ import type {
   ResourceBinding,
   CommunityResourceArchive,
   World,
-  AppCustomization
+  AppCustomization,
+  CharacterSocialProfile
 } from '../types/domain'
 
 
@@ -59,7 +60,7 @@ interface LegacyRelationshipEvent {
 
 export interface CompanionBackup {
   format: 'ai-companion-phone-backup'
-  version: 11
+  version: 12
   exportedAt: string
 
   data: {
@@ -87,6 +88,8 @@ export interface CompanionBackup {
     momentPosts: MomentPost[]
     momentComments: MomentComment[]
     appCustomizations: AppCustomization[]
+    // Backup V12：每位角色的朋友圈权限与活跃度。
+    socialProfiles: CharacterSocialProfile[]
   }
 }
 
@@ -111,6 +114,7 @@ export interface BackupSummary {
   momentPosts: number
   momentComments: number
   appCustomizations: number
+  socialProfiles: number
   images: number
   imageBytes: number
 }
@@ -149,7 +153,8 @@ export async function createBackup(options?: {
     conversationStateHistory,
     momentPosts,
     momentComments,
-    appCustomizations
+    appCustomizations,
+    socialProfiles
   ] = await Promise.all([
     db.worlds.toArray(),
     db.characters.toArray(),
@@ -171,7 +176,8 @@ export async function createBackup(options?: {
     db.conversationStateHistory.toArray(),
     db.momentPosts.toArray(),
     db.momentComments.toArray(),
-    db.appCustomizations.toArray()
+    db.appCustomizations.toArray(),
+    db.socialProfiles.toArray()
   ])
 
   // Backup V9 兼容字段继续保留，但 V13 起不再有本地关系积分 stores。
@@ -190,7 +196,7 @@ export async function createBackup(options?: {
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 11,
+    version: 12,
     exportedAt: new Date().toISOString(),
     data: {
       worlds,
@@ -215,7 +221,8 @@ export async function createBackup(options?: {
       conversationStateHistory,
       momentPosts,
       momentComments,
-      appCustomizations
+      appCustomizations,
+      socialProfiles
     }
   }
 }
@@ -244,6 +251,7 @@ export function getBackupSummary(
     momentPosts: backup.data.momentPosts.length,
     momentComments: backup.data.momentComments.length,
     appCustomizations: backup.data.appCustomizations.length,
+    socialProfiles: backup.data.socialProfiles.length,
     images: backup.data.messages.reduce(
       (total, message) => total + getMessageImages(message).filter(image => Boolean(image.dataUrl)).length,
       0
@@ -308,7 +316,7 @@ export async function parseBackupFile(
     throw new Error('这不是 AI Companion Phone 备份文件。')
   }
 
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(Number(parsed.version))) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(Number(parsed.version))) {
     throw new Error('当前版本暂不支持此备份版本。')
   }
 
@@ -337,7 +345,7 @@ export async function parseBackupFile(
 
   return {
     format: 'ai-companion-phone-backup',
-    version: 11,
+    version: 12,
     exportedAt:
       typeof parsed.exportedAt === 'string'
         ? parsed.exportedAt
@@ -365,7 +373,8 @@ export async function parseBackupFile(
       conversationStateHistory: optionalArray('conversationStateHistory') as ConversationStateHistory[],
       momentPosts: optionalArray('momentPosts') as MomentPost[],
       momentComments: optionalArray('momentComments') as MomentComment[],
-      appCustomizations: optionalArray('appCustomizations') as AppCustomization[]
+      appCustomizations: optionalArray('appCustomizations') as AppCustomization[],
+      socialProfiles: optionalArray('socialProfiles') as CharacterSocialProfile[]
     }
   }
 }
@@ -380,6 +389,7 @@ export async function restoreBackup(
   // V9 及更早备份不含朋友圈数据；兜底成空数组再统一写回。
   plainBackup.data.momentPosts = plainBackup.data.momentPosts || []
   plainBackup.data.momentComments = plainBackup.data.momentComments || []
+  plainBackup.data.socialProfiles = plainBackup.data.socialProfiles || []
 
   // Backup V9 仍能读取旧结构，但恢复到 V0.4.4.2 时立即按 V14 规则归一：
   // 通讯录不再恢复分组；世界书 / Regex 变成共享资源本体，角色使用关系只通过 ResourceBinding 表达。
@@ -519,6 +529,10 @@ export async function restoreBackup(
     await db.conversationStateHistory.clear()
     await db.momentPosts.clear()
     await db.momentComments.clear()
+    // Social Runtime 队列是可重建的运行时调度元数据，不进入备份；恢复备份时必须清空旧队列。
+    await db.socialActivities.clear()
+    await db.socialNotifications.clear()
+    await db.socialProfiles.clear()
     await db.appCustomizations.clear()
     await db.promptDebugTraces.clear()
 
@@ -573,6 +587,9 @@ export async function restoreBackup(
     }
     if (plainBackup.data.appCustomizations.length) {
       await db.appCustomizations.bulkPut(plainBackup.data.appCustomizations)
+    }
+    if (plainBackup.data.socialProfiles.length) {
+      await db.socialProfiles.bulkPut(plainBackup.data.socialProfiles)
     }
   })
 }

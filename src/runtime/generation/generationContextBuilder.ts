@@ -27,7 +27,7 @@ import {
   buildCharacterRuntimeManifest,
   characterMacroName
 } from '../../services/characterCardCompatibility'
-import { composeRoleplaySystemPrompt } from '../../services/promptComposer'
+import { composeRoleplaySystemPrompt, resolvePromptUserMacroName } from '../../services/promptComposer'
 import {
   buildPresentationOverridePrompt,
   resolvePresenceMode
@@ -392,7 +392,7 @@ export async function buildGenerationContext(options: BuildGenerationContextOpti
       openingMode: conversation.openingMode
     }), activePreset, {
       char: macroCharacterName,
-      user: persona.name,
+      user: resolvePromptUserMacroName(persona),
       scenario: character.scenario || '',
       personality: character.cardPersonality || character.persona || '',
       persona: persona.description || persona.identity || '',

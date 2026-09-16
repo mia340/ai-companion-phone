@@ -48,13 +48,33 @@ function buildLengthRule(settings: ChatSettings) {
   return '长度随情绪与内容自然变化，避免每次都保持相同篇幅。'
 }
 
+export function resolvePromptUserMacroName(persona: Pick<UserPersona, 'name' | 'isDefault'>) {
+  const name = persona.name?.trim() || ''
+  // “我 / 用户 / User”等默认展示名是 UI 标签，不是角色世界里的专名。
+  // 把这类名称直接替换进社区卡会生成“与我年龄差 / 我固定对应某人”之类的混乱语句。
+  // 保留 {{user}} 占位符，让模型明确把它理解为当前用户，而不是把“我”误当成叙述者姓名。
+  if (!name || /^(?:我|用户|user|默认(?:用户|人设|persona)?|未填写身份|匿名)$/iu.test(name)) return '{{user}}'
+  return name
+}
+
+function narrationPersonContinuityRules() {
+  return [
+    '【叙事人称连续性】',
+    '除非角色卡、世界书或 Prompt 预设明确写出“第三人称叙事/用她、他、TA指代{{user}}”等人称规则，否则当前用户在旁白、动作与场景叙事中固定使用第二人称“你”。',
+    '人物资料为了介绍用户而写“她/他/TA/女生/女孩/男生/男人/这个人”等，只是资料描述，不构成第三人称叙事指令。<user_profile>、Persona、世界书人物档案中的第三人称同样如此。',
+    '不要因为较早的 assistant 回复偶尔误用了第三人称就继续沿用；若原资源没有明确第三人称规则，从本轮恢复第二人称。',
+    '角色对白可以按角色设定使用“你”、用户姓名、昵称或其它自然称呼；但同一轮叙事不要无理由在“你”和“她/他/女生/男生”等用户指代之间切换。',
+    '这里的 {{user}} 始终表示当前用户，不是模型自己；如果 Persona 的界面名称恰好叫“我”，也不能把“我”当作角色世界中的用户专名。'
+  ].join('\n')
+}
+
 function naturalnessRules(settings: ChatSettings, options: { structuredOutput: boolean; phoneEnhanced: boolean }) {
   const lines = [
     '【AI 生成边界】',
     '所有角色台词、动作、心理、情绪、关系感受和剧情推进都由你依据角色卡、社区资源与聊天上下文自行生成；应用不会提供可直接照抄的角色回复。',
     '不要把小手机界面本身当成角色世界中的手机、聊天软件或现代设备，除非角色卡/世界观/当前剧情明确存在这些东西。',
     '区分现实用户事实与角色卡里的 {{user}} 剧情设定；缺少依据的现实用户事实视为未知。',
-    '默认在叙事中用第二人称“你”指代当前 Persona / {{user}}。原卡开场里偶尔使用“她/他/TA”只视为当时的叙事写法，不自动继承为后续用户人称；只有角色卡、世界书或 Preset 明确要求第三人称称呼 {{user}} 时才覆盖这一默认。',
+    '默认在叙事中用第二人称“你”指代当前 Persona / {{user}}；具体的人称连续性以“叙事人称连续性”规则为准。',
     '不得替用户生成用户未实际发送过的新台词、消息、选择或动作；社区微信/短信/群聊/论坛/邮件等模板中的 user/{{user}}/自己/我方消息槽只能引用真实历史。',
     '当消息包含 <director_instruction> 时，把它视为用户的 OOC 导演指令并静默执行，不把标签内容当世界内台词。',
     options.structuredOutput
@@ -150,6 +170,7 @@ export function composeRoleplaySystemPrompt(input: RoleplayPromptInput): string 
     input.lorebookAfterExamplesPrompt || '',
     input.lorebookAuthorNoteTopPrompt || '',
     buildOpeningFormatContinuity(input.character, structuredOutput, input.settings, input.openingMode),
+    narrationPersonContinuityRules(),
     naturalnessRules(input.settings, { structuredOutput, phoneEnhanced: runtimeProfile.compatibilityMode === 'phone-enhanced' }),
     input.lorebookAuthorNoteBottomPrompt || '',
     visualRules(input),
@@ -164,7 +185,7 @@ export function composeRoleplaySystemPrompt(input: RoleplayPromptInput): string 
 
   return renderCharacterCardPromptText(
     assembled,
-    input.persona.name,
+    resolvePromptUserMacroName(input.persona),
     characterMacroName(input.character),
     `${input.character.id}:${input.conversationState?.id || 'prompt'}`,
     { angleCharacterAliases: detectCharacterCardFamily(input.character) === 'v3' }

@@ -1,3 +1,16 @@
+## V0.5.0-alpha.5.0
+
+Social Runtime V1：持久后台朋友圈、多角色评论串、用户回复角色后继续接话；IndexedDB 升至 V17。详见 `SOCIAL_RUNTIME_V1.md`。
+
+## V0.5.0-alpha.4.5 · 2026-09-13
+
+- 新增叙事人称连续性层：无明确第三人称指令时，当前用户的旁白/动作统一使用第二人称“你”。
+- user profile 中“她/他/TA”等资料写法不再被视为输出人称规则。
+- 默认 Persona UI 名“我/用户/User”等不再直接替换 `{{user}}` 宏，降低系统 Prompt 的叙述者混淆。
+- 社区 Persona 识别支持 `{{user}}某某设定`、`<user_profile>` 与 `{{user}}固定对应某姓名`。
+- 旧角色编辑页可从当前绑定 Lorebook 恢复内嵌 user Persona 预览并绑定。
+- 目标 31 files / 280 tests；DB V16 / Backup V11 不变。
+
 ## V0.5.0-alpha.4.4.1 · 2026-09-13
 
 - 通用归一化社区 Persona 的年龄/身高字段，支持中文与英文常见单位写法。
