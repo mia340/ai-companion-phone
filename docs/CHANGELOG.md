@@ -1,3 +1,8 @@
+## V0.5.0-alpha.5.1.2 · 朋友圈发布菜单构建热修
+
+- 修复 `MomentsView.vue` 使用 `showCreateMenu` 却遗漏 `ref(false)` 声明导致的 5 个 vue-tsc 错误；不改变 Social Runtime、封面和独立页面功能。
+- IndexedDB V18 / Backup V12 不变；Windows `npm run verify` 通过后方可部署。
+
 ## V0.5.0-alpha.5.0 · Social Runtime V1 / 后台朋友圈
 
 - 新增 App 级 Social Runtime：朋友圈 AI 互动从页面内 `setTimeout` 升级为 IndexedDB V17 持久活动队列。
@@ -410,3 +415,8 @@
 - 新增朋友圈评论/回复未读通知和主屏幕朋友圈角标。
 - 朋友圈 UI 改为更接近微信的白底、紧凑评论区、顶部发布/通知入口与底部设置面板。
 - IndexedDB 升级 V18；Backup 升级 V12 并备份角色社交设置。
+
+## 0.5.0-alpha.5.1.1
+- 朋友圈页面层级：新互动、设置、好友权限独立路由，不再使用底部抽屉。
+- 朋友圈支持本地封面图片上传、压缩、持久化及恢复默认，头像与昵称叠在封面下沿。
+- 封面使用现有 IndexedDB V18 `appCustomizations` / Backup V12，Social Runtime V2 保持不变。

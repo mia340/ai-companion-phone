@@ -1,3 +1,9 @@
+## 2026-09-16 · V0.5.0-alpha.5.1.2｜发布菜单 ref 构建修复
+
+- Windows alpha.5.1.1 Vitest 34/34、298/298 通过，但 vue-tsc 报 `showCreateMenu` 未声明的 5 处错误，导致构建中止。
+- 恢复 `<script setup>` 中 `const showCreateMenu = ref(false)`；后续发布门禁必须包括 `npm run build` 而非仅 Vitest。
+- 当前环境完整 npm 依赖不可用；等待 Windows `npm run verify` 验证。
+
 ## 2026-09-16 · V0.5.0-alpha.5.0｜Social Runtime V1
 
 ### 目标
@@ -574,3 +580,8 @@ Windows 完整 `npm run verify` 暴露出 alpha.5.0.1 的 `normalizePersonaNameT
 ## 2026-09-16 · V0.5.0-alpha.5.1 Social Runtime V2
 
 在 V1 评论持久队列跑通后，将“谁来互动”从均匀随机抽样升级为可解释社交决策。没有重新引入关系积分；只读取已有会话更新时间、共享记忆、当前内容相关性和 Social Runtime 冷却，并叠加用户显式设置的角色社交权限/活跃度。UI 同步改为微信式简洁白底，并新增新互动通知。该候选选择层将作为后续群聊 Speaker Scheduler 的共用基础。
+
+### V0.5.0-alpha.5.1.1 · 朋友圈封面与独立页面
+- 将新互动、设置和每位好友权限从底部抽屉拆为独立路由；保持原 Social Runtime V2 行为。
+- 用户朋友圈顶部增加自定义封面、本地图片校验压缩、恢复默认；存储复用世界级 appCustomizations，Backup V12 / IndexedDB V18 不变。
+- 新增封面服务的边界单测，避免 SVG/远端 URL 与超大 base64 入库。
