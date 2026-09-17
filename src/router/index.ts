@@ -13,6 +13,9 @@ import CharacterDetailView from '../views/CharacterDetailView.vue'
 import CharacterEditView from '../views/CharacterEditView.vue'
 import CharacterCardEditorView from '../views/CharacterCardEditorView.vue'
 import UserProfileView from '../views/UserProfileView.vue'
+import CompanionMeView from '../views/CompanionMeView.vue'
+import CompanionDiscoverView from '../views/CompanionDiscoverView.vue'
+import CompanionWalletView from '../views/CompanionWalletView.vue'
 import DataBackupView from '../views/DataBackupView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import AppearanceSettingsView from '../views/AppearanceSettingsView.vue'
@@ -45,6 +48,22 @@ export const router = createRouter({
     {
       path: '/home',
       component: HomeScreen
+    },
+    {
+      path: '/companion',
+      redirect: '/chat'
+    },
+    {
+      path: '/companion/discover',
+      component: CompanionDiscoverView
+    },
+    {
+      path: '/companion/me',
+      component: CompanionMeView
+    },
+    {
+      path: '/companion/wallet',
+      component: CompanionWalletView
     },
     {
       path: '/chat',

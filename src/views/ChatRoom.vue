@@ -44,11 +44,13 @@ import {
 } from '../runtime/generation/responsePersistenceService'
 import {
   isTokenLimitError,
+  ProviderHttpError,
   type ChatRequest,
   type ChatResponse,
   type ChatStreamChunk
 } from '../services/ai/provider'
 import { createProvider } from '../services/ai/providerFactory'
+import { diagnoseApiResponse, diagnoseApiHttpError } from '../services/ai/apiResponseDiagnostics'
 import { getModelSettings, getVisionCapability } from '../services/modelSettings'
 import {
   MAX_CHAT_IMAGES,
@@ -1380,6 +1382,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
   let visualMessage: Message | undefined
   let visionUsed = false
   let visionFallback = false
+  let requestTraceId: string | undefined
 
   try {
     const generationContext = await buildGenerationContext({
@@ -1510,6 +1513,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
           }),
           ruleInfluences: buildRuleInfluences(systemPrompt)
         })
+        requestTraceId = debugTrace.id
       } catch (debugError) {
         // Prompt 调试是旁路诊断能力，写库失败绝不能中断正常聊天。
         console.warn('保存 Prompt 调试记录失败：', debugError)
@@ -1869,6 +1873,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
           provider: providerId,
           model: usedModel,
           tokenUsage: { ...cumulativeTokenUsage },
+          apiResponseDiagnostics: diagnoseApiResponse(response),
           rawOutput: response.text,
           visibleOutput: finalVisibleOutput,
           actionSummary: parsedOutput.actionSummary,
@@ -2057,6 +2062,11 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       speakText(spokenText, latestAssistant?.id ?? '')
     }
   } catch (error) {
+    if (requestTraceId && error instanceof ProviderHttpError) {
+      try {
+        await patchPromptDebugTrace(requestTraceId, { apiResponseDiagnostics: diagnoseApiHttpError(error.status) })
+      } catch { /* 调试失败不能掩盖原始 API 错误 */ }
+    }
     if (isAbortError(error)) {
       if (manualStopRequested) {
         const preserved = await preserveInterruptedStream(

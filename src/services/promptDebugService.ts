@@ -132,6 +132,16 @@ export function buildPromptDebugReport(trace: PromptDebugTrace) {
     trace.tokenUsage?.totalTokens ? `- API 实际总 Token：${trace.tokenUsage.totalTokens}${trace.tokenUsage.successfulCalls && trace.tokenUsage.successfulCalls > 1 ? `（${trace.tokenUsage.successfulCalls} 次成功调用累计）` : ''}` : '',
     `- 图片：${trace.imageCount} 张`,
     '',
+    '## API 响应诊断',
+    ...(trace.apiResponseDiagnostics ? [
+      `- HTTP 状态：${trace.apiResponseDiagnostics.httpStatus ?? '未提供'}`,
+      `- finish_reason：${trace.apiResponseDiagnostics.finishReason || '未提供'}`,
+      `- 结构化拒绝标记：${trace.apiResponseDiagnostics.structuredRefusal ? '有' : '未见'}`,
+      `- 回复文本疑似自述拒绝：${trace.apiResponseDiagnostics.textRefusal ? '是（启发式检测）' : '未见'}`,
+      `- 分类：${trace.apiResponseDiagnostics.outcome}`,
+      '- 注意：文本拒绝无法区分底层模型与 API 中转服务；HTTP 200 不代表未受服务端规则影响。'
+    ] : ['- 旧记录未采集']),
+    '',
     '## 预算分区',
     ...(trace.promptSections || []).map(item => `- ${item.label}：${item.characters}${item.budget ? ` / 建议 ${item.budget}` : ''}${item.truncated ? '（偏长）' : ''}`),
     '',

@@ -254,7 +254,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <PhoneFrame title="聊天" show-back>
+  <PhoneFrame title="知间">
     <section class="chat-list-page">
       <label class="search-field">
         <span aria-hidden="true">⌕</span>

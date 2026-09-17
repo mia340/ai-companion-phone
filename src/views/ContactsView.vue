@@ -51,7 +51,7 @@ onMounted(loadContacts)
 </script>
 
 <template>
-  <PhoneFrame title="通讯录" show-back>
+  <PhoneFrame title="通讯录">
     <section class="contacts-page">
       <label class="search-field">
         <span aria-hidden="true">⌕</span>

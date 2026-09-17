@@ -328,3 +328,32 @@ describe('OpenAICompatibleProvider.chatStream', () => {
   })
 
 })
+
+describe('API 原生结构化拒绝元信息', () => {
+  it('JSON 兼容响应暴露 HTTP 与 refusal 信号，正文不被客户端替换', async () => {
+    const text = '我不能继续参与这段互动。'
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: text, refusal: 'provider-refused' }, finish_reason: 'stop' }]
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const response = await createProvider().chat({ model: 'test-model', messages: [] })
+    expect(response.text).toBe(text)
+    expect(response.httpStatus).toBe(200)
+    expect(response.refusalMarker).toBe(true)
+    expect(response.finishReason).toBe('stop')
+  })
+
+  it('SSE 检测元数据 refusal 并照常返回模型真实文本', async () => {
+    const encoder = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"抱歉"}}]}\n\n'))
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"refusal":"provider-refused"},"finish_reason":"stop"}]}\n\n'))
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    } })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+    const response = await createProvider().chatStream({ model: 'test-model', messages: [] })
+    expect(response.text).toBe('抱歉')
+    expect(response.httpStatus).toBe(200)
+    expect(response.refusalMarker).toBe(true)
+  })
+})

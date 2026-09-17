@@ -1,3 +1,10 @@
+## V0.5.0-alpha.5.1.3 · API 响应诊断（不增加恋爱剧情拦截）
+
+- 在 Prompt Debug 记录 HTTP 状态、finish_reason、上游结构化拒绝标记以及保守的回复文本拒绝线索；文本拒绝无法归因到模型或中转服务。
+- 记录最少量诊断元数据，不在诊断字段保存 API Key、Headers 或 HTTP 错误正文。
+- 不新增客户端对成年人的虚构恋爱、亲密剧情的笼统禁止；保持服务商返回文本原样进入既有展示流水线。
+- IndexedDB V18 / Backup V12 不变；完整 npm verify 需 Windows 验证。
+
 ## V0.5.0-alpha.5.1.2 · 朋友圈发布菜单构建热修
 
 - 修复 `MomentsView.vue` 使用 `showCreateMenu` 却遗漏 `ref(false)` 声明导致的 5 个 vue-tsc 错误；不改变 Social Runtime、封面和独立页面功能。

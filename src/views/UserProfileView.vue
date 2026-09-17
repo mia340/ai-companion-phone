@@ -23,6 +23,7 @@ const personas = ref<UserPersona[]>([])
 const name = ref('我')
 const identity = ref('')
 const bio = ref('')
+const signature = ref('')
 
 const avatarEmoji = ref('🧑')
 const avatarImage = ref('')
@@ -65,6 +66,7 @@ async function loadProfile() {
     name.value = profile.name
     identity.value = profile.identity ?? ''
     bio.value = profile.bio ?? ''
+    signature.value = profile.signature ?? ''
     originalCreatedAt.value =
       profile.createdAt
 
@@ -240,6 +242,9 @@ async function saveProfile() {
       bio:
         bio.value.trim() || undefined,
 
+      signature:
+        signature.value.trim().slice(0, 80) || undefined,
+
       createdAt:
         originalCreatedAt.value || now,
 
@@ -291,7 +296,7 @@ onMounted(loadProfile)
             <span class="profile-kicker">手机基础身份</span>
             <h2>{{ name || '我' }}</h2>
             <p>{{ identity || '还没有填写身份' }}</p>
-            <small>{{ bio || '这里保存全局昵称和头像；进入角色世界时由 Persona 决定角色认识的“你”。' }}</small>
+            <small>{{ signature || '还没有填写个性签名' }}</small>
           </div>
         </section>
 
@@ -367,6 +372,11 @@ onMounted(loadProfile)
             <label>
               我的身份
               <input v-model="identity" maxlength="50" placeholder="例如：大学生、设计师、旅行者" />
+            </label>
+
+            <label>
+              个性签名
+              <input v-model="signature" maxlength="80" placeholder="写一句自己的话，会显示在知间和朋友圈" />
             </label>
 
             <label>

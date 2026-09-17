@@ -1,3 +1,10 @@
+## 2026-09-16 · V0.5.0-alpha.5.1.3｜追踪 API 拒绝来源
+
+- 用户对照同一触发消息的两个渠道：OpenAI 兼容接口返回自述拒绝，DeepSeek 返回正常角色剧情。仅凭文本不能确认底层模型或网关责任。
+- 新增仅观察的 API 响应诊断：HTTP 状态、finish_reason、结构化拒绝标记、文本启发式。客户端不更改提供商规则，也不增加成年角色恋爱禁令。
+- JSON / SSE 兼容路径均携带诊断元数据；Trace 与导出报告展示结果，HTTP 错误仅保留状态码。
+- 因容器 npm 离线缺少 zod 包，完整 `npm run verify` 待用户 Windows 运行。
+
 ## 2026-09-16 · V0.5.0-alpha.5.1.2｜发布菜单 ref 构建修复
 
 - Windows alpha.5.1.1 Vitest 34/34、298/298 通过，但 vue-tsc 报 `showCreateMenu` 未声明的 5 处错误，导致构建中止。

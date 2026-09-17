@@ -11,6 +11,7 @@ import {
 import CharacterAvatar from '../components/CharacterAvatar.vue'
 import PhoneFrame from '../components/PhoneFrame.vue'
 import { db } from '../db/database'
+import { USER_PROFILE_ID } from '../services/userProfile'
 import { listCharacterSharedMemories } from '../services/memoryService'
 import { useRoute, useRouter } from 'vue-router'
 import { findSingleConversation } from '../services/characterService'
@@ -59,6 +60,7 @@ const route = useRoute()
 
 const unreadSocialCount = ref(0)
 const coverDataUrl = ref('')
+const publicSignature = ref('')
 const coverInput = ref<HTMLInputElement | null>(null)
 const preparingCover = ref(false)
 
@@ -495,12 +497,13 @@ function formatTime(value: string) {
 onMounted(() => {
   subscription = liveQuery(async () => {
     const worldId = await getActiveWorldId()
-    const [feed, characters, self, unread, cover] = await Promise.all([
+    const [feed, characters, self, unread, cover, profile] = await Promise.all([
       loadMomentFeed(worldId),
       db.characters.where('worldId').equals(worldId).toArray(),
       resolveSelfDisplay(),
       db.socialNotifications.where('worldId').equals(worldId).filter(item => !item.read).count(),
-      getMomentCover(worldId)
+      getMomentCover(worldId),
+      db.userProfiles.get(USER_PROFILE_ID)
     ])
 
     // 极老数据可能没有 worldId；没有该世界角色时退回全局角色，保证入口可用。
@@ -508,7 +511,7 @@ onMounted(() => {
       ? characters
       : await db.characters.toArray()
 
-    return { worldId, feed, characters: fallbackCharacters, self, unread, cover }
+    return { worldId, feed, characters: fallbackCharacters, self, unread, cover, signature: profile?.signature || '' }
   }).subscribe(rows => {
     activeWorldId.value = rows.worldId
     feedItems.value = rows.feed
@@ -516,6 +519,7 @@ onMounted(() => {
     selfDisplay.value = rows.self
     unreadSocialCount.value = rows.unread
     coverDataUrl.value = rows.cover ?? ''
+    publicSignature.value = rows.signature
     void scrollToLinkedMoment()
   })
 })
@@ -530,7 +534,7 @@ onUnmounted(() => {
   <PhoneFrame>
     <template #header>
       <div class="wechat-header">
-        <button class="wechat-back" type="button" aria-label="返回" @click="router.back()">‹</button>
+        <button class="wechat-back" type="button" aria-label="返回发现" @click="router.push('/companion/discover')">‹</button>
         <strong>朋友圈</strong>
         <div class="wechat-header-actions">
           <button class="header-icon-btn notification-button" type="button" aria-label="新互动" @click="router.push('/app/朋友圈/notifications')">
@@ -554,6 +558,7 @@ onUnmounted(() => {
           <CharacterAvatar :avatar="selfDisplay.avatar" :name="selfDisplay.name" :size="62" />
         </div>
       </div>
+      <p v-if="publicSignature" class="moment-signature">{{ publicSignature }}</p>
       <Transition name="controls-fold">
         <div v-if="showCreateMenu" class="create-popover">
           <button type="button" @click="openSelfComposer">
@@ -1044,6 +1049,7 @@ onUnmounted(() => {
 .cover-change,.cover-reset{position:absolute;z-index:2;bottom:14px;padding:5px 9px;border:1px solid #ffffff55;border-radius:5px;background:#0005;color:#fff;font-size:11px;cursor:pointer;backdrop-filter:blur(5px)}
 .cover-change{left:14px}.cover-reset{left:94px}.cover-change:disabled,.cover-reset:disabled{opacity:.45}
 .moment-cover-profile{position:absolute;z-index:3;right:17px;bottom:-29px;display:flex;align-items:center;gap:11px;max-width:calc(100% - 28px)}
+.moment-signature{margin:-24px 0 30px;padding:0 4px;text-align:right;color:#81909b;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 .moment-cover-profile>b{max-width:195px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#fff;font-size:16px;text-shadow:0 1px 5px #0009}
 .moment-cover-profile :deep(.character-avatar){border:3px solid #fff;border-radius:7px;background:#fff;box-shadow:0 1px 5px #0002}
 

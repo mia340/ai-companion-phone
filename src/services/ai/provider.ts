@@ -52,6 +52,9 @@ export interface ChatResponse {
   text: string
   raw?: unknown
   finishReason?: string
+  httpStatus?: number
+  /** Structured refusal signal returned by the API, not a text-based inference. */
+  refusalMarker?: boolean
   usage?: {
     promptTokens?: number
     completionTokens?: number
@@ -109,6 +112,7 @@ interface OpenAIChatCompletionResponse {
   choices?: Array<{
     message?: {
       content?: string | Array<{ type?: string; text?: string }>
+      refusal?: string | null
     }
     finish_reason?: string | null
   }>
@@ -523,12 +527,17 @@ function extractStreamMeta(payload: unknown) {
   const finishReason = typeof first === 'object' && first !== null && typeof (first as Record<string, unknown>).finish_reason === 'string'
     ? String((first as Record<string, unknown>).finish_reason)
     : undefined
+  const choice = typeof first === 'object' && first !== null ? first as Record<string, unknown> : undefined
+  const message = choice?.message && typeof choice.message === 'object' ? choice.message as Record<string, unknown> : undefined
+  const delta = choice?.delta && typeof choice.delta === 'object' ? choice.delta as Record<string, unknown> : undefined
+  const refusalMarker = Boolean(message?.refusal || delta?.refusal || finishReason === 'content_filter')
   const usageRaw = typeof record.usage === 'object' && record.usage !== null
     ? record.usage as Record<string, unknown>
     : undefined
   const numberValue = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : undefined
   return {
     finishReason,
+    refusalMarker,
     usage: usageRaw ? {
       promptTokens: numberValue(usageRaw.prompt_tokens),
       completionTokens: numberValue(usageRaw.completion_tokens),
@@ -565,6 +574,7 @@ async function readEventStream(
   let text = ''
   let eventCount = 0
   let finishReason: string | undefined
+  let refusalMarker = false
   let usage: ChatResponse['usage']
 
   const consumeBlock = async (block: string) => {
@@ -582,6 +592,7 @@ async function readEventStream(
       eventCount += 1
       const meta = extractStreamMeta(payload)
       if (meta.finishReason) finishReason = meta.finishReason
+      if (meta.refusalMarker) refusalMarker = true
       if (meta.usage) usage = { ...(usage || {}), ...meta.usage }
       const delta = extractStreamDelta(payload)
 
@@ -634,6 +645,7 @@ async function readEventStream(
     if (fallbackData !== undefined) {
       const meta = extractStreamMeta(fallbackData)
       if (meta.finishReason) finishReason = meta.finishReason
+      if (meta.refusalMarker) refusalMarker = true
       if (meta.usage) usage = { ...(usage || {}), ...meta.usage }
       const fallbackText = extractStreamDelta(fallbackData)
 
@@ -655,6 +667,8 @@ async function readEventStream(
   return {
     text: text.trim(),
     finishReason,
+    httpStatus: response.status,
+    refusalMarker,
     usage,
     raw: {
       streamed: true,
@@ -806,6 +820,8 @@ implements ModelProvider {
       text,
       raw: data,
       finishReason,
+      httpStatus: response.status,
+      refusalMarker: Boolean(data.choices?.[0]?.message?.refusal || finishReason === 'content_filter'),
       usage
     }
   }
@@ -908,6 +924,8 @@ implements ModelProvider {
         text,
         raw: data,
         finishReason,
+        httpStatus: response.status,
+        refusalMarker: Boolean(data.choices?.[0]?.message?.refusal || finishReason === 'content_filter'),
         usage
       }
     }

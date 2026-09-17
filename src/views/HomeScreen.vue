@@ -36,13 +36,13 @@ let longPressStartY = 0
 
 const apps = computed(() => HOME_APPS.map(app => ({
   ...app,
-  badge: app.key === 'chat' ? chatUnread.value : app.key === 'moments' ? momentsUnread.value : 0,
+  badge: app.key === 'banxin' ? chatUnread.value + momentsUnread.value : app.key === 'chat' ? chatUnread.value : app.key === 'moments' ? momentsUnread.value : 0,
   customImage: customIcons.value[app.key]
 })))
 
 const dockApps = computed(() => DOCK_APPS.map(app => ({
   ...app,
-  badge: app.key === 'chat' ? chatUnread.value : app.key === 'moments' ? momentsUnread.value : 0,
+  badge: app.key === 'banxin' ? chatUnread.value + momentsUnread.value : app.key === 'chat' ? chatUnread.value : app.key === 'moments' ? momentsUnread.value : 0,
   customImage: customIcons.value[app.key]
 })))
 

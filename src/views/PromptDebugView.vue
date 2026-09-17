@@ -94,6 +94,16 @@ watch(conversationId, load)
         </details>
 
         <details open class="debug-section">
+          <summary>API 响应诊断</summary>
+          <template v-if="selected.apiResponseDiagnostics">
+            <p><b>HTTP：</b>{{ selected.apiResponseDiagnostics.httpStatus ?? '未提供' }} · <b>finish_reason：</b>{{ selected.apiResponseDiagnostics.finishReason || '未提供' }}</p>
+            <p><b>结构化拒绝标记：</b>{{ selected.apiResponseDiagnostics.structuredRefusal ? '有' : '未见' }} · <b>文本疑似自述拒绝：</b>{{ selected.apiResponseDiagnostics.textRefusal ? '是' : '未见' }}</p>
+            <p class="ok">仅做诊断，不改变模型回复。无法仅凭文本区分底层模型与中转服务；不记录 API Key 或原始响应头。</p>
+          </template>
+          <p v-else class="empty">旧请求未采集响应诊断。</p>
+        </details>
+
+        <details open class="debug-section">
           <summary>字符预算与截断</summary>
           <p v-if="selected.tokenUsage?.totalTokens" class="ok">API 实际 Token：输入 {{ selected.tokenUsage.promptTokens || 0 }} · 输出 {{ selected.tokenUsage.completionTokens || 0 }} · 合计 {{ selected.tokenUsage.totalTokens }}<template v-if="selected.tokenUsage.successfulCalls && selected.tokenUsage.successfulCalls > 1"> · {{ selected.tokenUsage.successfulCalls }} 次成功调用累计</template></p>
           <article v-for="section in selected.promptSections || []" :key="section.key" class="budget-row">

@@ -2,6 +2,7 @@ import { db } from '../db/database'
 import type { AppCustomization } from '../types/domain'
 
 export type HomeAppKey =
+  | 'banxin'
   | 'chat'
   | 'contacts'
   | 'moments'
@@ -38,12 +39,9 @@ export const DEFAULT_HOME_APPEARANCE: HomeAppearancePreferences = {
 const APPEARANCE_APP_KEY = '__home-appearance__'
 
 export const HOME_APPS: HomeAppDefinition[] = [
-  { key: 'chat', label: '聊天', route: '/chat', icon: 'chat', tone: ['#79b7ee', '#a8d8f7'] },
-  { key: 'contacts', label: '通讯录', route: '/contacts', icon: 'contacts', tone: ['#71cdbd', '#a8e4d5'] },
-  { key: 'moments', label: '朋友圈', route: '/app/朋友圈', icon: 'moments', tone: ['#07c160', '#53d78b'] },
+  { key: 'banxin', label: '知间', route: '/companion', icon: 'banxin', tone: ['#17bd78', '#5fd8a5'] },
   { key: 'diary', label: '日记', route: '/app/日记', icon: 'diary', tone: ['#e9bb83', '#f5d6a5'] },
   { key: 'music', label: '音乐', route: '/app/音乐', icon: 'music', tone: ['#8f9cde', '#b9c4ef'] },
-  { key: 'wallet', label: '钱包', route: '/app/钱包', icon: 'wallet', tone: ['#82c5a0', '#b6dfc5'] },
   { key: 'turtle-soup', label: '海龟汤', route: '/app/海龟汤', icon: 'turtle-soup', tone: ['#75bcc4', '#a8d8d3'] },
   { key: 'profile', label: '我的资料', route: '/profile', icon: 'profile', tone: ['#9aa6df', '#c5cdf0'] },
   { key: 'memory', label: '记忆', route: '/memory', icon: 'memory', tone: ['#a8a1dc', '#d0c9ee'] },
@@ -54,11 +52,12 @@ export const HOME_APPS: HomeAppDefinition[] = [
 
 export const DOCK_APPS: HomeAppDefinition[] = [
   HOME_APPS[0],
-  HOME_APPS[1],
   { key: 'new-character', label: '新建角色', route: '/characters/new', icon: 'new-character', tone: ['#8ebce8', '#bddcf4'] },
-  HOME_APPS[11]
+  HOME_APPS[6],
+  HOME_APPS[8]
 ]
 
+/** 旧入口不再显示在桌面，继续保留其自定义图标及历史路由数据。 */
 export const CUSTOMIZABLE_APPS: HomeAppDefinition[] = Array.from(
   new Map([...HOME_APPS, ...DOCK_APPS].map(app => [app.key, app])).values()
 )

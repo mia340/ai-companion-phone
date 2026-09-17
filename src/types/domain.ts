@@ -123,6 +123,8 @@ export interface UserProfile {
   avatar: string
   identity?: string
   bio?: string
+  /** 独立于 bio / Persona 的公开展示签名，不注入聊天 Prompt。 */
+  signature?: string
   createdAt: string
   updatedAt: string
 }
@@ -685,6 +687,14 @@ export interface PromptDebugTrace {
     delayBlocked: string[]
     groupDropped: string[]
     depthInjections: Array<{ title: string; depth: number; role: 'system' | 'user' | 'assistant' }>
+  }
+  /** Diagnostics from the API response; no raw headers, key, gateway text, or response body. */
+  apiResponseDiagnostics?: {
+    httpStatus?: number
+    finishReason?: string
+    structuredRefusal: boolean
+    textRefusal: boolean
+    outcome: 'structured-refusal' | 'text-refusal' | 'no-refusal-indicator' | 'http-error'
   }
   tokenUsage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number; successfulCalls?: number }
   memoryHits: Array<{ id: UUID; content: string; importance: number; layer?: MemoryLayer; score?: number; reason?: string }>
