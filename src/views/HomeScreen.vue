@@ -113,11 +113,38 @@ let longPressStartY = 0
 const renderedAppearance = computed(() => dragPreviewAppearance.value ?? appearance.value)
 const actualPages = computed(() => renderedAppearance.value.homeLayoutPages)
 const launcherPages = computed<HomeLayoutPage[]>(() => {
-  if (transientBlankPage.value && !dragPreviewAppearance.value && renderedAppearance.value.homeLayoutPages.length < MAX_HOME_PAGES) {
-    return [...renderedAppearance.value.homeLayoutPages, { items: [] }]
-  }
-  return renderedAppearance.value.homeLayoutPages
+  // 临时空白页只服务于“正在编辑并拖拽到最后一页右边缘”的那一瞬间。
+  // 一旦拖拽结束 / 取消 / 退出编辑，空白页必须立刻消失，绝不能成为稳定桌面页。
+  const canExposeTransientPage = transientBlankPage.value
+    && editMode.value
+    && Boolean(draggingId.value)
+    && !dragPreviewAppearance.value
+    && renderedAppearance.value.homeLayoutPages.length < MAX_HOME_PAGES
+
+  return canExposeTransientPage
+    ? [...renderedAppearance.value.homeLayoutPages, { items: [] }]
+    : renderedAppearance.value.homeLayoutPages
 })
+const clampCurrentPageToPersistedLayout = () => {
+  const pageCount = Math.max(1, actualPages.value.length)
+  if (currentPage.value >= pageCount) currentPage.value = pageCount - 1
+  if (currentPage.value < 0) currentPage.value = 0
+}
+
+watch(() => actualPages.value.length, () => {
+  // 拖拽预览允许页面数量暂时变化；真正松手后再收敛页索引，
+  // 避免在手指还按着时突然把当前页抢回前一页。
+  if (draggingId.value) return
+  transientBlankPage.value = false
+  clampCurrentPageToPersistedLayout()
+})
+
+watch([editMode, draggingId], ([editing, dragging]) => {
+  if (editing && dragging) return
+  transientBlankPage.value = false
+  clampCurrentPageToPersistedLayout()
+})
+
 const dockApps = computed(() => resolveDockApps(appearance.value).map(enrichApp))
 const draggingAppKey = computed(() => launcherPointer?.itemType === 'app' ? String(launcherPointer.key) : '')
 const availableWidgets = computed(() => WIDGET_CATALOG.filter(widget => !appearance.value.homeWidgetKeys.includes(widget.key)))
@@ -507,7 +534,7 @@ function resetLauncherPointer() {
   draggingId.value = ''
   clearDropTarget()
   transientBlankPage.value = false
-  if (currentPage.value >= actualPages.value.length) currentPage.value = Math.max(0, actualPages.value.length - 1)
+  clampCurrentPageToPersistedLayout()
 }
 
 function activateLauncherDrag(event: PointerEvent) {

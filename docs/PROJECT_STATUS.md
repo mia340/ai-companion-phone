@@ -1,18 +1,24 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.13**
+当前版本：**V0.5.0-alpha.5.1.14**
 
 ```text
-App：0.5.0-alpha.5.1.13
+App：0.5.0-alpha.5.1.14
 IndexedDB：V18
 Backup：V12
-测试定义：41 files / 333 it-test declarations
+测试定义：41 files / 334 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
-## 0. 本轮 alpha.5.1.13 重点
+## 0. 本轮 alpha.5.1.14 重点
+
+- 修复 Launcher 临时空白页在拖拽结束后仍可能被展示为稳定页面的问题：临时页现在只在“编辑态 + 正在拖拽”期间可见。
+- 持久布局页数减少时统一夹紧 `currentPage`；移到 Dock、隐藏 App、删除 Widget 或跨页拖拽清空页面后，页码圆点与当前页立即收敛。
+- 新增“后一页最后一个 App 移走后只剩 1 页”的回归测试。
+
+## 0.1 alpha.5.1.13 重点
 
 - **Launcher Grid V7**：App / Widget 拖拽从 swap 改成 insert + reflow；拖到某个位置时，后续项目会实时后移、跨行补位。
 - **实时布局预览**：拖动过程中不直接写 IndexedDB，而是基于当前持久布局生成临时 preview；指针跨过格子时立即重排，松手后才提交。

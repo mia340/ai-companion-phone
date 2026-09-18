@@ -113,6 +113,25 @@ describe('知间桌面入口与布局', () => {
     ])
   })
 
+  it('把后一页最后一个项目移走后会立即回收空白页', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [
+        { items: [{ id: 'app:music', type: 'app', key: 'music', x: 0, y: 0, w: 1, h: 1 }] },
+        { items: [{ id: 'app:profile', type: 'app', key: 'profile', x: 0, y: 0, w: 1, h: 1 }] }
+      ],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+
+    const moved = moveHomeAppToGrid(current, 'profile', 0, 1, 0)
+    expect(moved.homeLayoutPages).toHaveLength(1)
+    expect(moved.homeLayoutPages[0].items.map(item => item.id).sort()).toEqual(['app:music', 'app:profile'])
+  })
+
   it('页面只有在真正清空后才删除，不会把非空页自动挤回前一页', () => {
     const normalized = normalizeHomeAppearance({
       homeAppKeys: ['music', 'backup'],

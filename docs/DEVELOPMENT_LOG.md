@@ -663,3 +663,11 @@ Windows 首轮 `npm run verify` 显示 41 个测试文件 / 329 个测试均先�
 - 增加拖拽时非持久化 preview，指针越过格子即重新计算目标页顺序。
 - 增加 WAAPI FLIP 动画，其他项目会连续挤开/补位，形成更接近 iPhone 的果冻式反馈。
 - 来源页只在本页补洞；目标页溢出才向后页级联，保持玩家人为分页。
+
+
+## 2026-09-18 · alpha.5.1.14 Empty Page Reclamation Hotfix
+
+- 根因不在持久布局压缩：`compactLayoutPages()` 已会过滤空页；问题来自 UI 层 `transientBlankPage` 可在拖拽结束后短路为稳定分页。
+- 临时空页现在要求 `editMode && draggingId && transientBlankPage` 同时成立才渲染。
+- 监听持久页数量变化并在非拖拽态夹紧 `currentPage`，覆盖移 Dock、隐藏 App、删除 Widget 等所有清空页入口。
+- 新增回归：第二页只有一个 App，将其插回第一页后 `homeLayoutPages.length === 1`。
