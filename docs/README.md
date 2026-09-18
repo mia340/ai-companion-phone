@@ -1,9 +1,9 @@
 # AI Companion Phone 文档中心
 
-当前开发线：**V0.5.0-alpha.5.1.14**
+当前开发线：**V0.5.0-alpha.5.1.15**
 
 ```text
-应用：0.5.0-alpha.5.1.14
+应用：0.5.0-alpha.5.1.15
 IndexedDB：V18
 Backup：V12
 测试定义：41 个测试文件 / 334 个 it/test 声明
@@ -18,7 +18,7 @@ Backup：V12
 
 1. `START_HERE_小白启动指南.md`：第一次启动、Build、常见问题。
 2. `部署与更新.md`：长期通用的 Windows / Git / Build 流程。
-3. `releases/V0.5.0-alpha.5.1.14_部署与更新.md`：当前版本的专项验收步骤。
+3. `releases/V0.5.0-alpha.5.1.15_部署与更新.md`：当前版本的专项验收步骤。
 
 ### 当前开发单一事实源
 

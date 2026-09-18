@@ -10,6 +10,7 @@ import {
   moveHomeAppToGrid,
   moveHomeWidgetToGrid,
   resizeHomeWidgetInGrid,
+  removeHomeLayoutPages,
   paginateHomeAppKeys
 } from './appCustomizationService'
 
@@ -147,6 +148,49 @@ describe('知间桌面入口与布局', () => {
     })
     expect(normalized.homeLayoutPages).toHaveLength(2)
     expect(normalized.homeLayoutPages[1].items[0]).toMatchObject({ key: 'backup', x: 3, y: 5 })
+  })
+
+
+  it('显式自愈幽灵页时会同时重算 App/Widget 列表，不会把幽灵项目再次补回来', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [
+        { items: [{ id: 'app:music', type: 'app', key: 'music', x: 0, y: 0, w: 1, h: 1 }] },
+        { items: [{ id: 'app:profile', type: 'app', key: 'profile', x: 0, y: 0, w: 1, h: 1 }] }
+      ],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+
+    const repaired = removeHomeLayoutPages(current, [1])
+    expect(repaired.homeLayoutPages).toHaveLength(1)
+    expect(repaired.homeAppKeys).toEqual(['music'])
+    expect(repaired.homeLayoutPages[0].items.map(item => item.id)).toEqual(['app:music'])
+  })
+
+  it('归一化会删除中间和尾部幽灵空页，并把后续非空页前移', () => {
+    const normalized = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [
+        { items: [{ id: 'app:music', type: 'app', key: 'music', x: 0, y: 0, w: 1, h: 1 }] },
+        { items: [] },
+        { items: [{ id: 'app:profile', type: 'app', key: 'profile', x: 0, y: 0, w: 1, h: 1 }] },
+        { items: [] }
+      ],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted',
+      homeLayoutRevision: 7
+    })
+
+    expect(normalized.homeLayoutPages).toHaveLength(2)
+    expect(normalized.homeLayoutPages[0].items.map(item => item.id)).toEqual(['app:music'])
+    expect(normalized.homeLayoutPages[1].items.map(item => item.id)).toEqual(['app:profile'])
   })
 
   it('App 拖到已有项目之间时按插入顺序流式后移，而不是简单交换', () => {

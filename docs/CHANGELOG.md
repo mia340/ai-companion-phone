@@ -1,5 +1,14 @@
 # Changelog
 
+## V0.5.0-alpha.5.1.15
+
+- 修复第二页幽灵空页：过期 drag preview 不再覆盖真实 HomeLayout。
+- 拖拽结束改为 finally 清理，保存异常也不会留下临时页面。
+- HomeLayout Revision 8：读取时自动压缩并回写历史空页。
+- 增加渲染级 ghost-page 自愈与显式页面移除 helper。
+- 新增 2 条回归测试，静态为 41 个测试文件 / 336 个测试声明。
+
+
 ## V0.5.0-alpha.5.1.14
 
 - 修复 Launcher 临时空白页在拖拽结束/取消后仍可能保留第二个分页圆点的问题。

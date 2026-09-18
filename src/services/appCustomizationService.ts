@@ -35,7 +35,7 @@ export interface HomeWidgetSettings {
 export const HOME_GRID_COLUMNS = 4
 export const HOME_GRID_ROWS = 6
 export const MAX_HOME_PAGES = 8
-export const HOME_LAYOUT_REVISION = 7
+export const HOME_LAYOUT_REVISION = 8
 
 export interface HomeAppDefinition {
   key: HomeAppKey
@@ -635,6 +635,35 @@ export function moveHomeWidgetToGrid(
   return moveHomeLayoutItemToGrid(value, { type: 'widget', key }, destinationPageIndex, x, y)
 }
 
+export function removeHomeLayoutPages(
+  value: HomeAppearancePreferences,
+  pageIndexes: readonly number[]
+): HomeAppearancePreferences {
+  const normalized = normalizeHomeAppearance(value)
+  const removed = new Set(pageIndexes.filter(index => Number.isInteger(index) && index >= 0))
+  if (!removed.size) return normalized
+
+  const pages = compactLayoutPages(
+    normalized.homeLayoutPages
+      .filter((_, index) => !removed.has(index))
+      .map(page => ({ items: page.items.map(item => ({ ...item })) }))
+  )
+  const homeAppKeys = pages.flatMap(page => page.items
+    .filter((item): item is HomeLayoutAppItem => item.type === 'app')
+    .map(item => item.key))
+  const homeWidgetKeys = pages.flatMap(page => page.items
+    .filter((item): item is HomeLayoutWidgetItem => item.type === 'widget')
+    .map(item => item.key))
+
+  return normalizeHomeAppearance({
+    ...normalized,
+    homeAppKeys,
+    homeWidgetKeys,
+    homePageKeys: deriveLegacyPageKeys(pages),
+    homeLayoutPages: pages
+  })
+}
+
 export function resizeHomeWidgetInGrid(
   value: HomeAppearancePreferences,
   key: HomeWidgetKey,
@@ -847,7 +876,7 @@ export async function resetAppIcon(worldId: string, appKey: HomeAppKey) {
 
 export async function loadHomeAppearance(worldId: string): Promise<HomeAppearancePreferences> {
   const row = await db.appCustomizations.get(customizationId(worldId, APPEARANCE_APP_KEY))
-  return normalizeHomeAppearance({
+  const normalized = normalizeHomeAppearance({
     wallpaperDataUrl: row?.wallpaperDataUrl,
     iconScale: row?.iconScale,
     showAppLabels: row?.showAppLabels,
@@ -861,6 +890,19 @@ export async function loadHomeAppearance(worldId: string): Promise<HomeAppearanc
     homeWidgetSettings: row?.homeWidgetSettings,
     homeLayoutRevision: row?.homeLayoutRevision
   })
+
+  // Launcher V8 自愈：历史版本可能把临时空页/旧 revision 留在 IndexedDB。
+  // 读取时已经会归一化；这里把归一化结果回写一次，避免下一次启动继续携带幽灵页。
+  if (row) {
+    const storedPages = Array.isArray(row.homeLayoutPages) ? row.homeLayoutPages : []
+    const storedRevision = Number(row.homeLayoutRevision || 0)
+    const pagesChanged = JSON.stringify(storedPages) !== JSON.stringify(normalized.homeLayoutPages)
+    if (pagesChanged || storedRevision !== HOME_LAYOUT_REVISION) {
+      await saveHomeAppearance(worldId, normalized)
+    }
+  }
+
+  return normalized
 }
 
 export async function saveHomeAppearance(worldId: string, value: HomeAppearancePreferences) {
@@ -900,9 +942,12 @@ export function normalizeHomeAppearance(value: HomeAppearanceInput): HomeAppeara
   const legacyPages = normalizeHomePageKeys(value.homePageKeys, requestedHomeAppKeys, homeWidgetKeys.length > 0)
   const rawLayoutPages = normalizeLayoutPages(value.homeLayoutPages, requestedHomeAppKeys, homeWidgetKeys, legacyPages)
   const storedRevision = Number.isFinite(value.homeLayoutRevision) ? Number(value.homeLayoutRevision) : 0
-  const homeLayoutPages = storedRevision < HOME_LAYOUT_REVISION
+  const migratedPages = storedRevision < HOME_LAYOUT_REVISION
     ? migrateLegacyWidgetSizes(rawLayoutPages)
     : rawLayoutPages
+  // 无论来自旧数据、迁移结果还是当前写入，都必须经过最终空页压缩。
+  // 这样中间空页、尾部空页和历史临时页都不可能进入稳定 HomeLayout。
+  const homeLayoutPages = compactLayoutPages(migratedPages)
   const homeAppKeys = homeLayoutPages.flatMap(page => page.items
     .filter((item): item is HomeLayoutAppItem => item.type === 'app')
     .map(item => item.key))

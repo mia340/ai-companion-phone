@@ -23,6 +23,7 @@ import {
   moveHomeAppPlacement,
   moveHomeLayoutItemToGrid,
   resizeHomeWidgetInGrid,
+  removeHomeLayoutPages,
   resolveDockApps,
   saveHomeAppearance,
   updateHomeWidgetSettings,
@@ -107,10 +108,11 @@ let dragPreviewAnimationToken = 0
 let socialBadgeSubscription: { unsubscribe: () => void } | undefined
 let musicStateSubscription: { unsubscribe: () => void } | undefined
 let minuteTimer: number | undefined
+let repairingRenderedPages = false
 let longPressStartX = 0
 let longPressStartY = 0
 
-const renderedAppearance = computed(() => dragPreviewAppearance.value ?? appearance.value)
+const renderedAppearance = computed(() => draggingId.value && dragPreviewAppearance.value ? dragPreviewAppearance.value : appearance.value)
 const actualPages = computed(() => renderedAppearance.value.homeLayoutPages)
 const launcherPages = computed<HomeLayoutPage[]>(() => {
   // 临时空白页只服务于“正在编辑并拖拽到最后一页右边缘”的那一瞬间。
@@ -138,6 +140,14 @@ watch(() => actualPages.value.length, () => {
   transientBlankPage.value = false
   clampCurrentPageToPersistedLayout()
 })
+
+watch(
+  () => appearance.value.homeLayoutPages.map(page => page.items.map(item => item.id).join(',')).join('|'),
+  () => {
+    if (!draggingId.value && !editMode.value) void repairRenderedEmptyPages()
+  },
+  { flush: 'post' }
+)
 
 watch([editMode, draggingId], ([editing, dragging]) => {
   if (editing && dragging) return
@@ -291,6 +301,7 @@ async function loadHomeState() {
     savedIcons.filter(item => item.iconDataUrl).map(item => [item.appKey, item.iconDataUrl as string])
   )
   appearance.value = savedAppearance
+  void repairRenderedEmptyPages()
 
   const latest = [...conversations]
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
@@ -339,6 +350,42 @@ function openWidget(key: HomeWidgetKey) {
 
 async function persistAppearance(next: HomeAppearancePreferences) {
   appearance.value = await saveHomeAppearance(worldId.value, next)
+}
+
+async function repairRenderedEmptyPages() {
+  if (repairingRenderedPages || editMode.value || draggingId.value || dragPreviewAppearance.value) return
+  await nextTick()
+  const viewport = pageViewport.value
+  if (!viewport) return
+
+  const pageElements = Array.from(viewport.querySelectorAll<HTMLElement>('.hm-page:not(.is-transient)'))
+  const emptyIndexes = appearance.value.homeLayoutPages
+    .map((page, index) => {
+      if (page.items.length === 0) return index
+      const pageElement = pageElements[index]
+      if (!pageElement) return -1
+      const renderedItems = Array.from(pageElement.querySelectorAll<HTMLElement>('[data-launcher-item]'))
+      const hasVisibleItem = renderedItems.some(element => {
+        const style = window.getComputedStyle(element)
+        const rect = element.getBoundingClientRect()
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0.01 && rect.width > 1 && rect.height > 1
+      })
+      return hasVisibleItem ? -1 : index
+    })
+    .filter(index => index >= 0)
+
+  if (!emptyIndexes.length) return
+  repairingRenderedPages = true
+  try {
+    appearance.value = await saveHomeAppearance(
+      worldId.value,
+      removeHomeLayoutPages(appearance.value, emptyIndexes)
+    )
+    transientBlankPage.value = false
+    clampCurrentPageToPersistedLayout()
+  } finally {
+    repairingRenderedPages = false
+  }
 }
 
 async function removeHomeApp(key: HomeAppKey) {
@@ -777,31 +824,35 @@ async function finishHomePointer(event?: PointerEvent, commit = true) {
   const pointer = launcherPointer
   if (!pointer) return
 
-  if (pointer.active && commit) {
-    if (dropTargetKind.value === 'home' && dropTargetPage.value >= 0 && dropTargetX.value >= 0 && dropTargetY.value >= 0) {
-      await persistAppearance(dragPreviewAppearance.value ?? moveHomeLayoutItemToGrid(
-        appearance.value,
-        pointer.itemType === 'app'
-          ? { type: 'app', key: pointer.key as HomeAppKey }
-          : { type: 'widget', key: pointer.key as HomeWidgetKey },
-        dropTargetPage.value,
-        dropTargetX.value,
-        dropTargetY.value
-      ))
-      suppressAppClickUntil = performance.now() + 320
-    } else if (dropTargetKind.value === 'dock' && pointer.itemType === 'app') {
-      await persistAppearance(moveHomeAppPlacement(
-        appearance.value,
-        pointer.key as HomeAppKey,
-        'dock',
-        dropTargetKey.value || undefined
-      ))
-      suppressAppClickUntil = performance.now() + 320
+  try {
+    if (pointer.active && commit) {
+      if (dropTargetKind.value === 'home' && dropTargetPage.value >= 0 && dropTargetX.value >= 0 && dropTargetY.value >= 0) {
+        await persistAppearance(dragPreviewAppearance.value ?? moveHomeLayoutItemToGrid(
+          appearance.value,
+          pointer.itemType === 'app'
+            ? { type: 'app', key: pointer.key as HomeAppKey }
+            : { type: 'widget', key: pointer.key as HomeWidgetKey },
+          dropTargetPage.value,
+          dropTargetX.value,
+          dropTargetY.value
+        ))
+        suppressAppClickUntil = performance.now() + 320
+      } else if (dropTargetKind.value === 'dock' && pointer.itemType === 'app') {
+        await persistAppearance(moveHomeAppPlacement(
+          appearance.value,
+          pointer.key as HomeAppKey,
+          'dock',
+          dropTargetKey.value || undefined
+        ))
+        suppressAppClickUntil = performance.now() + 320
+      }
     }
+  } finally {
+    // 即便 IndexedDB 写入或布局校验异常，也必须销毁拖拽预览和临时页。
+    // 否则 dragPreviewAppearance 会继续盖住真实 appearance，表现成“第二页永远删不掉”。
+    resetLauncherPointer()
+    if (event) event.preventDefault()
   }
-
-  resetLauncherPointer()
-  if (event) event.preventDefault()
 }
 
 function goToPage(index: number) {

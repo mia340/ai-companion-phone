@@ -671,3 +671,14 @@ Windows 首轮 `npm run verify` 显示 41 个测试文件 / 329 个测试均先�
 - 临时空页现在要求 `editMode && draggingId && transientBlankPage` 同时成立才渲染。
 - 监听持久页数量变化并在非拖拽态夹紧 `currentPage`，覆盖移 Dock、隐藏 App、删除 Widget 等所有清空页入口。
 - 新增回归：第二页只有一个 App，将其插回第一页后 `homeLayoutPages.length === 1`。
+
+
+## 2026-09-18 · alpha.5.1.15 Ghost Page Self-Heal
+
+实机反馈显示：第三个临时页可正常创建/回收，但第二页仍可能成为无内容的持久“幽灵页”。本轮将问题从单一 `items.length === 0` 扩展为完整的 Launcher 生命周期修复：
+
+1. drag preview 只在实际 dragging 时渲染；
+2. pointer finish 使用 try/finally 无条件清理 preview/transient state；
+3. HomeLayout Revision 8 在 load 时压缩历史空页并回写；
+4. UI 在非编辑/非拖拽状态下检查稳定页面是否真正渲染 Launcher item，无可见项目则触发持久自愈；
+5. 显式删除 ghost page 时同步重算 App/Widget 清单，防止 normalize 将幽灵项目再次补回。

@@ -1,10 +1,10 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.14**
+当前版本：**V0.5.0-alpha.5.1.15**
 
 ```text
-App：0.5.0-alpha.5.1.14
+App：0.5.0-alpha.5.1.15
 IndexedDB：V18
 Backup：V12
 测试定义：41 files / 334 it-test declarations
@@ -12,11 +12,14 @@ Backup：V12
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
-## 0. 本轮 alpha.5.1.14 重点
+## 0. 本轮 alpha.5.1.15 重点
 
-- 修复 Launcher 临时空白页在拖拽结束后仍可能被展示为稳定页面的问题：临时页现在只在“编辑态 + 正在拖拽”期间可见。
-- 持久布局页数减少时统一夹紧 `currentPage`；移到 Dock、隐藏 App、删除 Widget 或跨页拖拽清空页面后，页码圆点与当前页立即收敛。
-- 新增“后一页最后一个 App 移走后只剩 1 页”的回归测试。
+- 修复“第二页幽灵空页”顽固残留：拖拽预览只在 `draggingId` 有效时参与渲染，避免过期 `dragPreviewAppearance` 覆盖真实桌面。
+- `finishHomePointer()` 改为 `try/finally`，即使 IndexedDB 写入或布局校验异常，也会无条件清理拖拽 ghost / preview / transient page。
+- `HomeLayout Revision` 提升到 8；读取旧布局时自动压缩中间/尾部空页并回写自愈结果。
+- 增加 DOM 级兜底修复：稳定桌面页如果最终没有任何可见 Launcher Item，会被认定为 ghost page 并从持久布局中移除。
+- 新增 `removeHomeLayoutPages()`，删除幽灵页时同步重算 `homeAppKeys/homeWidgetKeys`，避免被 normalize 再次补回。
+- 测试定义：41 文件 / 336 声明（最终以 Windows `npm run verify` 输出为准）。
 
 ## 0.1 alpha.5.1.13 重点
 
