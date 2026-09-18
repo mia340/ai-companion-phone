@@ -53,6 +53,7 @@ describe('知间桌面入口与布局', () => {
     expect(normalized.iconScale).toBe(1.12)
     expect(normalized.showAppLabels).toBe(false)
     expect(normalized.homeAppKeys).toEqual(['music', 'turtle-soup'])
+    expect(normalized.homePageKeys).toEqual([['music', 'turtle-soup'], []])
     expect(normalized.dockAppKeys).toEqual(['banxin', 'world', 'settings', 'new-character'])
     expect(normalized.homeWidgetKeys).toEqual(['greeting', 'music'])
     expect(normalized.widgetStyle).toBe('clear')
@@ -63,8 +64,8 @@ describe('知间桌面入口与布局', () => {
       'music', 'turtle-soup', 'profile', 'memory', 'backup', 'world', 'settings', 'banxin',
       'new-character'
     ], true)).toEqual([
-      ['music', 'turtle-soup', 'profile', 'memory', 'backup', 'world', 'settings', 'banxin'],
-      ['new-character']
+      ['music', 'turtle-soup', 'profile', 'memory'],
+      ['backup', 'world', 'settings', 'banxin', 'new-character']
     ])
 
     const current = normalizeHomeAppearance({
@@ -78,6 +79,23 @@ describe('知间桌面入口与布局', () => {
     const moved = moveHomeAppPlacement(current, 'music', 'dock', 'world')
     expect(moved.dockAppKeys).toEqual(['banxin', 'new-character', 'music', 'settings'])
     expect(moved.homeAppKeys).toEqual(['world', 'turtle-soup', 'profile'])
+  })
+
+  it('拖到第二页后会真正保留页归属，而不是重新挤回第一页', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'turtle-soup', 'profile', 'memory', 'backup'],
+      homePageKeys: [['music', 'turtle-soup', 'profile', 'memory'], ['backup']],
+      dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
+      homeWidgetKeys: ['greeting'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+    const moved = moveHomeAppPlacement(current, 'music', 'home', undefined, 1)
+    expect(moved.homePageKeys).toEqual([
+      ['turtle-soup', 'profile', 'memory'],
+      ['backup', 'music']
+    ])
   })
 
 })

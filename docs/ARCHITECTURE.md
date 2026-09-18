@@ -1,10 +1,22 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.5.1.8**。
+> 当前文档版本：**V0.5.0-alpha.5.1.9**。
 > V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V18 / Backup V12（朋友圈、角色社交权限、主屏幕与空间设置均纳入现有备份范围）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
 
+
+## V0.5.0-alpha.5.1.9 Launcher V3：持久分页而非临时切片
+
+```text
+HomeAppearancePreferences
+  ├─ homeAppKeys[]       # 兼容 / 成员集合
+  ├─ homePageKeys[][]    # 真正页面归属与顺序
+  ├─ dockAppKeys[]       # 固定 Dock，最多 4
+  └─ homeWidgetKeys[]
+```
+
+主屏自身拥有横向分页，但不拥有纵向页面滚动。`PhoneFrame lockScroll` 关闭外层 `.phone-content` scroll layer，Home Page 作为固定画布；编辑菜单只覆盖，不改变 Widget / App 的原坐标。跨页拖拽把目标 page index 传入纯函数 `moveHomeAppPlacement()`，持久化后仍留在目标页。旧版本只有 `homeAppKeys[]` 时由 normalizer 自动迁移，无需 IndexedDB schema 升级。
 
 ## V0.5.0-alpha.5.1.8 Launcher / Character Asset Security / Retrieval
 

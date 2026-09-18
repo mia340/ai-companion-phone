@@ -16,6 +16,8 @@ const props = defineProps<{
   showBack?: boolean
   /** 状态栏文字深浅：锁屏等深色壁纸页用 'light'。 */
   statusTone?: 'dark' | 'light'
+  /** 主屏幕这类 OS Surface 自己管理分页，不允许外层再生成滚动层。 */
+  lockScroll?: boolean
 }>()
 
 const slots = useSlots()
@@ -110,7 +112,7 @@ onUnmounted(() => {
         <span class="header-right-slot"><slot name="header-right" /></span>
       </div>
 
-      <div class="phone-content">
+      <div class="phone-content" :class="{ 'phone-content--locked': props.lockScroll }">
         <slot />
       </div>
 
@@ -158,7 +160,13 @@ onUnmounted(() => {
 .companion-tab-icon{position:relative;width:26px;height:26px;display:block}
 .companion-tab-icon svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .companion-badge{position:absolute;top:-5px;right:-12px;border-radius:10px;background:#ee4d54;color:#fff;min-width:16px;height:16px;padding:0 3px;font:10px/16px sans-serif;border:1px solid #fff}
-.phone-content::-webkit-scrollbar {
+.phone-content--locked {
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+}
+.phone-content::-webkit-scrollbar,
+.phone-content--locked::-webkit-scrollbar {
   width: 0;
   height: 0;
   display: none;

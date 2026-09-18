@@ -1,3 +1,13 @@
+## 2026-09-18 · V0.5.0-alpha.5.1.9｜Launcher 真机反馈第二轮
+
+- 用户真机截图确认 alpha.5.1.8 仍有四个明确问题：左侧竖白线仍出现、编辑态整体下沉、只有逻辑分页但实际无法形成可用分页、音乐 App 图标与指定的小组件单音符不一致。
+- 白线不再只靠 `::-webkit-scrollbar` 隐藏：主屏给 `PhoneFrame` 新增 `lockScroll`，外层 `.phone-content` 完全禁止滚动；每个 Home Page 也改为固定画布，不再创建纵向 scroll layer。
+- 编辑菜单改为真正 overlay，删除 `.is-editing .hm-page-content{padding-top:226px}`，保证进入整理态不改变原布局坐标。
+- 新增 `homePageKeys` 持久页模型；旧的一维 `homeAppKeys` 自动迁移成两页，不升级 Dexie。拖到第二页、边缘翻页后的归属会保存。
+- 页面编辑器增加新增 / 删除 / 跳转页面；删除页面只合并入口，不删除任何角色、聊天、记忆或 App 数据。
+- 音乐图标改成单音符，并让音乐 Widget 直接复用同一 AppIcon。
+- 新增跨页拖拽回归测试；静态测试定义提升到 38 files / 316 declarations。
+
 ## 2026-09-18 · V0.5.0-alpha.5.1.8｜SullyOS 深度学习 + Runtime 吸收第一批
 
 - 用户要求不要只学糯米机 UI，而要系统学习角色卡、世界书、记忆、Prompt、后台行为、备份等全部可借鉴处理。

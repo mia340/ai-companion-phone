@@ -1,24 +1,24 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.8**
+当前版本：**V0.5.0-alpha.5.1.9**
 
 ```text
-App：0.5.0-alpha.5.1.8
+App：0.5.0-alpha.5.1.9
 IndexedDB：V18
 Backup：V12
-测试定义：38 files / 315 it-test declarations
+测试定义：38 files / 316 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
-## 0. 本轮 alpha.5.1.8 重点
+## 0. 本轮 alpha.5.1.9 重点
 
-- **Launcher Runtime V2**：主屏升级为横向多页；长按 App 可直接进入整理态并拖拽，支持桌面内排序、桌面与 Dock 双向移动、Dock 满 4 格交换、边缘停留跨页。桌面层隐藏浏览器滚动条，修复左下角竖向白线伪影。
-- **Character Card Security Boundary**：角色卡导入与导出都递归剥离凭据、发送者 UI 偏好和本地运行时残留；原始社区文件仍由 Resource Archive 独立保留，安全工作模型与原始取证不冲突。
-- **WorldBook compatibility**：新增 SullyOS-shaped entry 回归，覆盖 `keysecondary / selectiveLogic / sourceUid / scanDepth / matchWholeWords` 等字段；禁用条目保持禁用，未知扩展继续 round-trip。
-- **Memory Retrieval V2 第一批**：`confidence` 与 capped `hitCount` feedback 正式参与检索评分；冲突惩罚仍高于热门记忆加权。
-- 深度研究记录：`research/SULLYOS_DEEP_STUDY_2026-09-18.md`。
+- **Launcher Runtime V3**：主屏外层和单页纵向 scroll layer 都被锁定，针对真机截图中的左侧竖白线做第二轮根因修正；底部横向 Home Indicator 保留。
+- **编辑态坐标稳定**：编辑菜单作为 overlay，不再用 226px padding 把 Widget / App / Dock 整体向下推。
+- **持久分页**：新增 `homePageKeys[][]`，旧 `homeAppKeys[]` 自动迁移；至少两页，跨页拖拽后目标页归属可持久化，页面编辑器可新增 / 删除页面。
+- **音乐视觉统一**：桌面音乐 App 改成用户指定的单音符图标，「一起听」Widget 直接复用同一 AppIcon。
+- alpha.5.1.8 的 Character Card Security Boundary、WorldBook compatibility 与 Memory Retrieval V2 继续保留。
 
 ## 1. 当前产品结构
 

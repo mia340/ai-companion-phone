@@ -55,9 +55,8 @@ const props = withDefaults(defineProps<{
         <path d="M38 11v13l-4-2.8-4 2.8V11" fill="var(--icon-a)" opacity=".8"/>
       </g>
       <g v-else-if="props.icon === 'music'">
-        <path d="M39 14v27.5c0 6-4.4 10.5-10.2 10.5-4.8 0-8.3-2.7-8.3-6.7 0-4.4 4.1-7.3 9-7.3 2.2 0 4.3.5 6 1.5V18l17-4v24" fill="none" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="27" cy="45" r="6" fill="white"/>
-        <circle cx="46" cy="40" r="6" fill="rgba(255,255,255,.8)"/>
+        <path d="M37.5 12.5v28.7c0 6.5-4.5 11.3-10.6 11.3-4.8 0-8.4-2.8-8.4-6.8 0-4.6 4.1-7.6 9.2-7.6 2 0 3.9.4 5.5 1.2V19.1l13.9-4.2v7.2l-9.6 2.9V12.5Z" fill="white"/>
+        <ellipse cx="26.8" cy="45.6" rx="8.4" ry="6.3" transform="rotate(-13 26.8 45.6)" fill="white"/>
       </g>
       <g v-else-if="props.icon === 'wallet'">
         <rect x="10" y="18" width="44" height="31" rx="8" fill="rgba(255,255,255,.94)"/>

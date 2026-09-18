@@ -1,3 +1,14 @@
+## V0.5.0-alpha.5.1.9 · Launcher V3 真机修正 / 持久分页 / 音乐图标统一
+
+- 主屏通过 `PhoneFrame lockScroll` 关闭外层纵向滚动，Launcher 页面自身也禁止纵向滚动并强制隐藏 scrollbar，针对用户截图中的左侧竖白线做根因级处理；底部横向 Home Indicator 保留。
+- 编辑态取消 `padding-top: 226px` 的让位逻辑；长按进入编辑后，Widget、App 与 Dock 保持原坐标，编辑菜单改为覆盖层，不再把整个桌面向下推。
+- Launcher 从“按数量临时切片”升级为持久 `homePageKeys: HomeAppKey[][]`：旧 `homeAppKeys` 自动迁移，两页起步，跨页拖拽后 App 会真正留在目标页。
+- 「编辑页面」新增页管理，可新增页面、切页和删除多余页；删除页面时 App 自动并回相邻页，不删除业务数据。
+- Dock 与桌面拖拽继续复用同一纯函数，并新增跨页归属回归测试。
+- 音乐 App 图标统一为用户指定的“小组件上方框选”的单音符样式；「一起听」Widget 直接复用同一个 `AppIcon`，不再出现双音符 / 单音符两套视觉。
+- IndexedDB 仍为 V18，Backup 仍为 V12；`homePageKeys` 复用 `appCustomizations` 非索引字段，无需 schema migration，也不要清站点数据。
+- 静态测试定义：**38 files / 316 it-test declarations**。完整 `npm run verify` 继续由 Windows / CI 作为发布硬门禁。
+
 ## V0.5.0-alpha.5.1.8 · Launcher Runtime V2 / Character Card 安全边界 / Memory Retrieval V2
 
 - 修复主桌面左下角出现的竖向白线：Launcher 收敛为横向分页滚动层，并隐藏桌面浏览器 scrollbar；Phone Shell 底部横向 Home Indicator 保留。
