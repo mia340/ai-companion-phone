@@ -1,6 +1,6 @@
 # AI Companion Phone 工程审查与 V0.5.0 重构路线图
 
-> **2026-09-18 当前快照**：App `0.5.0-alpha.5.1.10`，IndexedDB V18，Backup V12，源码定义 38 个测试文件 / 317 个 `it/test` 声明。alpha.5.1.10 将 Launcher 改为 pointer 手势 + transform 页轨道，取消固定两页和人工空白页，并自动清理空页；5.1.8~5.1.9 的 Character Card / WorldBook / Memory / Launcher 强化继续保留。
+> **2026-09-18 当前快照**：App `0.5.0-alpha.5.1.11`，IndexedDB V18，Backup V12，源码定义 38 个测试文件 / 319 个 `it/test` 声明。alpha.5.1.11 将 Launcher 升级为 4×6 Grid、手机内边缘翻页和 window 级 Pointer 收口，并定位/删除默认壁纸 blur 合成缝；5.1.8 起的 Character Card / WorldBook / Memory 强化继续保留。
 
 
 ## 0.0.5 V0.5.0-alpha.4.2 社区聊天兼容审查结论

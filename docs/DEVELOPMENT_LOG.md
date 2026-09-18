@@ -1,3 +1,11 @@
+## 2026-09-18 · alpha.5.1.11 Launcher Grid V5
+
+- 根据真机截图重新定位白线：截图中 2px 竖缝的纵向长度与底部 `.g2` blur 光斑可见裁切高度一致，确认是 compositor seam；移除三层独立 blur glow DOM。
+- 引入 4×6 `homeLayoutPages`，App/Widget 统一为带 x/y/w/h 的 Launcher Item。
+- 边缘翻页使用手机内容视口内侧热区；最后一页允许 transient blank page，落下内容后才持久化。
+- window 级 Pointer 收口，修复松手后继续跟随。
+- 纯函数手工执行验证了旧 5.1.10 数据迁移、Profile 回第一页、Profile 独占新页三条路径。
+
 ## 2026-09-18 · V0.5.0-alpha.5.1.10｜Launcher 真机反馈第三轮
 
 根据真机/浏览器截图继续修正：左侧竖白线在 5.1.9 仍存在，因此不再继续“隐藏 scrollbar”，而是删除产生原生滚动 UI 的技术路径。主屏改为 transform 页轨道，由 Pointer Events 同时支持触屏与鼠标拖动翻页。页数取消固定两页和手工创建空页，改为内容驱动；空页 normalize 时自动清理。桌面编辑页只负责 App/Dock 位置，不再承担页面实体管理。

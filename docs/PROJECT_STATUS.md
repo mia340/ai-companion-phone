@@ -1,24 +1,25 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.10**
+当前版本：**V0.5.0-alpha.5.1.11**
 
 ```text
-App：0.5.0-alpha.5.1.10
+App：0.5.0-alpha.5.1.11
 IndexedDB：V18
 Backup：V12
-测试定义：38 files / 317 it-test declarations
+测试定义：38 files / 319 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
-## 0. 本轮 alpha.5.1.10 重点
+## 0. 本轮 alpha.5.1.11 重点
 
-- **Launcher Runtime V4**：主屏不再依赖原生横向 scroll 容器，改用 pointer 手势 + transform 页轨道；手机/触屏与桌面鼠标都可左右拖动翻页，并从根源上移除原生滚动条/边缘白线来源。
-- **页数内容驱动**：取消“至少两页”和人工新增/删除空白页；至少 1 页，有内容溢出自动新增，某页 App 清空后自动收页。
-- **布局归属保留**：非空页仍保留玩家跨页拖拽后的归属，不会因为自动收空页把所有 App 强行挤回第一页。
-- **编辑页收敛**：长按桌面仍可进入编辑；“编辑页面”改为“编辑桌面”，只处理 App / Dock 显示位置，不再暴露新增空页按钮。
-- alpha.5.1.8/5.1.9 的 Character Card Security Boundary、WorldBook compatibility、Memory Retrieval V2、单音符音乐图标和编辑态坐标稳定继续保留。
+- **Launcher Grid V5**：主屏不再把 App 视为一维数组，而是 4×6 网格；App=1×1，Widget=2×2/4×2，页面可留白。
+- **页面归属真正持久**：`homeLayoutPages` 保存每个 Item 的 `x/y/w/h`；一个 App 可以单独待在一页，只要页面非空就不会被自动挤回前页。
+- **真机式边缘翻页**：拖动 App 到手机内部左右边缘即可换页；最后一页向右可临时打开新页，落下内容后才持久化；空页自动回收。
+- **Pointer 生命周期闭环**：window 级 `pointerup/pointercancel/blur` 统一结束 drag / swipe，修复松开鼠标后页面继续跟随。
+- **白线根因修复**：确认来源是默认壁纸底部 blur 光斑的 Chromium 合成裁切缝，而不是 scrollbar；独立 blur 光斑 DOM 已移除。
+- alpha.5.1.8 起的 Character Card Security Boundary、WorldBook compatibility、Memory Retrieval V2、SullyOS 深度研究继续保留。
 
 ## 1. 当前产品结构
 

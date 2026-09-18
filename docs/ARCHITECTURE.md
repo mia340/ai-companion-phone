@@ -1,10 +1,37 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.5.1.10**。
+> 当前文档版本：**V0.5.0-alpha.5.1.11**。
 > V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V18 / Backup V12（朋友圈、角色社交权限、主屏幕与空间设置均纳入现有备份范围）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
 
+
+## V0.5.0-alpha.5.1.11 Launcher Grid V5：页面是网格状态，不是数组切片
+
+主屏 Presentation State 继续存入 `appCustomizations` 非索引字段，但 canonical layout 已升级：
+
+```text
+HomeAppearance
+  ├─ homeLayoutPages[]
+  │    └─ items[]
+  │         ├─ app    { key, x, y, w:1, h:1 }
+  │         └─ widget { key, x, y, w, h }
+  ├─ dockAppKeys[]
+  ├─ wallpaper
+  └─ appearance
+
+Grid = 4 columns × 6 rows
+```
+
+`homePageKeys[][]` 仅作为旧版本兼容投影保留，不再决定真实页面坐标。旧数据加载时由 `normalizeHomeAppearance()` 转成 Grid；新版保存时同时写兼容投影。
+
+页面不是人工创建的空容器：正常情况下只持久化非空页。拖动 App 到最后一页右边缘时 Launcher 暂时渲染一个 transient blank page；只有 App 真正落入槽位后才写入 `homeLayoutPages`。因此既能让某个 App 独占一页，又不会积累无意义空页。
+
+分页和拖拽统一由 Pointer 状态机维护。页面边缘热区以 `pageViewport.getBoundingClientRect()` 为准，位于手机内容区内部；window 级 `pointerup/pointercancel/blur` 是 drag/swipe 的最终收口，防止指针离开局部 DOM 后出现 ghost 或页轨道“粘住”。
+
+Widget 与 App 共用同一网格。当前 App 为 1×1，小 Widget 为 2×2，宽 Widget 为 4×2；后续 resize、folder、Smart Stack 都应基于这一 Schema 扩展，而不是重新引入“Widget 顶部区 + App 列表”两套布局。
+
+白线问题最终确认不是浏览器 scrollbar，而是旧默认壁纸中独立 `filter: blur()` 光斑的合成裁切缝。Launcher V5 移除这些独立 filter layer，只保留单层背景渐变，避免 Chromium 在 OS-like 固定视口内出现 1~2px compositor seam。
 
 ## V0.5.0-alpha.5.1.10 Launcher V4：确定性手势分页与内容驱动页数
 

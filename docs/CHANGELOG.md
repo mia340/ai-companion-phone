@@ -1,3 +1,14 @@
+## V0.5.0-alpha.5.1.11 · Launcher Grid V5 / 真机边缘翻页 / Pointer 生命周期修复
+
+- 定位左侧竖白线真实来源：并非 scrollbar，而是默认壁纸底部独立 `filter: blur()` 光斑在 Chromium 合成层裁切边界形成的 2px 竖缝；移除该独立 blur DOM，改为单层背景渐变。
+- 主屏从“每页 App 数组 + Widget 顶部区”升级为 **4×6 Home Grid**；App 占 1×1，小组件占 2×2 / 4×2，可与 App 在同一网格混排。
+- 新增 `homeLayoutPages` 持久布局：每个 Item 保存 page 内 `x / y / w / h`，允许留白，也允许一个 App 单独待在一页，不再由容量算法强制挤页。
+- 新页面只通过拖拽自然产生：在最后一页把 App 拖到手机内容区右边缘会临时打开空页，真正落下后才保存；空页继续自动回收。
+- 边缘翻页热区改为手机内部左右约 10% 区域，不要求把指针拖出手机外框。
+- 拖拽与分页的 Pointer 生命周期改为 window 级收尾，补 `pointerup / pointercancel / blur`，修复松开鼠标后 ghost / 页面继续跟随的问题。
+- `我的资料` 与其他 App 统一走 Grid Item 移动路径；新增“单 App 独占新页”“非空页不被自动压回”等回归测试。
+- IndexedDB V18 / Backup V12 不变；测试定义更新为 **38 files / 319 cases**。
+
 ## V0.5.0-alpha.5.1.10 · Launcher V4 手势翻页 / 自动页数 / 白线根因修复
 
 - 横向分页从浏览器原生 scroll 容器切换为 pointer 手势 + transform 页轨道，避免原生 scrollbar / edge indicator 产生竖白线。

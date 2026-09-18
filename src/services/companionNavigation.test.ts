@@ -3,8 +3,11 @@ import {
   CUSTOMIZABLE_APPS,
   DOCK_APPS,
   HOME_APPS,
+  HOME_GRID_COLUMNS,
+  HOME_GRID_ROWS,
   normalizeHomeAppearance,
   moveHomeAppPlacement,
+  moveHomeAppToGrid,
   paginateHomeAppKeys
 } from './appCustomizationService'
 
@@ -53,21 +56,31 @@ describe('知间桌面入口与布局', () => {
     expect(normalized.iconScale).toBe(1.12)
     expect(normalized.showAppLabels).toBe(false)
     expect(normalized.homeAppKeys).toEqual(['music', 'turtle-soup'])
-    expect(normalized.homePageKeys).toEqual([['music', 'turtle-soup']])
     expect(normalized.dockAppKeys).toEqual(['banxin', 'world', 'settings', 'new-character'])
     expect(normalized.homeWidgetKeys).toEqual(['greeting', 'music'])
     expect(normalized.widgetStyle).toBe('clear')
+    expect(normalized.homeLayoutPages.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('按真实手机规则分页，并在 Dock 满位时支持拖拽交换', () => {
-    expect(paginateHomeAppKeys([
-      'music', 'turtle-soup', 'profile', 'memory', 'backup', 'world', 'settings', 'banxin',
-      'new-character'
-    ], true)).toEqual([
-      ['music', 'turtle-soup', 'profile', 'memory'],
-      ['backup', 'world', 'settings', 'banxin', 'new-character']
-    ])
+  it('Launcher Grid 固定为 4×6，Widget 与 App 共享同一网格', () => {
+    expect(HOME_GRID_COLUMNS).toBe(4)
+    expect(HOME_GRID_ROWS).toBe(6)
 
+    const normalized = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile'],
+      homeWidgetKeys: ['companion', 'world', 'music'],
+      dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+    const items = normalized.homeLayoutPages.flatMap(page => page.items)
+    expect(items.find(item => item.id === 'widget:music')).toMatchObject({ w: 4, h: 2 })
+    expect(items.find(item => item.id === 'widget:companion')).toMatchObject({ w: 2, h: 2 })
+    expect(items.find(item => item.id === 'app:music')).toMatchObject({ w: 1, h: 1 })
+  })
+
+  it('Dock 满位时支持拖拽交换', () => {
     const current = normalizeHomeAppearance({
       homeAppKeys: ['music', 'turtle-soup', 'profile'],
       dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
@@ -78,48 +91,50 @@ describe('知间桌面入口与布局', () => {
     })
     const moved = moveHomeAppPlacement(current, 'music', 'dock', 'world')
     expect(moved.dockAppKeys).toEqual(['banxin', 'new-character', 'music', 'settings'])
-    expect(moved.homeAppKeys).toEqual(['world', 'turtle-soup', 'profile'])
+    expect(moved.homeAppKeys).toContain('world')
   })
 
-  it('拖到第二页后会真正保留页归属，而不是重新挤回第一页', () => {
+  it('允许把一个 App 单独放到新页，并保留明确页归属', () => {
     const current = normalizeHomeAppearance({
-      homeAppKeys: ['music', 'turtle-soup', 'profile', 'memory', 'backup'],
-      homePageKeys: [['music', 'turtle-soup', 'profile', 'memory'], ['backup']],
+      homeAppKeys: ['music', 'turtle-soup', 'profile'],
+      homePageKeys: [['music', 'turtle-soup', 'profile']],
       dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
-      homeWidgetKeys: ['greeting'],
+      homeWidgetKeys: [],
       iconScale: 1,
       showAppLabels: true,
       widgetStyle: 'frosted'
     })
-    const moved = moveHomeAppPlacement(current, 'music', 'home', undefined, 1)
-    expect(moved.homePageKeys).toEqual([
-      ['turtle-soup', 'profile', 'memory'],
-      ['backup', 'music']
+    const moved = moveHomeAppToGrid(current, 'profile', 1, 0, 0)
+    expect(moved.homeLayoutPages).toHaveLength(2)
+    expect(moved.homeLayoutPages[1].items).toEqual([
+      expect.objectContaining({ type: 'app', key: 'profile', x: 0, y: 0 })
     ])
   })
 
-  it('页面只由内容产生：空页自动收掉，桌面至少保留一页', () => {
-    const collapsed = normalizeHomeAppearance({
+  it('页面只有在真正清空后才删除，不会把非空页自动挤回前一页', () => {
+    const normalized = normalizeHomeAppearance({
       homeAppKeys: ['music', 'backup'],
-      homePageKeys: [['music'], [], ['backup'], []],
-      dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
-      homeWidgetKeys: ['greeting'],
-      iconScale: 1,
-      showAppLabels: true,
-      widgetStyle: 'frosted'
-    })
-    expect(collapsed.homePageKeys).toEqual([['music'], ['backup']])
-
-    const empty = normalizeHomeAppearance({
-      homeAppKeys: [],
-      homePageKeys: [[], []],
+      homeLayoutPages: [
+        { items: [{ id: 'app:music', type: 'app', key: 'music', x: 0, y: 0, w: 1, h: 1 }] },
+        { items: [{ id: 'app:backup', type: 'app', key: 'backup', x: 3, y: 5, w: 1, h: 1 }] }
+      ],
       dockAppKeys: ['banxin'],
       homeWidgetKeys: [],
       iconScale: 1,
       showAppLabels: true,
       widgetStyle: 'frosted'
     })
-    expect(empty.homePageKeys).toEqual([[]])
+    expect(normalized.homeLayoutPages).toHaveLength(2)
+    expect(normalized.homeLayoutPages[1].items[0]).toMatchObject({ key: 'backup', x: 3, y: 5 })
   })
 
+  it('保留旧分页迁移函数，兼容历史备份', () => {
+    expect(paginateHomeAppKeys([
+      'music', 'turtle-soup', 'profile', 'memory', 'backup', 'world', 'settings', 'banxin',
+      'new-character'
+    ], true)).toEqual([
+      ['music', 'turtle-soup', 'profile', 'memory'],
+      ['backup', 'world', 'settings', 'banxin', 'new-character']
+    ])
+  })
 })
