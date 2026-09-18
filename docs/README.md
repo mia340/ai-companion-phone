@@ -1,13 +1,13 @@
 # AI Companion Phone 文档中心
 
-当前开发线：**V0.5.0-alpha.5.1.6**
+当前开发线：**V0.5.0-alpha.5.1.7**
 
 ```text
-应用：0.5.0-alpha.5.1.6
+应用：0.5.0-alpha.5.1.7
 IndexedDB：V18
 Backup：V12
 测试定义：37 个测试文件 / 308 个 it/test 声明
-当前 UI 主线：知间收敛 + 空间设置 + 六入口空间桌面
+当前 UI 主线：真实手机桌面 + 4 格 Dock + 玩家自定义 Widget / App 布局
 ```
 
 这里是项目 Markdown 文档的**唯一保管入口**。项目根目录不再散放逐版本说明；版本交付文档统一在 `docs/releases/`，同类项目研究统一在 `docs/research/`。
@@ -18,7 +18,7 @@ Backup：V12
 
 1. `START_HERE_小白启动指南.md`：第一次启动、Build、常见问题。
 2. `部署与更新.md`：长期通用的 Windows / Git / Build 流程。
-3. `releases/V0.5.0-alpha.5.1.6_部署与更新.md`：当前版本的专项验收步骤。
+3. `releases/V0.5.0-alpha.5.1.7_部署与更新.md`：当前版本的专项验收步骤。
 
 ### 当前开发单一事实源
 
@@ -35,6 +35,7 @@ Backup：V12
 - `research/REFERENCE_PROJECTS.md`：长期参考项目索引和学习原则。
 - `research/REFERENCE_STUDY_2026-09-13.md`：早一轮工程研究。
 - `research/REFERENCE_STUDY_SMALL_PHONES_2026-09-17.md`：本轮 20+ 小手机/辅助工具案例研究与可吸收机制。
+- `research/HOME_WIDGET_CUSTOMIZATION_STUDY_2026-09-18.md`：Apple / Widgetsmith / Color Widgets / ScreenKit 主屏与 Widget 自定义研究。
 - `COMMUNITY_PERSONA_COMPATIBILITY_AUDIT_2026-09-13.md`：社区 Persona 兼容专项审计。
 
 ### 历史与发布
@@ -73,7 +74,8 @@ docs/
 ├─ research/
 │  ├─ REFERENCE_PROJECTS.md
 │  ├─ REFERENCE_STUDY_2026-09-13.md
-│  └─ REFERENCE_STUDY_SMALL_PHONES_2026-09-17.md
+│  ├─ REFERENCE_STUDY_SMALL_PHONES_2026-09-17.md
+│  └─ HOME_WIDGET_CUSTOMIZATION_STUDY_2026-09-18.md
 └─ releases/
    ├─ V..._RELEASE_MANIFEST.md
    └─ V..._部署与更新.md

@@ -9,6 +9,11 @@ export interface AppCustomization {
   wallpaperDataUrl?: string
   iconScale?: number
   showAppLabels?: boolean
+  /** 主屏幕布局也复用这个非结构化记录；这些字段不参与索引，因此无需升级 IndexedDB。 */
+  homeAppKeys?: string[]
+  dockAppKeys?: string[]
+  homeWidgetKeys?: string[]
+  widgetStyle?: 'clear' | 'frosted' | 'solid'
   /** 知间空间设置复用同一非结构化 store；字段不参与索引，因此无需数据库迁移。 */
   spaceVisibility?: 'public' | 'friends' | 'private'
   spaceBlacklistCharacterIds?: UUID[]

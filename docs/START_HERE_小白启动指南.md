@@ -1,6 +1,6 @@
 # 从这里开始
 
-当前开发线：**V0.5.0-alpha.5.1.6**。
+当前开发线：**V0.5.0-alpha.5.1.7**。
 
 如果你只是想把我给你的新源码更新到 Git 仓库，直接先看：`部署与更新.md`。
 
@@ -52,7 +52,7 @@ V0.5 当前重点是“Runtime 稳定 + 知间 UI 收敛”，不是继续无边
 - 空间桌面当前只保留 6 个核心入口，知间内部为「知间 / 通讯录 / 发现 / 我」；
 - 当前源码定义为 **37 个测试文件 / 308 个 it/test 声明**；完整是否全绿仍以 `npm run verify` 为准。
 
-项目全貌看 `PROJECT_STATUS.md`，架构边界看 `ARCHITECTURE.md`，当前版本专项验收看 `releases/V0.5.0-alpha.5.1.6_部署与更新.md`。
+项目全貌看 `PROJECT_STATUS.md`，架构边界看 `ARCHITECTURE.md`，当前版本专项验收看 `releases/V0.5.0-alpha.5.1.7_部署与更新.md`。
 
 ## Build
 

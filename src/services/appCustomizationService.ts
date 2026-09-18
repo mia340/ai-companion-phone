@@ -17,6 +17,9 @@ export type HomeAppKey =
   | 'settings'
   | 'new-character'
 
+export type HomeWidgetKey = 'greeting' | 'companion' | 'world' | 'music'
+export type HomeWidgetStyle = 'clear' | 'frosted' | 'solid'
+
 export interface HomeAppDefinition {
   key: HomeAppKey
   label: string
@@ -25,35 +28,109 @@ export interface HomeAppDefinition {
   tone: [string, string]
 }
 
+export interface HomeWidgetDefinition {
+  key: HomeWidgetKey
+  label: string
+  description: string
+  size: 'small' | 'medium'
+}
+
 export interface HomeAppearancePreferences {
   wallpaperDataUrl?: string
   iconScale: number
   showAppLabels: boolean
+  homeAppKeys: HomeAppKey[]
+  dockAppKeys: HomeAppKey[]
+  homeWidgetKeys: HomeWidgetKey[]
+  widgetStyle: HomeWidgetStyle
 }
 
-export const DEFAULT_HOME_APPEARANCE: HomeAppearancePreferences = {
-  iconScale: 1,
-  showAppLabels: true
+/**
+ * 宽松的存储输入。IndexedDB 中旧版本记录使用 string[]，因此加载时先接收 unknown，
+ * 再统一经过 normalizeHomeAppearance 白名单收窄，避免旧数据与新联合类型直接冲突。
+ */
+type HomeAppearanceInput = {
+  wallpaperDataUrl?: unknown
+  iconScale?: unknown
+  showAppLabels?: unknown
+  homeAppKeys?: unknown
+  dockAppKeys?: unknown
+  homeWidgetKeys?: unknown
+  widgetStyle?: unknown
 }
 
-const APPEARANCE_APP_KEY = '__home-appearance__'
-
-export const HOME_APPS: HomeAppDefinition[] = [
+const APP_CATALOG: readonly HomeAppDefinition[] = [
   { key: 'banxin', label: '知间', route: '/companion', icon: 'banxin', tone: ['#16b874', '#62d6a4'] },
+  { key: 'music', label: '音乐', route: '/app/音乐', icon: 'music', tone: ['#8f9cde', '#b9c4ef'] },
+  { key: 'turtle-soup', label: '海龟汤', route: '/app/海龟汤', icon: 'turtle-soup', tone: ['#75bcc4', '#a8d8d3'] },
   { key: 'profile', label: '我的资料', route: '/profile', icon: 'profile', tone: ['#9aa6df', '#c5cdf0'] },
   { key: 'memory', label: '记忆', route: '/memory', icon: 'memory', tone: ['#a8a1dc', '#d0c9ee'] },
   { key: 'world', label: '世界', route: '/world', icon: 'world', tone: ['#7eafd6', '#b6d5ea'] },
   { key: 'backup', label: '数据备份', route: '/backup', icon: 'backup', tone: ['#9caebb', '#c8d3dc'] },
-  { key: 'settings', label: '设置', route: '/settings', icon: 'settings', tone: ['#a7b4c3', '#d1d9e2'] }
+  { key: 'settings', label: '设置', route: '/settings', icon: 'settings', tone: ['#a7b4c3', '#d1d9e2'] },
+  { key: 'new-character', label: '新建角色', route: '/characters/new', icon: 'new-character', tone: ['#8ebce8', '#bddcf4'] }
 ]
 
-/** 当前空间桌面不再使用 Dock；保留导出避免旧调用与历史数据升级时出现断点。 */
-export const DOCK_APPS: HomeAppDefinition[] = []
+export const HOME_APPS: HomeAppDefinition[] = pickApps([
+  'music',
+  'turtle-soup',
+  'profile',
+  'memory',
+  'backup'
+])
 
-/** 旧入口不再显示在桌面，继续保留其自定义图标及历史路由数据。 */
-export const CUSTOMIZABLE_APPS: HomeAppDefinition[] = Array.from(
-  new Map([...HOME_APPS, ...DOCK_APPS].map(app => [app.key, app])).values()
-)
+export const DOCK_APPS: HomeAppDefinition[] = pickApps([
+  'banxin',
+  'new-character',
+  'world',
+  'settings'
+])
+
+export const WIDGET_CATALOG: readonly HomeWidgetDefinition[] = [
+  { key: 'greeting', label: '今天', description: '时间、日期与一句轻量问候', size: 'medium' },
+  { key: 'companion', label: '最近的人', description: '快速回到最近互动的角色', size: 'small' },
+  { key: 'world', label: '世界状态', description: '查看当前世界与事件状态', size: 'small' },
+  { key: 'music', label: '一起听', description: '快速进入音乐陪伴', size: 'medium' }
+]
+
+export const DEFAULT_HOME_APPEARANCE: HomeAppearancePreferences = {
+  iconScale: 1,
+  showAppLabels: true,
+  homeAppKeys: HOME_APPS.map(app => app.key),
+  dockAppKeys: DOCK_APPS.map(app => app.key),
+  homeWidgetKeys: ['greeting'],
+  widgetStyle: 'frosted'
+}
+
+const APPEARANCE_APP_KEY = '__home-appearance__'
+const VALID_APP_KEYS = new Set(APP_CATALOG.map(app => app.key))
+const VALID_WIDGET_KEYS = new Set(WIDGET_CATALOG.map(widget => widget.key))
+
+/** 所有能出现在主屏幕或 Dock 中、也允许玩家替换图标的 App。 */
+export const CUSTOMIZABLE_APPS: HomeAppDefinition[] = [...APP_CATALOG]
+
+export function getHomeAppDefinition(key: HomeAppKey) {
+  return APP_CATALOG.find(app => app.key === key)
+}
+
+export function resolveHomeApps(preferences: HomeAppearancePreferences) {
+  return preferences.homeAppKeys
+    .map(key => getHomeAppDefinition(key))
+    .filter((item): item is HomeAppDefinition => Boolean(item))
+}
+
+export function resolveDockApps(preferences: HomeAppearancePreferences) {
+  return preferences.dockAppKeys
+    .map(key => getHomeAppDefinition(key))
+    .filter((item): item is HomeAppDefinition => Boolean(item))
+    .slice(0, 4)
+}
+
+function pickApps(keys: HomeAppKey[]) {
+  return keys
+    .map(key => APP_CATALOG.find(app => app.key === key))
+    .filter((item): item is HomeAppDefinition => Boolean(item))
+}
 
 function customizationId(worldId: string, appKey: string) {
   return `${worldId}:${appKey}`
@@ -82,25 +159,34 @@ export async function resetAppIcon(worldId: string, appKey: HomeAppKey) {
 
 export async function loadHomeAppearance(worldId: string): Promise<HomeAppearancePreferences> {
   const row = await db.appCustomizations.get(customizationId(worldId, APPEARANCE_APP_KEY))
-  return {
+  return normalizeHomeAppearance({
     wallpaperDataUrl: row?.wallpaperDataUrl,
-    iconScale: clampIconScale(row?.iconScale),
-    showAppLabels: row?.showAppLabels !== false
-  }
+    iconScale: row?.iconScale,
+    showAppLabels: row?.showAppLabels,
+    homeAppKeys: row?.homeAppKeys,
+    dockAppKeys: row?.dockAppKeys,
+    homeWidgetKeys: row?.homeWidgetKeys,
+    widgetStyle: row?.widgetStyle
+  })
 }
 
 export async function saveHomeAppearance(worldId: string, value: HomeAppearancePreferences) {
+  const normalized = normalizeHomeAppearance(value)
   const row: AppCustomization = {
     id: customizationId(worldId, APPEARANCE_APP_KEY),
     worldId,
     appKey: APPEARANCE_APP_KEY,
-    wallpaperDataUrl: value.wallpaperDataUrl,
-    iconScale: clampIconScale(value.iconScale),
-    showAppLabels: value.showAppLabels,
+    wallpaperDataUrl: normalized.wallpaperDataUrl,
+    iconScale: normalized.iconScale,
+    showAppLabels: normalized.showAppLabels,
+    homeAppKeys: normalized.homeAppKeys,
+    dockAppKeys: normalized.dockAppKeys,
+    homeWidgetKeys: normalized.homeWidgetKeys,
+    widgetStyle: normalized.widgetStyle,
     updatedAt: new Date().toISOString()
   }
   await db.appCustomizations.put(row)
-  return row
+  return normalized
 }
 
 export async function resetHomeWallpaper(worldId: string) {
@@ -108,7 +194,47 @@ export async function resetHomeWallpaper(worldId: string) {
   await saveHomeAppearance(worldId, { ...current, wallpaperDataUrl: undefined })
 }
 
-function clampIconScale(value?: number) {
+export function normalizeHomeAppearance(value: HomeAppearanceInput): HomeAppearancePreferences {
+  return {
+    wallpaperDataUrl: typeof value.wallpaperDataUrl === 'string' && value.wallpaperDataUrl ? value.wallpaperDataUrl : undefined,
+    iconScale: clampIconScale(value.iconScale),
+    showAppLabels: value.showAppLabels !== false,
+    homeAppKeys: normalizeAppKeys(value.homeAppKeys, DEFAULT_HOME_APPEARANCE.homeAppKeys),
+    dockAppKeys: normalizeAppKeys(value.dockAppKeys, DEFAULT_HOME_APPEARANCE.dockAppKeys).slice(0, 4),
+    homeWidgetKeys: normalizeWidgetKeys(value.homeWidgetKeys, DEFAULT_HOME_APPEARANCE.homeWidgetKeys),
+    widgetStyle: value.widgetStyle === 'clear' || value.widgetStyle === 'solid' ? value.widgetStyle : 'frosted'
+  }
+}
+
+function normalizeAppKeys(value: unknown, fallback: HomeAppKey[]) {
+  if (!Array.isArray(value)) return [...fallback]
+  const seen = new Set<HomeAppKey>()
+  const result: HomeAppKey[] = []
+  for (const raw of value) {
+    if (typeof raw !== 'string' || !VALID_APP_KEYS.has(raw as HomeAppKey)) continue
+    const key = raw as HomeAppKey
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(key)
+  }
+  return result
+}
+
+function normalizeWidgetKeys(value: unknown, fallback: HomeWidgetKey[]) {
+  if (!Array.isArray(value)) return [...fallback]
+  const seen = new Set<HomeWidgetKey>()
+  const result: HomeWidgetKey[] = []
+  for (const raw of value) {
+    if (typeof raw !== 'string' || !VALID_WIDGET_KEYS.has(raw as HomeWidgetKey)) continue
+    const key = raw as HomeWidgetKey
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(key)
+  }
+  return result
+}
+
+function clampIconScale(value?: unknown) {
   if (!Number.isFinite(value)) return DEFAULT_HOME_APPEARANCE.iconScale
   return Math.max(0.88, Math.min(1.12, Number(value)))
 }
@@ -131,10 +257,7 @@ function loadImage(dataUrl: string) {
   })
 }
 
-/**
- * Prepare a player-uploaded icon for IndexedDB. The source is center-cropped
- * into a 512px square and encoded as WebP to keep the home screen light.
- */
+/** 将玩家上传的图标中心裁切并压缩后存进 IndexedDB。 */
 export async function prepareAppIcon(file: File) {
   if (!file.type.startsWith('image/')) throw new Error('请选择图片文件。')
   if (file.size > 8 * 1024 * 1024) throw new Error('图标图片不能超过 8 MB。')
@@ -173,10 +296,7 @@ export async function prepareAppIcon(file: File) {
   return readAsDataUrl(blob)
 }
 
-/**
- * Home wallpapers are resized before entering IndexedDB so a single photo does
- * not bloat backup files or make the simulated phone sluggish on mobile Safari.
- */
+/** 壁纸进入 IndexedDB 前先缩放，避免备份膨胀和移动端卡顿。 */
 export async function prepareHomeWallpaper(file: File) {
   if (!file.type.startsWith('image/')) throw new Error('请选择图片文件。')
   if (file.size > 16 * 1024 * 1024) throw new Error('壁纸图片不能超过 16 MB。')

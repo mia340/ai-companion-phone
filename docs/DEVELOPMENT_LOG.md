@@ -1,3 +1,13 @@
+## 2026-09-18 · V0.5.0-alpha.5.1.7｜主屏回归真实手机 / Widget 自定义
+
+- 用户指出 alpha.5.1.6 过度收敛：音乐、海龟汤和底部 Dock 从桌面消失，主屏更像功能面板而不是手机。
+- 对照用户真实 iPhone 主屏/编辑态截图，并补充研究 Apple Home Screen customization、Widgetsmith、Color Widgets、ScreenKit。共同点是：App 网格与 Dock 属于基础骨架；个性化通过壁纸、主题、Widget、图标与编辑态完成，而不是用常驻提示文案解释操作。
+- 恢复音乐、海龟汤与 4 格 Dock；移除“长按桌面空白处可调整壁纸与图标”提示。
+- 长按改为进入编辑态，提供“添加小组件 / 自定义 / 编辑墙纸 / 编辑页面 / 完成”，并增加图标轻微 jiggle / 移除入口。
+- 新增 `homeAppKeys / dockAppKeys / homeWidgetKeys / widgetStyle`，复用 `appCustomizations`，IndexedDB V18 / Backup V12 不变。
+- 「桌面与外观」升级为「桌面与小组件」，玩家可自行选择 App、Dock、Widget、壁纸和图标。
+- 当前容器缺少 npm 离线缓存中的 `zod@3.25.76`，无法完整安装依赖；已做 TypeScript script 语法检查，完整 `npm run verify` 留给 Windows / CI。
+
 ## 2026-09-16 · V0.5.0-alpha.5.1.3｜追踪 API 拒绝来源
 
 - 用户对照同一触发消息的两个渠道：OpenAI 兼容接口返回自述拒绝，DeepSeek 返回正常角色剧情。仅凭文本不能确认底层模型或网关责任。

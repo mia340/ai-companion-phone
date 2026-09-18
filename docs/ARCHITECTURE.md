@@ -1,9 +1,35 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.5.1.6**。
+> 当前文档版本：**V0.5.0-alpha.5.1.7**。
 > V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V18 / Backup V12（朋友圈、角色社交权限、主屏幕与空间设置均纳入现有备份范围）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
+
+
+## V0.5.0-alpha.5.1.7 Home Launcher / Widget Runtime
+
+主屏仍然只是 Launcher，但不再是固定六入口面板。桌面布局偏好属于本地 Presentation State，不属于角色或世界剧情状态。
+
+```text
+appCustomizations(__home-appearance__)
+  ├─ wallpaperDataUrl
+  ├─ iconScale / showAppLabels
+  ├─ homeAppKeys[]
+  ├─ dockAppKeys[]            # 最多 4 个
+  ├─ homeWidgetKeys[]
+  └─ widgetStyle              # clear / frosted / solid
+          ↓
+HomeScreen
+  ├─ 4-column App grid
+  ├─ configurable Widgets
+  ├─ 4-slot glass Dock
+  └─ long-press edit mode
+```
+
+- 布局字段不参与 Dexie 索引，因此继续使用 IndexedDB V18，不做 schema migration。
+- 隐藏 App 只删除 Launcher 入口，不删除路由、数据库记录或 Runtime。音乐、海龟汤因此可以自由从桌面移除/恢复，而不影响功能数据。
+- Widget 只读取可公开给 Launcher 的 glanceable state，并通过路由打开对应 App；它们不直接修改聊天/角色剧情状态。
+- 长按编辑态只修改 Presentation State。未来拖拽排序、照片 Widget、主题包可以继续沿用同一边界。
 
 ## V0.5.0-alpha.4.2 Community Chat Presentation
 

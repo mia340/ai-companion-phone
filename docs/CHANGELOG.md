@@ -1,3 +1,15 @@
+## V0.5.0-alpha.5.1.7 · 真实手机桌面 + Dock + 小组件自定义
+
+- 恢复主屏幕上的「音乐」与「海龟汤」入口；两者继续使用既有真实路由与 Runtime，不降级为占位页。
+- 恢复 4 格底部 Dock，默认放置「知间 / 新建角色 / 世界 / 设置」，Dock 不显示文字标签，更接近真实手机。
+- 主屏从三列“功能面板”改回四列 App 网格；移除“长按桌面空白处可调整壁纸与图标”说明文案。
+- 长按桌面空白处进入编辑态：提供「添加小组件 / 自定义 / 编辑墙纸 / 编辑页面 / 完成」，App 与 Dock 进入轻微抖动状态，可从桌面或 Dock 移除入口。
+- 新增可持久化主屏布局：桌面 App 列表、Dock App 列表、Widget 列表与 Widget 材质都写入现有 `appCustomizations`，无需升级 IndexedDB。
+- 新增 4 类原生感 Widget：今天、最近的人、世界状态、一起听；支持通透 / 毛玻璃 / 实色三种材质。
+- 「桌面与外观」升级为「桌面与小组件」：玩家可选择壁纸、小组件、桌面 App、Dock、图标图片、图标大小与名称显示。
+- Widget 设计参考 Apple Home Screen customization、Widgetsmith、Color Widgets、ScreenKit 的“模板 + 主题 + 玩家可编辑”思路；研究记录归档在 `docs/research/HOME_WIDGET_CUSTOMIZATION_STUDY_2026-09-18.md`。
+- IndexedDB V18 / Backup V12 不变；测试定义仍为 37 个测试文件，但导航测试新增布局归一化断言。完整 `npm run verify` 需 Windows/CI 执行。
+
 ## V0.5.0-alpha.5.1.3 · API 响应诊断（不增加恋爱剧情拦截）
 
 - 在 Prompt Debug 记录 HTTP 状态、finish_reason、上游结构化拒绝标记以及保守的回复文本拒绝线索；文本拒绝无法归因到模型或中转服务。
