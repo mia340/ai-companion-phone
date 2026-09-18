@@ -37,7 +37,9 @@ function open(app: HomeAppDefinition) {
       :key="app.key"
       class="hm-dock-slot"
       :class="{ 'is-dragging': props.draggingKey === app.key, 'is-drop-target': props.dropTargetKey === app.key }"
-      :data-launcher-item="app.key"
+      :data-launcher-item="`app:${app.key}`"
+      :data-launcher-key="app.key"
+      data-launcher-type="app"
       data-launcher-kind="dock"
     >
       <button class="hm-dock-item" type="button" :aria-label="app.label" @click="open(app)">

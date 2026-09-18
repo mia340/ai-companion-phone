@@ -100,7 +100,8 @@ function emptyLorebookResult(state?: ConversationState): Awaited<ReturnType<type
       cooldownBlocked: [],
       delayBlocked: [],
       groupDropped: [],
-      depthInjections: []
+      depthInjections: [],
+      decisions: []
     },
     resourceSession: { continued: false, exitRequested: false }
   }

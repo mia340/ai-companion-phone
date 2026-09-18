@@ -15,21 +15,28 @@ import {
   MAX_HOME_PAGES,
   WIDGET_CATALOG,
   addHomeWidgetToGrid,
+  applyHomeThemePreset,
   getHomeAppDefinition,
+  getWidgetGridSizes,
   listAppCustomizations,
   loadHomeAppearance,
   moveHomeAppPlacement,
-  moveHomeAppToGrid,
+  moveHomeLayoutItemToGrid,
+  resizeHomeWidgetInGrid,
   resolveDockApps,
   saveHomeAppearance,
+  updateHomeWidgetSettings,
   type HomeAppDefinition,
   type HomeAppKey,
   type HomeAppearancePreferences,
   type HomeLayoutItem,
   type HomeLayoutPage,
   type HomePlacement,
+  type HomeThemePreset,
   type HomeWidgetKey
 } from '../services/appCustomizationService'
+import { parseHomeLayoutBackup, serializeHomeLayoutBackup } from '../services/homeLayoutBackup'
+import type { MusicState } from '../types/domain'
 
 const router = useRouter()
 
@@ -41,21 +48,28 @@ const worldStateLabel = ref('日常')
 const latestCharacterName = ref('')
 const latestCharacterAvatar = ref('🌍')
 const latestConversationId = ref('')
+const musicState = ref<MusicState>()
 const customIcons = ref<Record<string, string>>({})
 const appearance = ref<HomeAppearancePreferences>(structuredClone(DEFAULT_HOME_APPEARANCE))
 const now = ref(new Date())
 const musicTones: [string, string] = ['#8f9cde', '#b9c4ef']
 
 const editMode = ref(false)
-const activeSheet = ref<'widgets' | 'page' | null>(null)
+const editMenuOpen = ref(false)
+const activeSheet = ref<'widgets' | 'pages' | 'apps' | 'widget' | 'theme' | 'layout-backup' | null>(null)
+const editingWidgetKey = ref<HomeWidgetKey | ''>('')
+const photoInput = ref<HTMLInputElement | null>(null)
+const layoutImportInput = ref<HTMLInputElement | null>(null)
+const layoutBackupMessage = ref('')
 const pageViewport = ref<HTMLElement | null>(null)
 const pageSwipeOffset = ref(0)
 const pageSwiping = ref(false)
 const currentPage = ref(0)
 const transientBlankPage = ref(false)
 
-const draggingKey = ref<HomeAppKey | ''>('')
+const draggingId = ref('')
 const dropTargetKey = ref<HomeAppKey | ''>('')
+const dropTargetItemId = ref('')
 const dropTargetKind = ref<HomePlacement | ''>('')
 const dropTargetPage = ref(-1)
 const dropTargetX = ref(-1)
@@ -72,7 +86,8 @@ let suppressAppClickUntil = 0
 
 type LauncherPointerState = {
   pointerId: number
-  key: HomeAppKey
+  itemType: 'app' | 'widget'
+  key: HomeAppKey | HomeWidgetKey
   kind: HomePlacement
   startX: number
   startY: number
@@ -87,6 +102,7 @@ let launcherPointer: LauncherPointerState | undefined
 let longPressTimer: number | undefined
 let pageTurnTimer: number | undefined
 let socialBadgeSubscription: { unsubscribe: () => void } | undefined
+let musicStateSubscription: { unsubscribe: () => void } | undefined
 let minuteTimer: number | undefined
 let longPressStartX = 0
 let longPressStartY = 0
@@ -99,9 +115,16 @@ const launcherPages = computed<HomeLayoutPage[]>(() => {
   return appearance.value.homeLayoutPages
 })
 const dockApps = computed(() => resolveDockApps(appearance.value).map(enrichApp))
+const draggingAppKey = computed(() => launcherPointer?.itemType === 'app' ? String(launcherPointer.key) : '')
 const availableWidgets = computed(() => WIDGET_CATALOG.filter(widget => !appearance.value.homeWidgetKeys.includes(widget.key)))
 const desktopAppSet = computed(() => new Set(appearance.value.homeAppKeys))
 const dockAppSet = computed(() => new Set(appearance.value.dockAppKeys))
+const HOME_THEME_PRESETS: HomeThemePreset[] = ['default', 'dark', 'clear', 'tinted']
+const editingWidgetDefinition = computed(() => editingWidgetKey.value ? widgetForKey(editingWidgetKey.value) : undefined)
+const editingWidgetSizes = computed(() => editingWidgetKey.value ? getWidgetGridSizes(editingWidgetKey.value) : [])
+const editingWidgetLayout = computed(() => editingWidgetKey.value ? appearance.value.homeLayoutPages
+  .flatMap(page => page.items)
+  .find(item => item.type === 'widget' && item.key === editingWidgetKey.value) : undefined)
 
 const homeIconSize = computed(() => Math.round(60 * appearance.value.iconScale))
 const dockIconSize = computed(() => Math.round(54 * appearance.value.iconScale))
@@ -124,6 +147,10 @@ const timeLine = computed(() => now.value.toLocaleTimeString('zh-CN', {
   minute: '2-digit',
   hour12: false
 }))
+
+const calendarDay = computed(() => String(now.value.getDate()).padStart(2, '0'))
+const calendarMonth = computed(() => `${now.value.getMonth() + 1}月`)
+const calendarWeekday = computed(() => now.value.toLocaleDateString('zh-CN', { weekday: 'short' }))
 
 const greeting = computed(() => {
   const hour = now.value.getHours()
@@ -219,13 +246,15 @@ async function loadHomeState() {
         : world.eventLevel || '日常'
   }
 
-  const [conversations, savedIcons, savedAppearance, unreadMomentNotifications] = await Promise.all([
+  const [conversations, savedIcons, savedAppearance, unreadMomentNotifications, musicStates] = await Promise.all([
     db.conversations.toArray(),
     listAppCustomizations(worldId.value),
     loadHomeAppearance(worldId.value),
-    db.socialNotifications.where('worldId').equals(worldId.value).filter(item => !item.read).count()
+    db.socialNotifications.where('worldId').equals(worldId.value).filter(item => !item.read).count(),
+    db.musicStates.toArray()
   ])
   momentsUnread.value = unreadMomentNotifications
+  musicState.value = [...musicStates].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0]
   chatUnread.value = conversations.reduce((sum, conversation) => sum + Number(conversation.unread || 0), 0)
   customIcons.value = Object.fromEntries(
     savedIcons.filter(item => item.iconDataUrl).map(item => [item.appKey, item.iconDataUrl as string])
@@ -259,7 +288,13 @@ function openApp(app: HomeAppDefinition) {
 }
 
 function openWidget(key: HomeWidgetKey) {
-  if (editMode.value) return
+  if (performance.now() < suppressAppClickUntil) return
+  if (editMode.value) {
+    editingWidgetKey.value = key
+    editMenuOpen.value = false
+    activeSheet.value = 'widget'
+    return
+  }
   if (key === 'companion') {
     void router.push(latestConversationId.value ? `/chat/${latestConversationId.value}` : '/chat')
     return
@@ -300,6 +335,65 @@ async function removeWidget(key: HomeWidgetKey) {
     ...appearance.value,
     homeWidgetKeys: appearance.value.homeWidgetKeys.filter(item => item !== key)
   })
+}
+
+
+
+async function chooseWidgetSize(key: HomeWidgetKey, w: number, h: number) {
+  await persistAppearance(resizeHomeWidgetInGrid(appearance.value, key, w, h))
+}
+
+async function applyThemePreset(preset: HomeThemePreset) {
+  await persistAppearance(applyHomeThemePreset(appearance.value, preset))
+}
+
+function requestPhoto() {
+  photoInput.value?.click()
+}
+
+async function handlePhotoSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !file.type.startsWith('image/')) return
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('读取照片失败'))
+    reader.readAsDataURL(file)
+  })
+  await persistAppearance(updateHomeWidgetSettings(appearance.value, 'photo', { imageDataUrl: dataUrl }))
+}
+
+function exportLayoutBackup() {
+  const text = serializeHomeLayoutBackup(appearance.value)
+  const blob = new Blob([text], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `zhijian-home-layout-${new Date().toISOString().slice(0, 10)}.json`
+  anchor.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 500)
+  layoutBackupMessage.value = '桌面布局已导出。'
+}
+
+function requestLayoutImport() {
+  layoutImportInput.value?.click()
+}
+
+async function handleLayoutImport(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    const next = parseHomeLayoutBackup(await file.text())
+    await persistAppearance(next)
+    currentPage.value = 0
+    layoutBackupMessage.value = '桌面布局已通过 Schema 校验并恢复。'
+  } catch (error) {
+    layoutBackupMessage.value = error instanceof Error ? error.message : '桌面布局导入失败。'
+  }
 }
 
 async function toggleDesktopApp(key: HomeAppKey) {
@@ -351,6 +445,7 @@ function removeLauncherGhost() {
 function clearDropTarget() {
   dropTargetKind.value = ''
   dropTargetKey.value = ''
+  dropTargetItemId.value = ''
   dropTargetPage.value = -1
   dropTargetX.value = -1
   dropTargetY.value = -1
@@ -361,7 +456,7 @@ function resetLauncherPointer() {
   clearPageTurn()
   removeLauncherGhost()
   launcherPointer = undefined
-  draggingKey.value = ''
+  draggingId.value = ''
   clearDropTarget()
   transientBlankPage.value = false
   if (currentPage.value >= actualPages.value.length) currentPage.value = Math.max(0, actualPages.value.length - 1)
@@ -406,17 +501,22 @@ function beginBlankLongPress(event: PointerEvent) {
   longPressTimer = window.setTimeout(() => {
     longPressTimer = undefined
     editMode.value = true
+    editMenuOpen.value = false
     activeSheet.value = null
   }, 520)
 }
 
 function beginLauncherItemPointer(event: PointerEvent, item: HTMLElement) {
-  const key = item.dataset.launcherItem as HomeAppKey | undefined
+  const rawKey = item.dataset.launcherKey || item.dataset.launcherItem
+  const itemType = (item.dataset.launcherType || 'app') as 'app' | 'widget'
   const kind = item.dataset.launcherKind as HomePlacement | undefined
-  if (!key || (kind !== 'home' && kind !== 'dock')) return
+  if (!rawKey || (itemType !== 'app' && itemType !== 'widget') || (kind !== 'home' && kind !== 'dock')) return
+  if (itemType === 'widget' && kind !== 'home') return
+  const key = rawKey as HomeAppKey | HomeWidgetKey
   cancelHomeLongPress()
   launcherPointer = {
     pointerId: event.pointerId,
+    itemType,
     key,
     kind,
     startX: event.clientX,
@@ -425,7 +525,7 @@ function beginLauncherItemPointer(event: PointerEvent, item: HTMLElement) {
     sourceElement: item
   }
   if (editMode.value) {
-    draggingKey.value = key
+    draggingId.value = `${itemType}:${key}`
     activateLauncherDrag(event)
     event.preventDefault()
     return
@@ -433,8 +533,9 @@ function beginLauncherItemPointer(event: PointerEvent, item: HTMLElement) {
   longPressTimer = window.setTimeout(() => {
     if (!launcherPointer || launcherPointer.pointerId !== event.pointerId) return
     launcherPointer.active = true
-    draggingKey.value = key
+    draggingId.value = `${itemType}:${key}`
     editMode.value = true
+    editMenuOpen.value = false
     activateLauncherDrag(event)
     activeSheet.value = null
   }, 520)
@@ -503,7 +604,7 @@ function updateDropTarget(event: PointerEvent) {
   const viewportRect = viewport.getBoundingClientRect()
   const edge = Math.max(38, Math.min(52, viewportRect.width * 0.11))
 
-  // 真机式边缘翻页：进入手机内容区域左右热区就开始计时，不需要把指针拖出手机。
+  // iPhone 式边缘翻页：热区就在手机桌面内部，不要求指针越过手机边框。
   if (event.clientX <= viewportRect.left + edge && canTurnPage(-1)) queuePageTurn(-1)
   else if (event.clientX >= viewportRect.right - edge && canTurnPage(1)) queuePageTurn(1)
   else clearPageTurn()
@@ -511,10 +612,11 @@ function updateDropTarget(event: PointerEvent) {
   const hit = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
   const dockItem = hit?.closest<HTMLElement>('[data-launcher-kind="dock"]')
   const dockZone = hit?.closest<HTMLElement>('[data-launcher-zone="dock"]')
-  if (dockItem || dockZone) {
+  if ((dockItem || dockZone) && launcherPointer.itemType === 'app') {
     dropTargetKind.value = 'dock'
-    const key = dockItem?.dataset.launcherItem as HomeAppKey | undefined
+    const key = (dockItem?.dataset.launcherKey || dockItem?.dataset.launcherItem) as HomeAppKey | undefined
     dropTargetKey.value = key && key !== launcherPointer.key ? key : ''
+    dropTargetItemId.value = key ? `app:${key}` : ''
     dropTargetPage.value = -1
     dropTargetX.value = -1
     dropTargetY.value = -1
@@ -539,18 +641,15 @@ function updateDropTarget(event: PointerEvent) {
   const x = Math.max(0, Math.min(HOME_GRID_COLUMNS - 1, Math.floor(relativeX / (rect.width / HOME_GRID_COLUMNS))))
   const y = Math.max(0, Math.min(HOME_GRID_ROWS - 1, Math.floor(relativeY / (rect.height / HOME_GRID_ROWS))))
   const occupant = itemAtCell(pageAt(pageIndex), x, y)
-
-  if (occupant?.type === 'widget') {
-    clearDropTarget()
-    return
-  }
-  if (occupant?.type === 'app' && occupant.key === launcherPointer.key && launcherPointer.kind === 'home') {
+  const selfId = `${launcherPointer.itemType}:${launcherPointer.key}`
+  if (occupant?.id === selfId && launcherPointer.kind === 'home') {
     clearDropTarget()
     return
   }
 
   dropTargetKind.value = 'home'
   dropTargetKey.value = occupant?.type === 'app' ? occupant.key : ''
+  dropTargetItemId.value = occupant?.id || ''
   dropTargetPage.value = pageIndex
   dropTargetX.value = x
   dropTargetY.value = y
@@ -588,18 +687,20 @@ async function finishHomePointer(event?: PointerEvent, commit = true) {
 
   if (pointer.active && commit) {
     if (dropTargetKind.value === 'home' && dropTargetPage.value >= 0 && dropTargetX.value >= 0 && dropTargetY.value >= 0) {
-      await persistAppearance(moveHomeAppToGrid(
+      await persistAppearance(moveHomeLayoutItemToGrid(
         appearance.value,
-        pointer.key,
+        pointer.itemType === 'app'
+          ? { type: 'app', key: pointer.key as HomeAppKey }
+          : { type: 'widget', key: pointer.key as HomeWidgetKey },
         dropTargetPage.value,
         dropTargetX.value,
         dropTargetY.value
       ))
       suppressAppClickUntil = performance.now() + 320
-    } else if (dropTargetKind.value === 'dock') {
+    } else if (dropTargetKind.value === 'dock' && pointer.itemType === 'app') {
       await persistAppearance(moveHomeAppPlacement(
         appearance.value,
-        pointer.key,
+        pointer.key as HomeAppKey,
         'dock',
         dropTargetKey.value || undefined
       ))
@@ -654,7 +755,9 @@ function movePageSwipe(event: PointerEvent) {
 
 function finishPageSwipe(event?: PointerEvent) {
   if (!pageSwipe || (event && pageSwipe.pointerId !== event.pointerId)) return
-  if (pageSwiping.value) {
+  const wasSwiping = pageSwiping.value
+  const tapDistance = Math.hypot(pageSwipe.lastX - pageSwipe.startX, (event?.clientY ?? pageSwipe.startY) - pageSwipe.startY)
+  if (wasSwiping) {
     const dx = pageSwipe.lastX - pageSwipe.startX
     const elapsed = Math.max(1, performance.now() - pageSwipe.startedAt)
     const velocity = dx / elapsed
@@ -667,6 +770,9 @@ function finishPageSwipe(event?: PointerEvent) {
   pageSwipeOffset.value = 0
   pageSwiping.value = false
   pageSwipe = undefined
+
+  // Face ID iPhone 的编辑态可以轻点主屏幕背景结束；这里也不再保留右上角大块“完成”。
+  if (!wasSwiping && editMode.value && tapDistance < 8 && !activeSheet.value) finishEditing()
 }
 
 function cancelPageSwipe() {
@@ -704,7 +810,9 @@ function finishEditing() {
   void finishHomePointer(undefined, false)
   cancelPageSwipe()
   editMode.value = false
+  editMenuOpen.value = false
   activeSheet.value = null
+  editingWidgetKey.value = ''
 }
 
 function openAppearance(section: 'customize' | 'wallpaper') {
@@ -720,6 +828,9 @@ onMounted(async () => {
   socialBadgeSubscription = liveQuery(() =>
     db.socialNotifications.where('worldId').equals(worldId.value).filter(item => !item.read).count()
   ).subscribe(count => { momentsUnread.value = count })
+  musicStateSubscription = liveQuery(() => db.musicStates.toArray()).subscribe(rows => {
+    musicState.value = [...rows].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0]
+  })
   minuteTimer = window.setInterval(() => { now.value = new Date() }, 30_000)
 
   window.addEventListener('pointermove', handlePointerMove, { capture: true, passive: false })
@@ -732,6 +843,7 @@ onUnmounted(() => {
   resetLauncherPointer()
   cancelPageSwipe()
   socialBadgeSubscription?.unsubscribe()
+  musicStateSubscription?.unsubscribe()
   if (minuteTimer !== undefined) window.clearInterval(minuteTimer)
   window.removeEventListener('pointermove', handlePointerMove, true)
   window.removeEventListener('pointerup', handlePointerUp, true)
@@ -742,26 +854,32 @@ onUnmounted(() => {
 
 <template>
   <PhoneFrame status-tone="dark" lock-scroll>
-    <section class="hm-root" :class="{ 'is-editing': editMode }">
+    <section class="hm-root" :class="[{ 'is-editing': editMode }, `theme-${appearance.themePreset}`]">
       <div class="hm-wall" :style="wallpaperStyle"></div>
 
       <div class="hm-main">
         <div v-if="editMode" class="hm-edit-toolbar">
-          <div class="hm-edit-menu">
-            <button type="button" @click="activeSheet = 'widgets'">
+          <button class="hm-edit-trigger" type="button" @click.stop="editMenuOpen = !editMenuOpen">编辑</button>
+          <div v-if="editMenuOpen" class="hm-edit-menu">
+            <button type="button" @click="activeSheet = 'widgets'; editMenuOpen = false">
               <span>▣＋</span><b>添加小组件</b>
             </button>
-            <button type="button" @click="openAppearance('customize')">
+            <button type="button" @click="activeSheet = 'theme'; editMenuOpen = false">
               <span>✣</span><b>自定义</b>
             </button>
             <button type="button" @click="openAppearance('wallpaper')">
               <span>❉</span><b>编辑墙纸</b>
             </button>
-            <button type="button" @click="activeSheet = 'page'">
-              <span>▦</span><b>编辑桌面</b>
+            <button type="button" @click="activeSheet = 'pages'; editMenuOpen = false">
+              <span>▦</span><b>编辑页面</b>
+            </button>
+            <button type="button" @click="activeSheet = 'apps'; editMenuOpen = false">
+              <span>▦</span><b>管理 App</b>
+            </button>
+            <button type="button" @click="activeSheet = 'layout-backup'; editMenuOpen = false; layoutBackupMessage = ''">
+              <span>⇩</span><b>布局备份</b>
             </button>
           </div>
-          <button class="hm-done" type="button" @click="finishEditing">完成</button>
         </div>
 
         <div ref="pageViewport" class="hm-pages" :class="{ 'is-swiping': pageSwiping }" @pointerdown.stop="startPagePointer">
@@ -774,7 +892,7 @@ onUnmounted(() => {
               :data-launcher-page="pageIndex"
             >
               <div class="hm-launcher-grid" data-launcher-zone="home" data-launcher-grid :data-launcher-page="pageIndex">
-                <template v-if="editMode || draggingKey">
+                <template v-if="editMode || draggingId">
                   <span
                     v-for="cell in HOME_GRID_COLUMNS * HOME_GRID_ROWS"
                     :key="`cell-${cell}`"
@@ -788,8 +906,20 @@ onUnmounted(() => {
                   <article
                     v-if="item.type === 'widget'"
                     class="hm-widget"
-                    :class="[`widget-${item.key}`, `style-${appearance.widgetStyle}`]"
+                    :class="[
+                      `widget-${item.key}`,
+                      `style-${appearance.widgetStyle}`,
+                      `size-${item.w}x${item.h}`,
+                      {
+                        'is-dragging': draggingId === `widget:${item.key}`,
+                        'is-drop-target': dropTargetKind === 'home' && dropTargetItemId === item.id
+                      }
+                    ]"
                     :style="layoutStyle(item)"
+                    :data-launcher-item="item.id"
+                    :data-launcher-key="item.key"
+                    data-launcher-type="widget"
+                    data-launcher-kind="home"
                     @click="openWidget(item.key)"
                   >
                     <button
@@ -827,14 +957,32 @@ onUnmounted(() => {
 
                     <template v-else-if="item.key === 'music'">
                       <div class="music-art">
-                        <AppIcon icon="music" :size="72" :tones="musicTones" />
+                        <AppIcon icon="music" :size="58" :tones="musicTones" />
                       </div>
                       <div class="music-copy">
-                        <small>一起听</small>
-                        <b>把声音留在这个世界里</b>
-                        <span>打开音乐陪伴</span>
+                        <small>{{ musicState?.isPlaying ? '正在播放' : '一起听' }}</small>
+                        <b>{{ musicState?.title || '把声音留在这个世界里' }}</b>
+                        <span>{{ musicState?.artist || '轻点打开音乐陪伴' }}</span>
                       </div>
-                      <span class="music-play">▶</span>
+                    </template>
+
+                    <template v-else-if="item.key === 'calendar'">
+                      <div class="calendar-badge">
+                        <small>{{ calendarMonth }}</small>
+                        <strong>{{ calendarDay }}</strong>
+                      </div>
+                      <div class="widget-copy calendar-copy">
+                        <small>日历</small>
+                        <b>{{ calendarWeekday }}</b>
+                        <span>{{ dateLine }}</span>
+                      </div>
+                    </template>
+
+                    <template v-else-if="item.key === 'photo'">
+                      <img v-if="appearance.homeWidgetSettings.photo?.imageDataUrl" class="photo-widget-image" :src="appearance.homeWidgetSettings.photo.imageDataUrl" alt="桌面照片" />
+                      <div v-else class="photo-widget-empty">
+                        <span>▧</span><b>添加照片</b><small>编辑小组件后选择图片</small>
+                      </div>
                     </template>
                   </article>
 
@@ -842,11 +990,13 @@ onUnmounted(() => {
                     v-else
                     class="hm-app-shell"
                     :class="{
-                      'is-dragging': draggingKey === item.key,
-                      'is-drop-target': dropTargetKind === 'home' && dropTargetKey === item.key
+                      'is-dragging': draggingId === `app:${item.key}`,
+                      'is-drop-target': dropTargetKind === 'home' && dropTargetItemId === item.id
                     }"
                     :style="layoutStyle(item)"
-                    :data-launcher-item="item.key"
+                    :data-launcher-item="item.id"
+                    :data-launcher-key="item.key"
+                    data-launcher-type="app"
                     data-launcher-kind="home"
                   >
                     <button class="hm-app" type="button" @click="openAppKey(item.key)">
@@ -882,7 +1032,7 @@ onUnmounted(() => {
             type="button"
             :class="{ active: currentPage === index }"
             :aria-label="`第 ${index + 1} 页`"
-            @click="index < actualPages.length && goToPage(index)"
+            @click="editMode ? (activeSheet = 'pages') : (index < actualPages.length && goToPage(index))"
           ></button>
         </div>
 
@@ -892,7 +1042,7 @@ onUnmounted(() => {
             :icon-size="dockIconSize"
             :show-labels="false"
             :editing="editMode"
-            :dragging-key="draggingKey"
+            :dragging-key="draggingAppKey"
             :drop-target-key="dropTargetKind === 'dock' ? dropTargetKey : ''"
             @remove="removeDockApp"
           />
@@ -903,8 +1053,8 @@ onUnmounted(() => {
         <section class="hm-sheet">
           <header>
             <div>
-              <small>{{ activeSheet === 'widgets' ? '小组件库' : '桌面布局' }}</small>
-              <h2>{{ activeSheet === 'widgets' ? '添加到当前主屏幕' : '选择显示位置' }}</h2>
+              <small>{{ activeSheet === 'widgets' ? '小组件库' : activeSheet === 'widget' ? '编辑小组件' : activeSheet === 'theme' ? '自定义' : activeSheet === 'layout-backup' ? '布局备份' : activeSheet === 'pages' ? '主屏幕页面' : '桌面 App' }}</small>
+              <h2>{{ activeSheet === 'widgets' ? '添加到当前主屏幕' : activeSheet === 'widget' ? (editingWidgetDefinition?.label || '小组件') : activeSheet === 'theme' ? '桌面外观' : activeSheet === 'layout-backup' ? '保存或恢复桌面' : activeSheet === 'pages' ? '选择页面' : '选择显示位置' }}</h2>
             </div>
             <button type="button" aria-label="关闭" @click="activeSheet = null">×</button>
           </header>
@@ -922,12 +1072,84 @@ onUnmounted(() => {
                 <b v-if="widget.key === 'greeting'">{{ timeLine }}</b>
                 <b v-else-if="widget.key === 'companion'">☺</b>
                 <b v-else-if="widget.key === 'world'">◎</b>
+                <b v-else-if="widget.key === 'calendar'">{{ calendarDay }}</b>
+                <b v-else-if="widget.key === 'photo'">▧</b>
                 <b v-else>♪</b>
               </span>
               <span><b>{{ widget.label }}</b><small>{{ widget.description }}</small></span>
               <em>{{ appearance.homeWidgetKeys.includes(widget.key) ? '已添加' : '＋' }}</em>
             </button>
             <p v-if="availableWidgets.length === 0" class="sheet-note">所有小组件都已经在主屏幕上了。</p>
+          </div>
+
+          <div v-else-if="activeSheet === 'widget' && editingWidgetKey" class="widget-editor">
+            <div class="widget-editor-block">
+              <h3>尺寸</h3>
+              <div class="widget-size-options">
+                <button
+                  v-for="size in editingWidgetSizes"
+                  :key="size.key"
+                  type="button"
+                  :class="{ active: editingWidgetLayout?.w === size.w && editingWidgetLayout?.h === size.h }"
+                  @click="editingWidgetKey && chooseWidgetSize(editingWidgetKey, size.w, size.h)"
+                >
+                  <span :style="{ aspectRatio: `${size.w}/${size.h}` }"></span>
+                  <b>{{ size.label }}</b>
+                </button>
+              </div>
+            </div>
+            <div v-if="editingWidgetKey === 'photo'" class="widget-editor-block">
+              <h3>照片</h3>
+              <button class="sheet-action" type="button" @click="requestPhoto">选择照片</button>
+              <button
+                v-if="appearance.homeWidgetSettings.photo?.imageDataUrl"
+                class="sheet-action secondary"
+                type="button"
+                @click="persistAppearance(updateHomeWidgetSettings(appearance, 'photo', { imageDataUrl: '' }))"
+              >移除照片</button>
+            </div>
+            <p class="sheet-note">小组件和 App 使用同一套 4×6 网格；长按后可以互相交换位置。</p>
+          </div>
+
+          <div v-else-if="activeSheet === 'theme'" class="theme-editor">
+            <button v-for="preset in HOME_THEME_PRESETS" :key="preset" type="button" :class="['theme-choice', `preset-${preset}`, { active: appearance.themePreset === preset }]" @click="applyThemePreset(preset)">
+              <span class="theme-preview"></span>
+              <b>{{ preset === 'default' ? '默认' : preset === 'dark' ? '深色' : preset === 'clear' ? '透明' : '色调' }}</b>
+            </button>
+            <p class="sheet-note">预设只改变桌面图标/小组件的显示氛围，不修改角色、聊天或世界数据。</p>
+          </div>
+
+          <div v-else-if="activeSheet === 'layout-backup'" class="layout-backup-editor">
+            <button class="sheet-action" type="button" @click="exportLayoutBackup">导出桌面布局 JSON</button>
+            <button class="sheet-action secondary" type="button" @click="requestLayoutImport">导入桌面布局 JSON</button>
+            <p class="sheet-note">导入前会先通过 HomeLayout Zod Schema 校验；失败不会写入 IndexedDB。</p>
+            <p v-if="layoutBackupMessage" class="backup-message">{{ layoutBackupMessage }}</p>
+          </div>
+
+          <div v-else-if="activeSheet === 'pages'" class="page-overview">
+            <button
+              v-for="(page, pageIndex) in actualPages"
+              :key="`overview-${pageIndex}`"
+              type="button"
+              class="page-thumbnail"
+              :class="{ active: currentPage === pageIndex }"
+              @click="goToPage(pageIndex); activeSheet = null"
+            >
+              <span class="page-mini-grid">
+                <i
+                  v-for="item in page.items"
+                  :key="item.id"
+                  :class="['page-mini-item', `type-${item.type}`]"
+                  :style="{
+                    gridColumn: `${item.x + 1} / span ${item.w}`,
+                    gridRow: `${item.y + 1} / span ${item.h}`
+                  }"
+                ></i>
+              </span>
+              <span class="page-thumbnail-meta"><b>第 {{ pageIndex + 1 }} 页</b><small>{{ page.items.length }} 个项目</small></span>
+              <em>{{ currentPage === pageIndex ? '✓' : '' }}</em>
+            </button>
+            <p class="sheet-note">页面由内容自然产生：把 App 或小组件拖到最后一页右侧边缘可创建新页；一页清空后会自动回收。</p>
           </div>
 
           <div v-else class="page-editor">
@@ -956,6 +1178,9 @@ onUnmounted(() => {
           </div>
         </section>
       </div>
+
+      <input ref="photoInput" class="hm-hidden-input" type="file" accept="image/*" @change="handlePhotoSelected" />
+      <input ref="layoutImportInput" class="hm-hidden-input" type="file" accept="application/json,.json" @change="handleLayoutImport" />
     </section>
   </PhoneFrame>
 </template>
@@ -973,23 +1198,26 @@ onUnmounted(() => {
 .hm-grid-cell{position:relative;z-index:0;border-radius:19px;pointer-events:none;transition:background .14s ease,box-shadow .14s ease}
 .is-editing .hm-grid-cell{background:rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,.11)}
 .hm-grid-cell.is-drop-cell{background:rgba(255,255,255,.35);box-shadow:inset 0 0 0 1.5px rgba(80,120,150,.35)}
-.hm-widget{position:relative;z-index:2;min-width:0;min-height:0;overflow:hidden;border:1px solid rgba(255,255,255,.52);border-radius:24px;box-shadow:0 12px 27px rgba(42,74,98,.12),inset 0 1px 0 rgba(255,255,255,.45);cursor:pointer}
+.hm-widget{position:relative;z-index:2;min-width:0;min-height:0;overflow:hidden;border:1px solid rgba(255,255,255,.52);border-radius:24px;box-shadow:0 12px 27px rgba(42,74,98,.12),inset 0 1px 0 rgba(255,255,255,.45);cursor:pointer;transition:transform .16s ease,opacity .16s ease,filter .16s ease}.hm-widget.is-dragging{opacity:.18;filter:saturate(.7)}.hm-widget.is-drop-target{transform:scale(.97);outline:1.5px dashed rgba(65,91,110,.34);outline-offset:2px}
 .hm-widget.style-frosted{background:rgba(247,251,254,.6);backdrop-filter:blur(24px) saturate(1.12);-webkit-backdrop-filter:blur(24px) saturate(1.12)}
 .hm-widget.style-clear{background:rgba(255,255,255,.22);backdrop-filter:blur(7px) saturate(1.08);-webkit-backdrop-filter:blur(7px) saturate(1.08)}
 .hm-widget.style-solid{background:#f8fbfd}
 .widget-greeting{position:absolute;left:18px;bottom:38px;font-size:27px;line-height:1;font-weight:760;letter-spacing:-.04em}.widget-date{position:absolute;left:18px;top:17px;color:#6d8292;font-size:11px}.widget-caption{position:absolute;left:18px;bottom:16px;color:#6f8494;font-size:10px}.widget-clock{position:absolute;right:17px;top:14px;font-size:27px;font-weight:620;letter-spacing:-.04em;color:#4c6679}
-.widget-companion,.widget-world{padding:14px;display:flex;flex-direction:column;justify-content:space-between}.widget-copy{display:grid;gap:2px;min-width:0}.widget-copy small,.music-copy small{color:#8396a5;font-size:9px}.widget-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.widget-copy span,.music-copy span{color:#7b8e9d;font-size:9px}.world-orb{display:grid;place-items:center;width:45px;height:45px;border-radius:15px;background:linear-gradient(145deg,#87b8dc,#c4def0);color:white;font-size:29px;box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}
-.widget-music{display:flex;align-items:center;gap:12px;padding:15px 16px}.music-art{display:grid;place-items:center;width:72px;height:72px;flex:0 0 auto}.music-copy{display:grid;gap:3px;min-width:0;flex:1}.music-copy b{font-size:14px;line-height:1.35}.music-play{display:grid;place-items:center;width:31px;height:31px;border-radius:50%;background:rgba(255,255,255,.8);color:#6f7fc4;font-size:12px}
+.widget-companion,.widget-world{padding:12px 13px;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px}.widget-companion.size-2x2,.widget-world.size-2x2{grid-template-columns:1fr;align-content:space-between;justify-items:start}.widget-copy{display:grid;gap:2px;min-width:0}.widget-copy small,.music-copy small{color:#8396a5;font-size:9px}.widget-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.widget-copy span,.music-copy span{color:#7b8e9d;font-size:9px}.world-orb{display:grid;place-items:center;width:44px;height:44px;border-radius:15px;background:linear-gradient(145deg,#87b8dc,#c4def0);color:white;font-size:27px;box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}
+.widget-music{display:flex;align-items:center;gap:11px;padding:11px 14px}.music-art{display:grid;place-items:center;width:58px;height:58px;flex:0 0 auto}.music-art :deep(.app-icon){transform:scale(.82)}.music-copy{display:grid;gap:3px;min-width:0;flex:1}.music-copy b{font-size:14px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hm-app-shell{position:relative;z-index:3;display:grid;place-items:center;min-width:0;min-height:0;transition:transform .16s ease,opacity .16s ease,filter .16s ease}.hm-app-shell.is-dragging{opacity:.18;filter:saturate(.7)}.hm-app-shell.is-drop-target{transform:scale(.92)}
 .hm-app{display:flex;min-width:0;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:0;border:0;background:transparent;cursor:pointer;color:inherit}.hm-tile-wrap{position:relative;display:grid;place-items:center}.hm-badge{position:absolute;z-index:3;right:-6px;top:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:11px;background:#ff4b57;color:#fff;font-size:10px;line-height:20px;text-align:center;font-weight:760;border:1.5px solid rgba(255,255,255,.92)}.hm-name{max-width:72px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#2e4659;white-space:nowrap;text-shadow:0 1px 8px rgba(255,255,255,.7)}
 .hm-drag-ghost{position:fixed!important;z-index:9999!important;margin:0!important;pointer-events:none!important;opacity:.94!important;transform:scale(1.06)!important;transform-origin:center!important;filter:drop-shadow(0 16px 18px rgba(32,50,65,.22));transition:none!important}.hm-drag-ghost .hm-app,.hm-drag-ghost .dock-app{animation:none!important}.launcher-source-dragging{opacity:.18!important}
 .hm-page-dots{display:flex;flex:0 0 auto;justify-content:center;gap:7px;padding:7px 0 9px}.hm-page-dots button{width:6px;height:6px;padding:0;border:0;border-radius:50%;background:rgba(63,81,95,.28)}.hm-page-dots button.active{background:rgba(42,62,78,.72)}
 .hm-dock-holder{flex:0 0 auto;padding:0 21px 10px}
-.hm-edit-toolbar{position:absolute;z-index:25;inset:8px 0 auto;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none}.hm-done{pointer-events:auto;margin-right:2px;padding:7px 15px;border:1px solid rgba(255,255,255,.55);border-radius:999px;background:rgba(248,250,252,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:#2d4050;font-size:13px;font-weight:700;box-shadow:0 7px 20px rgba(28,47,62,.12)}.hm-edit-menu{pointer-events:auto;width:225px;overflow:hidden;border:1px solid rgba(255,255,255,.54);border-radius:24px;background:rgba(248,247,246,.72);backdrop-filter:blur(28px) saturate(1.15);-webkit-backdrop-filter:blur(28px) saturate(1.15);box-shadow:0 18px 42px rgba(28,45,58,.18)}.hm-edit-menu button{width:100%;height:51px;padding:0 16px;border:0;border-bottom:1px solid rgba(73,84,93,.08);background:transparent;display:flex;align-items:center;gap:13px;text-align:left;color:#202a31}.hm-edit-menu button:last-child{border-bottom:0}.hm-edit-menu button span{width:26px;text-align:center;font-size:20px}.hm-edit-menu button b{font-size:14px;font-weight:620}
+.hm-edit-toolbar{position:absolute;z-index:25;left:10px;top:8px;pointer-events:none}.hm-edit-trigger{pointer-events:auto;padding:7px 14px;border:1px solid rgba(255,255,255,.54);border-radius:999px;background:rgba(248,247,246,.5);backdrop-filter:blur(22px) saturate(1.12);-webkit-backdrop-filter:blur(22px) saturate(1.12);color:#263b4c;font-size:13px;font-weight:700;box-shadow:0 7px 20px rgba(28,47,62,.1)}.hm-edit-menu{pointer-events:auto;width:225px;margin-top:7px;overflow:hidden;border:1px solid rgba(255,255,255,.54);border-radius:24px;background:rgba(248,247,246,.72);backdrop-filter:blur(28px) saturate(1.15);-webkit-backdrop-filter:blur(28px) saturate(1.15);box-shadow:0 18px 42px rgba(28,45,58,.18)}.hm-edit-menu button{width:100%;height:51px;padding:0 16px;border:0;border-bottom:1px solid rgba(73,84,93,.08);background:transparent;display:flex;align-items:center;gap:13px;text-align:left;color:#202a31}.hm-edit-menu button:last-child{border-bottom:0}.hm-edit-menu button span{width:26px;text-align:center;font-size:20px}.hm-edit-menu button b{font-size:14px;font-weight:620}
 .hm-remove{position:absolute;z-index:15;left:-7px;top:-7px;width:24px;height:24px;border:1px solid rgba(255,255,255,.72);border-radius:50%;background:rgba(119,127,135,.9);color:#fff;font-size:20px;line-height:20px;display:grid;place-items:center;box-shadow:0 3px 10px rgba(24,39,52,.2)}.hm-remove-app{left:2px;top:2px}.is-editing .hm-widget,.is-editing .hm-app{animation:home-jiggle .18s ease-in-out infinite alternate}.is-editing .hm-app-shell:nth-child(even) .hm-app,.is-editing .hm-widget:nth-child(even){animation-direction:alternate-reverse}
 .hm-sheet-backdrop{position:absolute;z-index:40;inset:0;display:flex;align-items:flex-end;background:rgba(24,35,43,.16);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}.hm-sheet{width:100%;max-height:68%;overflow:hidden;border-radius:28px 28px 0 0;background:#f7f9fb;box-shadow:0 -18px 48px rgba(24,45,61,.2)}.hm-sheet header{display:flex;align-items:center;justify-content:space-between;padding:17px 18px 13px;border-bottom:1px solid #e8edf1}.hm-sheet header small{color:#8798a5;font-size:9px}.hm-sheet header h2{margin:2px 0 0;font-size:20px;letter-spacing:-.02em}.hm-sheet header button{width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#536979;font-size:21px}
-.widget-catalog,.page-editor{max-height:430px;overflow:auto;padding:12px 14px 24px}.widget-choice{width:100%;min-height:72px;display:grid;grid-template-columns:62px 1fr auto;align-items:center;gap:12px;padding:9px 10px;border:0;border-bottom:1px solid #e9eef1;background:transparent;text-align:left;color:#304759}.widget-choice:disabled{opacity:.46}.widget-choice>span:nth-child(2){display:grid;gap:3px}.widget-choice>span:nth-child(2) b{font-size:13px}.widget-choice>span:nth-child(2) small{color:#8495a2;font-size:9px;line-height:1.4}.widget-choice em{font-style:normal;font-size:18px;color:#5d91b6}.widget-sample{display:grid;place-items:center;width:58px;height:50px;border-radius:15px;background:linear-gradient(145deg,#e8f2f8,#fff);box-shadow:inset 0 0 0 1px rgba(80,109,131,.07);color:#5e7b91}.sample-music{background:linear-gradient(145deg,#dfe2f7,#f7f8ff);color:#7783c8}
+.widget-catalog,.page-editor,.page-overview{max-height:430px;overflow:auto;padding:12px 14px 24px}.widget-choice{width:100%;min-height:72px;display:grid;grid-template-columns:62px 1fr auto;align-items:center;gap:12px;padding:9px 10px;border:0;border-bottom:1px solid #e9eef1;background:transparent;text-align:left;color:#304759}.widget-choice:disabled{opacity:.46}.widget-choice>span:nth-child(2){display:grid;gap:3px}.widget-choice>span:nth-child(2) b{font-size:13px}.widget-choice>span:nth-child(2) small{color:#8495a2;font-size:9px;line-height:1.4}.widget-choice em{font-style:normal;font-size:18px;color:#5d91b6}.widget-sample{display:grid;place-items:center;width:58px;height:50px;border-radius:15px;background:linear-gradient(145deg,#e8f2f8,#fff);box-shadow:inset 0 0 0 1px rgba(80,109,131,.07);color:#5e7b91}.sample-music{background:linear-gradient(145deg,#dfe2f7,#f7f8ff);color:#7783c8}
 .page-editor-head,.page-app-row{display:grid;grid-template-columns:1fr 58px 58px;align-items:center;gap:8px}.page-editor-head{padding:3px 5px 8px;color:#8c9aa5;font-size:9px;text-align:center}.page-editor-head span:first-child{text-align:left}.page-app-row{min-height:58px;border-top:1px solid #e9eef1}.page-app-name{display:flex;align-items:center;gap:9px;min-width:0}.page-app-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.place-toggle{justify-self:center;width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#7a8b97;font-size:15px}.place-toggle.on{background:#dff3ea;color:#159a63;font-weight:800}.place-toggle:disabled{opacity:.32}.sheet-note{margin:12px 4px 0;color:#8d9ba6;font-size:9px;line-height:1.55}
+.page-overview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.page-thumbnail{min-width:0;border:0;background:transparent;padding:0;color:#435c6e;display:grid;gap:8px;text-align:left}.page-mini-grid{aspect-ratio:4/6;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(6,1fr);gap:3px;padding:8px;border-radius:18px;background:linear-gradient(165deg,#edf7fd,#dcecf8);box-shadow:inset 0 0 0 1px rgba(76,106,128,.09),0 8px 18px rgba(35,56,70,.08)}.page-thumbnail.active .page-mini-grid{outline:3px solid rgba(62,158,120,.3);outline-offset:2px}.page-mini-item{display:block;border-radius:4px;background:linear-gradient(145deg,#9dbfe0,#d7e8f5)}.page-mini-item.type-widget{border-radius:6px;background:linear-gradient(145deg,#d9e9f4,#f7fbfd)}.page-thumbnail-meta{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:0 2px}.page-thumbnail-meta b{font-size:11px}.page-thumbnail-meta small{font-size:9px;color:#8a9aa6}.page-thumbnail em{position:absolute;opacity:0;pointer-events:none}
+
+.widget-calendar{padding:10px 12px;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px}.calendar-badge{width:44px;height:48px;border-radius:14px;background:rgba(255,255,255,.76);display:grid;place-items:center;align-content:center;box-shadow:inset 0 0 0 1px rgba(72,92,108,.08)}.calendar-badge small{font-size:9px;color:#ef625f}.calendar-badge strong{font-size:22px;line-height:1;color:#263c4e}.calendar-copy{align-content:center}.widget-photo{padding:0}.photo-widget-image{width:100%;height:100%;object-fit:cover;display:block}.photo-widget-empty{width:100%;height:100%;display:grid;place-items:center;align-content:center;gap:4px;color:#708798;background:linear-gradient(145deg,rgba(255,255,255,.55),rgba(219,235,247,.46))}.photo-widget-empty span{font-size:26px}.photo-widget-empty b{font-size:12px}.photo-widget-empty small{font-size:9px}.widget-editor,.theme-editor,.layout-backup-editor{max-height:430px;overflow:auto;padding:16px 16px 26px}.widget-editor-block+ .widget-editor-block{margin-top:18px}.widget-editor-block h3{margin:0 0 10px;font-size:13px;color:#40596c}.widget-size-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.widget-size-options button{min-width:0;padding:10px 8px 9px;border:1px solid #e0e8ee;border-radius:17px;background:#fff;color:#52697a;display:grid;gap:7px;justify-items:center}.widget-size-options button.active{border-color:#3baa7d;box-shadow:0 0 0 2px rgba(59,170,125,.12)}.widget-size-options button span{display:block;width:48px;max-height:45px;border-radius:10px;background:linear-gradient(145deg,#d7e8f4,#f8fbfd);box-shadow:inset 0 0 0 1px rgba(75,105,125,.08)}.widget-size-options button b{font-size:10px}.sheet-action{width:100%;min-height:45px;border:0;border-radius:15px;background:#dff2e9;color:#16855c;font-weight:700}.sheet-action.secondary{margin-top:9px;background:#e9eef2;color:#546b7c}.theme-editor{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.theme-choice{min-width:0;border:0;background:transparent;display:grid;justify-items:center;gap:8px;color:#617788}.theme-choice b{font-size:10px}.theme-preview{width:58px;height:58px;border-radius:17px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.55),0 8px 18px rgba(34,55,69,.12);background:linear-gradient(145deg,#88bce5,#eef7fd)}.preset-dark .theme-preview{background:linear-gradient(145deg,#27333d,#70808c)}.preset-clear .theme-preview{background:linear-gradient(145deg,rgba(255,255,255,.25),rgba(182,221,244,.3));backdrop-filter:blur(10px)}.preset-tinted .theme-preview{background:linear-gradient(145deg,#ceb4c7,#907f9d)}.theme-choice.active .theme-preview{outline:3px solid rgba(49,157,115,.28);outline-offset:2px}.theme-editor .sheet-note{grid-column:1/-1}.backup-message{margin:12px 4px 0;padding:10px 12px;border-radius:12px;background:#eef7f2;color:#3e6f59;font-size:10px}.hm-hidden-input{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}.theme-dark{color:#edf4f8}.theme-dark .hm-wall{filter:brightness(.58) saturate(.82)}.theme-dark .hm-name{color:#f4f7fa;text-shadow:0 1px 7px rgba(0,0,0,.38)}.theme-dark .hm-widget.style-solid{background:rgba(38,49,58,.86);color:#edf4f8}.theme-dark .hm-dock-holder :deep(.dock-bar){background:rgba(35,45,53,.58)}.theme-clear .hm-widget{background:rgba(255,255,255,.18)!important;backdrop-filter:blur(10px) saturate(1.08)!important;-webkit-backdrop-filter:blur(10px) saturate(1.08)!important}.theme-tinted .hm-widget{background:rgba(224,204,220,.58)!important}.theme-tinted .hm-app-shell :deep(.app-icon){filter:saturate(.72) sepia(.14) hue-rotate(285deg)}
 @keyframes home-jiggle{from{transform:rotate(-.65deg) translateY(0)}to{transform:rotate(.65deg) translateY(.4px)}}
 @media(max-width:360px){.hm-launcher-grid{padding-left:14px;padding-right:14px;column-gap:5px}.hm-dock-holder{padding-left:17px;padding-right:17px}.hm-name{font-size:10px}.hm-edit-menu{width:205px}}
 </style>

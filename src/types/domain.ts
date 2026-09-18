@@ -18,6 +18,12 @@ export interface AppCustomization {
   dockAppKeys?: string[]
   homeWidgetKeys?: string[]
   widgetStyle?: 'clear' | 'frosted' | 'solid'
+  homeThemePreset?: 'default' | 'dark' | 'clear' | 'tinted'
+  homeWidgetSettings?: {
+    photo?: { imageDataUrl?: string; caption?: string }
+    calendar?: { startWeekOnMonday?: boolean }
+  }
+  homeLayoutRevision?: number
   /** 知间空间设置复用同一非结构化 store；字段不参与索引，因此无需数据库迁移。 */
   spaceVisibility?: 'public' | 'friends' | 'private'
   spaceBlacklistCharacterIds?: UUID[]
@@ -699,6 +705,7 @@ export interface PromptDebugTrace {
     delayBlocked: string[]
     groupDropped: string[]
     depthInjections: Array<{ title: string; depth: number; role: 'system' | 'user' | 'assistant' }>
+    decisions?: Array<{ id: string; title: string; status: 'focused' | 'activated' | 'deferred' | 'not-triggered'; reason: string }>
   }
   /** Diagnostics from the API response; no raw headers, key, gateway text, or response body. */
   apiResponseDiagnostics?: {

@@ -1,3 +1,14 @@
+
+## V0.5.0-alpha.5.1.12 — 2026-09-18
+
+- **5.1.12 R2 build hotfix**：修复 Backup Zod envelope 经 `vue-tsc` 暴露的 transport/domain 数组类型边界；修正 Message 完整性测试夹具。运行时格式不变，仍为 IndexedDB V18 / Backup V12。
+
+- Launcher Grid V6：App/Widget 统一拖拽与交换，Widget 支持自由尺寸。
+- Widget 默认尺寸收窄；音乐 Widget 移除独立播放箭头。
+- 编辑态移除右上角大块完成控件，背景点击结束编辑。
+- 新增照片/日历 Widget、主题预设、HomeLayout 独立备份。
+- 新增 Character Card Import Report、Context Inspector、WorldBook Activation Inspector（逐条判定）、AgentAction capability runtime。
+- Backup V12 增加 Zod envelope preflight，并在清库前校验重复主键、会话/消息、Memory、WorldBook、ResourceBinding、朋友圈、Social Profile 等跨表引用。
 ## V0.5.0-alpha.5.1.11 · Launcher Grid V5 / 真机边缘翻页 / Pointer 生命周期修复
 
 - 定位左侧竖白线真实来源：并非 scrollbar，而是默认壁纸底部独立 `filter: blur()` 光斑在 Chromium 合成层裁切边界形成的 2px 竖缝；移除该独立 blur DOM，改为单层背景渐变。

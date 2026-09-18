@@ -34,6 +34,33 @@ interface CardPayload {
 
 export type ImportedCharacterLorebookEntry = Omit<LorebookEntry, 'id' | 'worldId' | 'lorebookId' | 'createdAt' | 'updatedAt'>
 
+export interface CharacterCardImportReport {
+  format: ImportedCharacterCard['format']
+  spec?: string
+  specVersion?: string
+  detectedFields: string[]
+  resources: {
+    lorebookEntries: number
+    regexScripts: number
+    assets: number
+    alternateGreetings: number
+    exampleDialogues: number
+  }
+  compatibility: {
+    embeddedUserPersona: boolean
+    userPlaceholder: boolean
+    depthPrompt: boolean
+    talkativeness: boolean
+    preservedUnknownFields: number
+  }
+  safety: {
+    strippedPaths: string[]
+    thirdPartyScriptDetected: boolean
+    scriptExecutionAllowed: false
+  }
+  warnings: string[]
+}
+
 export interface ImportedCharacterCard {
   format: 'sillytavern-v2' | 'sillytavern-v3' | 'legacy-json' | 'community-json' | 'png-character-card'
   patch: Partial<Character>
@@ -43,6 +70,7 @@ export interface ImportedCharacterCard {
   regexScripts: Array<Omit<RegexScript, 'id' | 'worldId' | 'createdAt' | 'updatedAt'>>
   embeddedUser?: ImportedPersonaPreview & { rawTemplate: string }
   notes: string[]
+  report: CharacterCardImportReport
   rawSourceJson?: string
 }
 
@@ -875,7 +903,38 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
   }
   if (asText(data.avatar ?? record.avatar) && !patch.avatar) notes.push('角色卡头像是外部相对路径；JSON 未携带图片文件，已保留原路径但不会显示成损坏头像。')
 
-  return { format, patch, lorebookEntries, lorebookName, lorebookResource, regexScripts, embeddedUser, notes, rawSourceJson: value }
+  const detectedFields = Object.entries(patch)
+    .filter(([, fieldValue]) => Array.isArray(fieldValue) ? fieldValue.length > 0 : fieldValue !== undefined && fieldValue !== '')
+    .map(([key]) => key)
+  const thirdPartyScriptDetected = Boolean(asRecord(extensions.tavern_helper).scripts || asRecord(rootExtensions.tavern_helper).scripts)
+  const report: CharacterCardImportReport = {
+    format,
+    spec: sourceSpec,
+    specVersion: sourceSpecVersion,
+    detectedFields,
+    resources: {
+      lorebookEntries: lorebookEntries.length,
+      regexScripts: regexScripts.length,
+      assets: Array.isArray(data.assets) ? data.assets.length : 0,
+      alternateGreetings: patch.alternateGreetings?.length || 0,
+      exampleDialogues: patch.exampleDialogues?.length || 0
+    },
+    compatibility: {
+      embeddedUserPersona: Boolean(embeddedUser),
+      userPlaceholder: hasUserPlaceholder,
+      depthPrompt: Boolean(depthPrompt),
+      talkativeness: talkativeness != null,
+      preservedUnknownFields: Object.keys(unknownData).length + Object.keys(rootMetadata).length
+    },
+    safety: {
+      strippedPaths: [...security.removedPaths],
+      thirdPartyScriptDetected,
+      scriptExecutionAllowed: false
+    },
+    warnings: [...notes]
+  }
+
+  return { format, patch, lorebookEntries, lorebookName, lorebookResource, regexScripts, embeddedUser, notes, report, rawSourceJson: value }
 }
 
 function decodeBase64Utf8(value: string) {
@@ -1004,7 +1063,16 @@ export async function parseCharacterCardFile(file: File) {
         '从 PNG 角色卡 metadata 读取到嵌入 JSON。',
         embeddedAvatar ? 'PNG 卡面已作为角色头像保存。' : '',
         ...parsed.notes
-      ].filter(Boolean)
+      ].filter(Boolean),
+      report: {
+        ...parsed.report,
+        format: 'png-character-card' as const,
+        warnings: [
+          '从 PNG 角色卡 metadata 读取到嵌入 JSON。',
+          embeddedAvatar ? 'PNG 卡面已作为角色头像保存。' : '',
+          ...parsed.report.warnings
+        ].filter(Boolean)
+      }
     }
   }
   throw new Error('请选择 JSON 或带角色卡 metadata 的 PNG 文件。')

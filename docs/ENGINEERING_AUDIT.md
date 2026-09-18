@@ -341,7 +341,7 @@ load runtime context
 - `provider.ts` 分离 SSE/error/model parsing；
 - Character Card adapters 渐进拆分；
 - Lorebook 主引擎补直接测试；
-- Backup Zod schema / referential integrity；
+- Backup Zod / referential integrity：alpha.5.1.12 已完成 envelope + 主要跨表引用 preflight；后续继续细化逐实体完整 schema、迁移回归与更大备份压力测试；
 - SafeRichHtml / Community interaction bridge 安全测试；
 - database migration tests。
 

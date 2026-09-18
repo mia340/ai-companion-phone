@@ -1,16 +1,25 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.11**
+当前版本：**V0.5.0-alpha.5.1.12**
 
 ```text
-App：0.5.0-alpha.5.1.11
+App：0.5.0-alpha.5.1.12
 IndexedDB：V18
 Backup：V12
-测试定义：38 files / 319 it-test declarations
+测试定义：41 files / 333 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+## 0. 本轮 alpha.5.1.12 重点
+
+- **Launcher Grid V6**：App 与 Widget 统一为可移动 Grid Item；App↔App 可交换，Widget 可拖动、跨页和改尺寸。
+- **Widget 尺寸回归真机比例**：最近的人/世界状态默认 2×1，音乐默认 4×1；旧大尺寸布局通过 layout revision 自动收窄。
+- **编辑态收敛**：移除右上角大块“完成”控件；轻点桌面背景即可结束编辑，左上“编辑”仅用于主动打开编辑菜单。
+- **音乐组件去冗余**：删除右侧独立播放箭头，整个组件作为入口，并继续读取真实 MusicState。
+- **Widget 能力扩展**：新增照片、日历组件与组件尺寸编辑；新增桌面主题预设和 HomeLayout 独立导入/导出。
+- **Runtime 深化**：Character Card 导入报告、Context/WorldBook Inspector、Capability-Gated AgentAction、Backup V12 Zod 预检与跨表引用完整性检查、HomeLayout Zod Schema 已进入实现；WorldBook Inspector 新增逐条激活判定轨迹。
 
 ## 0. 本轮 alpha.5.1.11 重点
 
@@ -29,7 +38,7 @@ Backup：V12
 
 - 四列 App 网格；默认显示音乐、海龟汤、我的资料、记忆、数据备份；
 - 四格 Dock；默认显示知间、新建角色、世界、设置；
-- 可选小组件：今天、最近的人、世界状态、一起听；
+- 可选小组件：今天、最近的人、世界状态、一起听、照片、日历；
 - 长按空白处进入编辑态，可添加小组件、自定义、编辑墙纸和编辑桌面；
 - 玩家可在「桌面与小组件」里选择桌面 App、Dock、Widget、壁纸、自定义图标、图标大小与 App 名称。
 

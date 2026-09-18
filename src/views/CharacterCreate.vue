@@ -978,6 +978,23 @@ async function save() {
           </div>
           <p>{{ importedCardFileName }}</p>
           <p>备用开场 {{ importedCard.patch.alternateGreetings?.length || 0 }} 条 · 示例对话 {{ importedCard.patch.exampleDialogues?.length || 0 }} 组 · 内嵌世界书 {{ importedCard.lorebookEntries.length }} 条 · 正则 {{ importedCard.regexScripts.length }} 条</p>
+          <details class="card-import-report" open>
+            <summary>Character Card 导入报告</summary>
+            <div class="import-report-grid">
+              <article><small>格式</small><b>{{ importedCard.report.format }}</b></article>
+              <article><small>规格</small><b>{{ importedCard.report.spec || '社区 / 旧版' }}{{ importedCard.report.specVersion ? ` · ${importedCard.report.specVersion}` : '' }}</b></article>
+              <article><small>识别字段</small><b>{{ importedCard.report.detectedFields.length }}</b></article>
+              <article><small>未知字段保留</small><b>{{ importedCard.report.compatibility.preservedUnknownFields }}</b></article>
+              <article><small>世界书</small><b>{{ importedCard.report.resources.lorebookEntries }} 条</b></article>
+              <article><small>Regex</small><b>{{ importedCard.report.resources.regexScripts }} 条</b></article>
+            </div>
+            <p><b>运行时：</b>{{ importedCard.report.compatibility.embeddedUserPersona ? '检测到独立 User Persona；' : '' }}{{ importedCard.report.compatibility.depthPrompt ? '含 depth_prompt；' : '' }}{{ importedCard.report.compatibility.talkativeness ? '含 talkativeness；' : '' }}未知社区字段会归档但不会擅自执行。</p>
+            <p><b>安全边界：</b>第三方脚本{{ importedCard.report.safety.thirdPartyScriptDetected ? '已检测到但禁止执行' : '未检测到' }}；已剥离 {{ importedCard.report.safety.strippedPaths.length }} 个凭据 / 本地 UI / 运行时字段。</p>
+            <details v-if="importedCard.report.safety.strippedPaths.length">
+              <summary>查看被剥离字段</summary>
+              <code v-for="path in importedCard.report.safety.strippedPaths" :key="path">{{ path }}</code>
+            </details>
+          </details>
           <div v-if="duplicateCharacterId" class="duplicate-card-hint">
             <b>检测到同一份原卡已经存在：{{ duplicateCharacterName }}</b>
             <span>如果只是想重开剧情，不需要再次导入；同一个角色现在可以新建多份独立聊天。</span>
@@ -1425,4 +1442,6 @@ async function save() {
 }
 .optional-fields{display:grid;gap:10px;padding:12px;border-radius:14px;background:rgba(255,255,255,.55);border:1px solid rgba(121,173,216,.16)}.optional-fields summary{cursor:pointer;color:#8c6071;font-weight:800}.optional-fields[open] summary{margin-bottom:8px}
 .duplicate-card-hint{display:grid;gap:7px;padding:11px 12px;border:1px solid #cfe3f5;border-radius:13px;background:#f1f8ff;color:#58718a}.duplicate-card-hint span{font-size:11px;line-height:1.55}.duplicate-card-hint button{justify-self:start;padding:7px 10px;border:0;border-radius:9px;background:#dceefa;color:#567b9e;font-weight:700}.duplicate-card-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.duplicate-card-actions button{justify-self:stretch}@media(max-width:390px){.duplicate-card-actions{grid-template-columns:1fr}}
+
+.card-import-report{margin-top:10px;border:1px solid rgba(90,124,149,.14);border-radius:14px;background:rgba(245,250,253,.82);padding:10px 11px}.card-import-report>summary{cursor:pointer;font-weight:800;color:#3d6078}.import-report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:9px}.import-report-grid article{display:grid;gap:2px;border-radius:10px;background:#fff;padding:8px 9px}.import-report-grid small{color:#8a9aa6;font-size:9px}.import-report-grid b{overflow:hidden;text-overflow:ellipsis;font-size:11px;white-space:nowrap}.card-import-report p{margin:8px 0 0;color:#60788a;font-size:10px;line-height:1.55}.card-import-report details details{margin-top:8px}.card-import-report code{display:block;margin-top:4px;border-radius:7px;background:#eef5f9;padding:5px 7px;color:#5e7484;font-size:9px;word-break:break-all}
 </style>

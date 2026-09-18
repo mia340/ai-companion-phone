@@ -647,3 +647,11 @@ Windows 完整 `npm run verify` 暴露出 alpha.5.0.1 的 `normalizePersonaNameT
 - 所有根目录逐版本 Markdown 移入 `docs/releases/`；参考项目文档移入 `docs/research/`；新增 2026-09-17 同类小手机研究文档。
 - 重写 `docs/README.md` 和 `PROJECT_STATUS.md`，当前事实更新为 App alpha.5.1.6 / IndexedDB V18 / Backup V12 / 37 tests files / 308 test declarations。
 - 当前容器 `npm test` 因 `vitest` 不存在无法执行；`npm ci` 尝试安装依赖超时。全局 `tsc --noEmit` 无报错；正式发布仍以 Windows/CI `npm run verify` 为门禁。
+
+
+## 2026-09-18 · alpha.5.1.12
+Launcher Grid V6 已将 App/Widget 统一为二维布局 Item，并推进 Character Card Import Report、WorldBook/Context Inspector、AgentAction capability boundary、Backup Zod preflight 与 HomeLayout Schema。WorldBook Inspector 已补逐条激活判定；Backup preflight 已扩到重复主键与主要跨表引用。
+### 2026-09-18 · alpha.5.1.12 R2 build hotfix
+
+Windows 首轮 `npm run verify` 显示 41 个测试文件 / 329 个测试均先通过，但 `vue-tsc` 在 Backup Zod 新代码处阻断构建：测试夹具缺少当前 `Message.worldId/status`，同时 Zod passthrough envelope 的窄 transport shape 被直接断言为完整 Domain 数组，触发 24 个 TS2352。R2 将此转换收口为单一 `asValidatedDomainRows<T>()` 边界，并保持真正的历史兼容迁移和 `assertBackupReferenceIntegrity()` 仍在破坏性 Dexie transaction 之前执行。没有数据库或 Backup 格式升级。
+

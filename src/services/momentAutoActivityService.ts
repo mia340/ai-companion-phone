@@ -6,6 +6,7 @@ import { listCharacterSharedMemories } from './memoryService'
 import { scheduleSocialForCharacterPost } from './socialRuntimeService'
 import { listCharacterSocialProfiles, profileAllows } from './socialPresenceService'
 import { loadCompanionSpaceSettings } from './companionSpaceSettings'
+import { executeAgentAction, type AgentActionKind } from './agentActionRuntime'
 import type { Character, MomentPost } from '../types/domain'
 
 export {
@@ -196,13 +197,29 @@ export async function runAutoActivityOnce(): Promise<AutoActivityOutcome | null>
           memoryHints: sharedMemories.map(memory => memory.content)
         }
       )
-      const post = await createCharacterMoment({
-        characterId: author.id,
-        worldId,
-        content: generated.text,
-        source: 'ai',
-        aiModel: generated.model
-      })
+      const action = await executeAgentAction(
+        {
+          kind: 'social.post',
+          actorCharacterId: author.id,
+          worldId,
+          payload: { content: generated.text, aiModel: generated.model }
+        },
+        { grantedKinds: new Set<AgentActionKind>(['social.post']) },
+        {
+          'social.post': async proposal => {
+            if (proposal.kind !== 'social.post') throw new Error('AgentAction kind 不匹配。')
+            return createCharacterMoment({
+              characterId: proposal.actorCharacterId,
+              worldId: proposal.worldId,
+              content: proposal.payload.content,
+              source: 'ai',
+              aiModel: proposal.payload.aiModel
+            })
+          }
+        }
+      )
+      if (action.status !== 'executed') throw new Error(action.status === 'denied' ? action.reason : '角色动态动作等待确认。')
+      const post = action.result as MomentPost
       await scheduleSocialForCharacterPost(post, characters).catch(error => {
         console.warn('角色动态已发布，但 Social Runtime 排队失败：', error)
       })

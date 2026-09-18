@@ -1,6 +1,7 @@
 import { db } from '../db/database'
 import { estimateDataUrlBytes } from './imageService'
 import { getMessageImages } from './messageImageService'
+import { assertBackupReferenceIntegrity, parseBackupEnvelope } from './backupValidation'
 
 import type {
   Character,
@@ -117,16 +118,6 @@ export interface BackupSummary {
   socialProfiles: number
   images: number
   imageBytes: number
-}
-
-function isRecord(
-  value: unknown
-): value is Record<string, unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value)
-  )
 }
 
 export async function createBackup(options?: {
@@ -297,6 +288,19 @@ export function downloadBackup(backup: CompanionBackup) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+/**
+ * The Zod envelope deliberately validates stable identity/reference fields and keeps
+ * historical/domain-specific payload fields in passthrough mode. Crossing from that
+ * validated transport shape into our current domain arrays is therefore an explicit
+ * trust boundary rather than a claim that Zod has reconstructed every current field.
+ *
+ * Full compatibility normalization still happens in restoreBackup() before the
+ * destructive transaction, followed by assertBackupReferenceIntegrity().
+ */
+function asValidatedDomainRows<T>(rows: unknown[]): T[] {
+  return rows as T[]
+}
+
 export async function parseBackupFile(
   file: File
 ): Promise<CompanionBackup> {
@@ -308,73 +312,38 @@ export async function parseBackupFile(
     throw new Error('文件无法读取，请选择有效的 JSON 备份。')
   }
 
-  if (!isRecord(parsed)) {
-    throw new Error('备份文件格式错误。')
-  }
-
-  if (parsed.format !== 'ai-companion-phone-backup') {
-    throw new Error('这不是 AI Companion Phone 备份文件。')
-  }
-
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(Number(parsed.version))) {
-    throw new Error('当前版本暂不支持此备份版本。')
-  }
-
-  if (!isRecord(parsed.data)) {
-    throw new Error('备份文件缺少数据内容。')
-  }
-
-  const data = parsed.data
-  const requiredTables = [
-    'worlds',
-    'characters',
-    'contactGroups',
-    'conversations',
-    'messages',
-    'userProfiles'
-  ]
-
-  for (const table of requiredTables) {
-    if (!Array.isArray(data[table])) {
-      throw new Error(`备份文件中的 ${table} 数据无效。`)
-    }
-  }
-
-  const optionalArray = (name: string) =>
-    Array.isArray(data[name]) ? data[name] : []
+  const envelope = parseBackupEnvelope(parsed)
+  const data = envelope.data
 
   return {
     format: 'ai-companion-phone-backup',
     version: 12,
-    exportedAt:
-      typeof parsed.exportedAt === 'string'
-        ? parsed.exportedAt
-        : new Date().toISOString(),
+    exportedAt: envelope.exportedAt || new Date().toISOString(),
     data: {
-      worlds: data.worlds as World[],
-      characters: data.characters as Character[],
-      contactGroups: data.contactGroups as ContactGroup[],
-      conversations: data.conversations as Conversation[],
-      messages: data.messages as Message[],
-      userProfiles: data.userProfiles as UserProfile[],
-      chatSettings: optionalArray('chatSettings') as ChatSettings[],
-      memories: optionalArray('memories') as CharacterMemory[],
-      conversationStates: optionalArray('conversationStates') as ConversationState[],
-      musicStates: optionalArray('musicStates') as MusicState[],
-      relationships: optionalArray('relationships') as LegacyCharacterRelationship[],
-      relationshipEvents: optionalArray('relationshipEvents') as LegacyRelationshipEvent[],
-      personas: optionalArray('personas') as UserPersona[],
-      lorebookEntries: optionalArray('lorebookEntries') as LorebookEntry[],
-      lorebooks: optionalArray('lorebooks') as LorebookResource[],
-      promptPresets: optionalArray('promptPresets') as PromptPreset[],
-      regexScripts: optionalArray('regexScripts') as RegexScript[],
-      resourceBindings: optionalArray('resourceBindings') as ResourceBinding[],
-      communityResourceArchives: optionalArray('communityResourceArchives') as CommunityResourceArchive[],
-      conversationStateHistory: optionalArray('conversationStateHistory') as ConversationStateHistory[],
-      momentPosts: optionalArray('momentPosts') as MomentPost[],
-      momentComments: optionalArray('momentComments') as MomentComment[],
-      appCustomizations: optionalArray('appCustomizations') as AppCustomization[],
-      socialProfiles: optionalArray('socialProfiles') as CharacterSocialProfile[]
+      worlds: asValidatedDomainRows<World>(data.worlds),
+      characters: asValidatedDomainRows<Character>(data.characters),
+      contactGroups: asValidatedDomainRows<ContactGroup>(data.contactGroups),
+      conversations: asValidatedDomainRows<Conversation>(data.conversations),
+      messages: asValidatedDomainRows<Message>(data.messages),
+      userProfiles: asValidatedDomainRows<UserProfile>(data.userProfiles),
+      chatSettings: asValidatedDomainRows<ChatSettings>(data.chatSettings),
+      memories: asValidatedDomainRows<CharacterMemory>(data.memories),
+      conversationStates: asValidatedDomainRows<ConversationState>(data.conversationStates),
+      musicStates: asValidatedDomainRows<MusicState>(data.musicStates),
+      relationships: asValidatedDomainRows<LegacyCharacterRelationship>(data.relationships),
+      relationshipEvents: asValidatedDomainRows<LegacyRelationshipEvent>(data.relationshipEvents),
+      personas: asValidatedDomainRows<UserPersona>(data.personas),
+      lorebookEntries: asValidatedDomainRows<LorebookEntry>(data.lorebookEntries),
+      lorebooks: asValidatedDomainRows<LorebookResource>(data.lorebooks),
+      promptPresets: asValidatedDomainRows<PromptPreset>(data.promptPresets),
+      regexScripts: asValidatedDomainRows<RegexScript>(data.regexScripts),
+      resourceBindings: asValidatedDomainRows<ResourceBinding>(data.resourceBindings),
+      communityResourceArchives: asValidatedDomainRows<CommunityResourceArchive>(data.communityResourceArchives),
+      conversationStateHistory: asValidatedDomainRows<ConversationStateHistory>(data.conversationStateHistory),
+      momentPosts: asValidatedDomainRows<MomentPost>(data.momentPosts),
+      momentComments: asValidatedDomainRows<MomentComment>(data.momentComments),
+      appCustomizations: asValidatedDomainRows<AppCustomization>(data.appCustomizations),
+      socialProfiles: asValidatedDomainRows<CharacterSocialProfile>(data.socialProfiles)
     }
   }
 }
@@ -507,6 +476,9 @@ export async function restoreBackup(
       resourceId: script.id
     })
   }
+
+  // 所有历史迁移完成后先做引用完整性检查；失败时尚未触碰本地数据库。
+  assertBackupReferenceIntegrity(plainBackup)
 
   await db.transaction('rw', db.tables, async () => {
     await db.messages.clear()

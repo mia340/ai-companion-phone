@@ -39,6 +39,15 @@ export interface LorebookDepthInjection {
   order: number
 }
 
+export type LorebookDecisionStatus = 'focused' | 'activated' | 'deferred' | 'not-triggered'
+
+export interface LorebookEngineDebugDecision {
+  id: string
+  title: string
+  status: LorebookDecisionStatus
+  reason: string
+}
+
 export interface LorebookEngineDebug {
   evaluatedEntries: number
   initialActivated: number
@@ -52,6 +61,8 @@ export interface LorebookEngineDebug {
   delayBlocked: string[]
   groupDropped: string[]
   depthInjections: Array<{ title: string; depth: number; role: 'system' | 'user' | 'assistant' }>
+  /** Per-entry decision trace for the Activation Inspector. Old traces can omit it. */
+  decisions: LorebookEngineDebugDecision[]
 }
 
 function normalizeText(value: string, caseSensitive: boolean) {
@@ -779,6 +790,32 @@ export async function buildLorebookPrompt(options: {
   })
   const explicitBudgets = [...books.values()].map(book => book.tokenBudget || 0).filter(value => value > 0)
   const estimatedUsedTokens = activated.reduce((sum, item) => sum + item.estimatedTokens, 0)
+  const routingById = new Map(routingDecisions.map(item => [item.id, item]))
+  const engineDecisions: LorebookEngineDebugDecision[] = entries
+    .filter(item => item.enabled)
+    .map(item => {
+      const routing = routingById.get(item.id)
+      if (routing) {
+        return {
+          id: item.id,
+          title: item.title,
+          status: routing.status === 'focused' ? 'focused' : routing.status === 'activated' ? 'activated' : 'deferred',
+          reason: routing.reason
+        }
+      }
+      const mode = initialLorebookEntryMode(item)
+      return {
+        id: item.id,
+        title: item.title,
+        status: 'not-triggered',
+        reason: mode === 'keyword'
+          ? '本轮扫描范围内未命中主关键词 / 辅助关键词，未进入候选。'
+          : mode === 'constant'
+            ? '常驻条目未进入候选：可能未通过概率、递归限制或按需资源路由。'
+            : '本轮未进入激活候选。'
+      }
+    })
+
   const engineDebug: LorebookEngineDebug = {
     evaluatedEntries: entries.filter(item => item.enabled).length,
     initialActivated,
@@ -791,7 +828,8 @@ export async function buildLorebookPrompt(options: {
     cooldownBlocked,
     delayBlocked,
     groupDropped,
-    depthInjections: depthInjections.map(item => ({ title: item.title, depth: item.depth, role: item.role }))
+    depthInjections: depthInjections.map(item => ({ title: item.title, depth: item.depth, role: item.role })),
+    decisions: engineDecisions
   }
 
   return {

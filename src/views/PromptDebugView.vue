@@ -15,6 +15,19 @@ const traces = ref<PromptDebugTrace[]>([])
 const selectedId = ref('')
 const notice = ref('')
 const selected = computed(() => traces.value.find(item => item.id === selectedId.value) || traces.value[0])
+const contextSources = computed(() => {
+  const trace = selected.value
+  if (!trace) return []
+  return [
+    { label: 'Character Card', count: trace.characterCardRuntime ? 1 : 0, note: trace.characterCardRuntime?.sourceLabel || '未记录' },
+    { label: 'Persona', count: trace.personaName ? 1 : 0, note: trace.personaName || '未绑定' },
+    { label: 'Memory', count: trace.memoryHits.length, note: trace.memoryHits.length ? '按检索分数注入' : '本轮未命中' },
+    { label: 'WorldBook', count: trace.activatedLorebook.length, note: trace.lorebookEngine ? `${trace.lorebookEngine.evaluatedEntries} 条参与评估` : '旧记录' },
+    { label: 'Recent Messages', count: trace.recentMessages.length, note: '冻结后的最近聊天上下文' },
+    { label: 'Regex', count: trace.regexPipeline?.activeScripts || 0, note: trace.regexPipeline ? '按 storage / prompt / display 分阶段' : '未记录' },
+    { label: 'Agent / Interaction', count: trace.protocolEnabled ? 1 : 0, note: trace.actionSummary || '无动作摘要' }
+  ]
+})
 
 async function load() {
   traces.value = await listPromptDebugTraces(conversationId.value)
@@ -120,6 +133,17 @@ watch(conversationId, load)
           <p v-else class="empty">没有记录规则影响。</p>
         </details>
 
+        <details open class="debug-section">
+          <summary>Context Inspector</summary>
+          <p class="ok">展示这一轮实际进入 Generation Context 的来源，不根据设置页“猜测已启用”。</p>
+          <article v-for="source in contextSources" :key="source.label" class="context-source-row">
+            <div><b>{{ source.label }}</b><small>{{ source.note }}</small></div>
+            <strong>{{ source.count }}</strong>
+          </article>
+          <p v-if="selected.contextCreatedAt"><b>冻结时间：</b>{{ formatTime(selected.contextCreatedAt) }}</p>
+          <p v-if="selected.generationId"><b>Generation：</b><code>{{ selected.generationId }}</code></p>
+        </details>
+
         <details v-if="selected.characterCardRuntime" open class="debug-section">
           <summary>Character Card Runtime</summary>
           <div class="score-grid">
@@ -135,9 +159,27 @@ watch(conversationId, load)
         </details>
 
         <details open class="debug-section">
-          <summary>触发的世界书</summary>
+          <summary>WorldBook Activation Inspector</summary>
           <article v-for="entry in selected.activatedLorebook" :key="entry.id" class="memory-row"><b>{{ entry.title }}</b><small>{{ entry.reason || '关键词或常驻规则触发' }}</small></article>
           <p v-if="!selected.activatedLorebook.length" class="empty">本轮没有触发世界书。</p>
+          <div v-if="selected.resourceRouting?.length" class="activation-routing">
+            <b>资源路由</b>
+            <span v-for="entry in selected.resourceRouting" :key="`${entry.status}:${entry.id}`">{{ entry.title }} · {{ entry.status }} · {{ entry.reason }}</span>
+          </div>
+          <div v-if="selected.lorebookEngine" class="activation-routing">
+            <b>阻止 / 淘汰</b>
+            <span v-if="selected.lorebookEngine.cooldownBlocked.length">Cooldown：{{ selected.lorebookEngine.cooldownBlocked.join('、') }}</span>
+            <span v-if="selected.lorebookEngine.delayBlocked.length">Delay：{{ selected.lorebookEngine.delayBlocked.join('、') }}</span>
+            <span v-if="selected.lorebookEngine.groupDropped.length">Group：{{ selected.lorebookEngine.groupDropped.join('；') }}</span>
+            <span v-if="selected.lorebookEngine.droppedByBudget">Token Budget：淘汰 {{ selected.lorebookEngine.droppedByBudget }} 条</span>
+          </div>
+          <div v-if="selected.lorebookEngine?.decisions?.length" class="decision-list">
+            <b>逐条判定</b>
+            <article v-for="decision in selected.lorebookEngine.decisions" :key="decision.id" :class="['decision-row', `status-${decision.status}`]">
+              <div><strong>{{ decision.title }}</strong><small>{{ decision.reason }}</small></div>
+              <em>{{ decision.status === 'focused' ? 'Focus' : decision.status === 'activated' ? '激活' : decision.status === 'deferred' ? '延后' : '未触发' }}</em>
+            </article>
+          </div>
         </details>
 
         <details v-if="selected.lorebookEngine" open class="debug-section">
@@ -190,4 +232,6 @@ watch(conversationId, load)
 
 <style scoped>
 .debug-page{min-height:100%;padding:14px 14px 36px;background:#f2f8fc;color:#40566a}.notice{position:sticky;top:6px;z-index:3;margin:0 0 10px;padding:9px 12px;border-radius:12px;background:#5f8fb1;color:#fff;text-align:center}.intro-card,.debug-section,.trace-picker{margin-bottom:11px;border:1px solid rgba(84,132,166,.12);border-radius:18px;background:#fff;padding:14px}.intro-card p{margin:7px 0 0;color:#6f8798;font-size:12px;line-height:1.6}.trace-picker{display:flex;align-items:center;justify-content:space-between;gap:12px}.trace-picker select{min-width:0;max-width:70%;border:1px solid #d7e5f0;border-radius:11px;background:#fff;padding:9px}.summary-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:11px}.summary-grid article{display:grid;gap:3px;border-radius:14px;background:#fff;padding:12px}.summary-grid small{color:#7890a2}.summary-grid b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.debug-section summary{cursor:pointer;font-weight:800}.debug-section>button{float:right;margin-top:-25px;border:0;border-radius:10px;background:#eaf4fb;color:#4f7f9f;padding:6px 10px}.debug-section pre{overflow:auto;max-height:420px;margin:12px 0 0;border-radius:12px;background:#213544;color:#edf7fd;padding:12px;font:11px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word}.memory-row,.prompt-message,.budget-row{margin-top:9px;border-radius:12px;background:#f2f8fc;padding:10px}.memory-row{display:grid;gap:4px}.memory-row small{color:#7890a2}.memory-row p{margin:0;line-height:1.55}.prompt-message pre{max-height:220px;margin-top:7px}.presence-resolution{display:grid;gap:4px;margin-top:10px;border-radius:12px;background:#edf7f1;color:#476b57;padding:10px}.presence-resolution.conflict{background:#fff1e7;color:#925d2f}.presence-resolution span,.presence-resolution small{line-height:1.5}.warnings{display:grid;gap:6px;margin-top:10px;border-radius:12px;background:#fff1e7;color:#925d2f;padding:10px}.warnings span:before,.rule-list span:before{content:'· ';font-weight:900}.ok{color:#4f8065}.score-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:12px}.score-grid article{display:flex;align-items:center;justify-content:space-between;border-radius:12px;background:#f2f8fc;padding:10px}.score-grid span{font-size:11px;color:#8e707c}.score-grid b{color:#5f8fb1}.score-note{display:block;margin-top:9px;color:#7890a2}.budget-row>div:first-child{display:flex;justify-content:space-between;gap:10px}.budget-row small{color:#7890a2}.budget-track{height:8px;margin-top:7px;overflow:hidden;border-radius:999px;background:#dcecf6}.budget-track i{display:block;height:100%;border-radius:inherit;background:#6ea5c7}.budget-track i.over{background:#d88455}.rule-list{display:grid;gap:6px;margin-top:10px}.rule-list span{color:#5d7485;font-size:12px}.empty,.empty-page{color:#7890a2;text-align:center;line-height:1.6}.empty-page{padding:70px 20px}.clear-button{width:100%;border:0;border-radius:14px;background:#eef7fc;color:#4f7f9f;padding:12px;font-weight:800}
+
+.context-source-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px;border-radius:12px;background:#f2f8fc;padding:10px}.context-source-row>div{display:grid;gap:3px}.context-source-row small{color:#7890a2;font-size:10px}.context-source-row strong{min-width:30px;text-align:center;color:#5f8fb1;font-size:18px}.activation-routing{display:grid;gap:5px;margin-top:10px;border-radius:12px;background:#f6f2fb;padding:10px;color:#675d79}.activation-routing span{font-size:11px;line-height:1.45}.activation-routing span:before{content:'· ';font-weight:900}.decision-list{display:grid;gap:7px;margin-top:10px}.decision-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;border-radius:11px;background:#f4f7fa;padding:9px 10px}.decision-row>div{display:grid;gap:3px;min-width:0}.decision-row strong{font-size:11px}.decision-row small{color:#7d8f9d;font-size:9px;line-height:1.45}.decision-row em{flex:0 0 auto;border-radius:999px;background:#e7edf2;padding:4px 7px;color:#617482;font-size:8px;font-style:normal}.decision-row.status-activated em,.decision-row.status-focused em{background:#dff2e9;color:#1a805c}.decision-row.status-deferred em{background:#fff0df;color:#9b6a34}
 </style>

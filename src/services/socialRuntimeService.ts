@@ -24,6 +24,7 @@ import {
 } from './socialPresenceService'
 import { addSocialNotification } from './socialNotificationService'
 import { loadCompanionSpaceSettings } from './companionSpaceSettings'
+import { executeAgentAction, type AgentActionKind } from './agentActionRuntime'
 
 import type {
   Character,
@@ -307,14 +308,30 @@ async function processMomentComment(activity: SocialActivity, post: MomentPost, 
     post.content || (post.images?.length ? '（发了一组图片，没有配文字。）' : '')
   )
 
-  const comment = await addMomentComment({
-    momentId: post.id,
-    worldId: post.worldId,
-    authorType: 'character',
-    authorId: actor.id,
-    content: generated.text,
-    source: 'ai'
-  })
+  const action = await executeAgentAction(
+    {
+      kind: 'social.comment',
+      actorCharacterId: actor.id,
+      worldId: post.worldId,
+      payload: { momentId: post.id, content: generated.text }
+    },
+    { grantedKinds: new Set<AgentActionKind>(['social.comment']) },
+    {
+      'social.comment': async proposal => {
+        if (proposal.kind !== 'social.comment') throw new Error('AgentAction kind 不匹配。')
+        return addMomentComment({
+          momentId: proposal.payload.momentId,
+          worldId: proposal.worldId,
+          authorType: 'character',
+          authorId: proposal.actorCharacterId,
+          content: proposal.payload.content,
+          source: 'ai'
+        })
+      }
+    }
+  )
+  if (action.status !== 'executed') throw new Error(action.status === 'denied' ? action.reason : '角色评论动作等待确认。')
+  const comment = action.result as MomentComment
   if (post.authorType === 'user') {
     await addSocialNotification({
       post,
@@ -348,15 +365,31 @@ async function processMomentReply(activity: SocialActivity, post: MomentPost, ac
     memoryHints
   })
 
-  const comment = await addMomentComment({
-    momentId: post.id,
-    worldId: post.worldId,
-    authorType: 'character',
-    authorId: actor.id,
-    replyToCommentId: target.id,
-    content: generated.text,
-    source: 'ai'
-  })
+  const action = await executeAgentAction(
+    {
+      kind: 'social.reply',
+      actorCharacterId: actor.id,
+      worldId: post.worldId,
+      payload: { momentId: post.id, replyToCommentId: target.id, content: generated.text }
+    },
+    { grantedKinds: new Set<AgentActionKind>(['social.reply']) },
+    {
+      'social.reply': async proposal => {
+        if (proposal.kind !== 'social.reply') throw new Error('AgentAction kind 不匹配。')
+        return addMomentComment({
+          momentId: proposal.payload.momentId,
+          worldId: proposal.worldId,
+          authorType: 'character',
+          authorId: proposal.actorCharacterId,
+          replyToCommentId: proposal.payload.replyToCommentId,
+          content: proposal.payload.content,
+          source: 'ai'
+        })
+      }
+    }
+  )
+  if (action.status !== 'executed') throw new Error(action.status === 'denied' ? action.reason : '角色回复动作等待确认。')
+  const comment = action.result as MomentComment
   if (target.authorType === 'user' || post.authorType === 'user') {
     await addSocialNotification({
       post,
@@ -438,7 +471,23 @@ export async function processSocialActivity(activity: SocialActivity): Promise<'
     } else if (activity.kind === 'moment-reply') {
       await processMomentReply(activity, post, actor)
     } else if (activity.kind === 'moment-like') {
-      await addMomentExternalLike(post.id)
+      const action = await executeAgentAction(
+        {
+          kind: 'social.like',
+          actorCharacterId: actor.id,
+          worldId: post.worldId,
+          payload: { momentId: post.id }
+        },
+        { grantedKinds: new Set<AgentActionKind>(['social.like']) },
+        {
+          'social.like': async proposal => {
+            if (proposal.kind !== 'social.like') throw new Error('AgentAction kind 不匹配。')
+            await addMomentExternalLike(proposal.payload.momentId)
+            return true
+          }
+        }
+      )
+      if (action.status !== 'executed') throw new Error(action.status === 'denied' ? action.reason : '角色点赞动作等待确认。')
     }
     await db.socialActivities.update(activity.id, {
       status: 'done',

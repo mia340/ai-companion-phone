@@ -696,3 +696,7 @@ Backup：V12
 ## 16. 文档规则
 
 当前架构只维护在本文件。历史实现细节统一归档到 `RELEASE_HISTORY.md`。
+
+
+## 2026-09-18 · alpha.5.1.12
+Launcher Grid V6 已将 App/Widget 统一为二维布局 Item，并推进 Character Card Import Report、WorldBook/Context Inspector、AgentAction capability boundary、Backup Zod preflight 与 HomeLayout Schema。WorldBook Debug Trace 现在记录每个启用条目的 focused / activated / deferred / not-triggered 判定；Backup Restore 在事务清库前执行 envelope + cross-reference preflight。

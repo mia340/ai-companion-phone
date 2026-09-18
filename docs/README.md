@@ -97,3 +97,7 @@ docs/
 发生架构边界变化时更新 `ARCHITECTURE.md`；Character Card / WorldBook / Preset / Regex / Community UI 语义变化时更新 `COMMUNITY_RUNTIME.md`；Social Runtime 语义变化时更新 `SOCIAL_RUNTIME_V2.md`。
 
 **不要再把旧版本流水账塞回 `PROJECT_STATUS.md`。** 当前状态只写现在；历史去 `CHANGELOG / RELEASE_HISTORY / releases/`。
+
+
+## 2026-09-18 · alpha.5.1.12
+Launcher Grid V6 已将 App/Widget 统一为二维布局 Item，并推进 Character Card Import Report、WorldBook/Context Inspector、AgentAction capability boundary、Backup Zod preflight 与 HomeLayout Schema。
