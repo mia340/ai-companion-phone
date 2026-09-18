@@ -655,3 +655,11 @@ Launcher Grid V6 已将 App/Widget 统一为二维布局 Item，并推进 Charac
 
 Windows 首轮 `npm run verify` 显示 41 个测试文件 / 329 个测试均先通过，但 `vue-tsc` 在 Backup Zod 新代码处阻断构建：测试夹具缺少当前 `Message.worldId/status`，同时 Zod passthrough envelope 的窄 transport shape 被直接断言为完整 Domain 数组，触发 24 个 TS2352。R2 将此转换收口为单一 `asValidatedDomainRows<T>()` 边界，并保持真正的历史兼容迁移和 `assertBackupReferenceIntegrity()` 仍在破坏性 Dexie transaction 之前执行。没有数据库或 Backup 格式升级。
 
+
+
+## 2026-09-18 · alpha.5.1.13 Launcher Flow Reorder
+
+- 将桌面移动语义从 swap 改为 insert + reflow；App/Widget 共用同一搬运器。
+- 增加拖拽时非持久化 preview，指针越过格子即重新计算目标页顺序。
+- 增加 WAAPI FLIP 动画，其他项目会连续挤开/补位，形成更接近 iPhone 的果冻式反馈。
+- 来源页只在本页补洞；目标页溢出才向后页级联，保持玩家人为分页。

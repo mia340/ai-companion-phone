@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { liveQuery } from 'dexie'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import CharacterAvatar from '../components/CharacterAvatar.vue'
@@ -51,6 +51,7 @@ const latestConversationId = ref('')
 const musicState = ref<MusicState>()
 const customIcons = ref<Record<string, string>>({})
 const appearance = ref<HomeAppearancePreferences>(structuredClone(DEFAULT_HOME_APPEARANCE))
+const dragPreviewAppearance = ref<HomeAppearancePreferences>()
 const now = ref(new Date())
 const musicTones: [string, string] = ['#8f9cde', '#b9c4ef']
 
@@ -101,18 +102,21 @@ type LauncherPointerState = {
 let launcherPointer: LauncherPointerState | undefined
 let longPressTimer: number | undefined
 let pageTurnTimer: number | undefined
+let dragPreviewSignature = ''
+let dragPreviewAnimationToken = 0
 let socialBadgeSubscription: { unsubscribe: () => void } | undefined
 let musicStateSubscription: { unsubscribe: () => void } | undefined
 let minuteTimer: number | undefined
 let longPressStartX = 0
 let longPressStartY = 0
 
-const actualPages = computed(() => appearance.value.homeLayoutPages)
+const renderedAppearance = computed(() => dragPreviewAppearance.value ?? appearance.value)
+const actualPages = computed(() => renderedAppearance.value.homeLayoutPages)
 const launcherPages = computed<HomeLayoutPage[]>(() => {
-  if (transientBlankPage.value && appearance.value.homeLayoutPages.length < MAX_HOME_PAGES) {
-    return [...appearance.value.homeLayoutPages, { items: [] }]
+  if (transientBlankPage.value && !dragPreviewAppearance.value && renderedAppearance.value.homeLayoutPages.length < MAX_HOME_PAGES) {
+    return [...renderedAppearance.value.homeLayoutPages, { items: [] }]
   }
-  return appearance.value.homeLayoutPages
+  return renderedAppearance.value.homeLayoutPages
 })
 const dockApps = computed(() => resolveDockApps(appearance.value).map(enrichApp))
 const draggingAppKey = computed(() => launcherPointer?.itemType === 'app' ? String(launcherPointer.key) : '')
@@ -442,6 +446,49 @@ function removeLauncherGhost() {
   launcherPointer?.sourceElement.classList.remove('launcher-source-dragging')
 }
 
+function captureLauncherRects() {
+  const root = pageViewport.value
+  const rects = new Map<string, DOMRect>()
+  root?.querySelectorAll<HTMLElement>('[data-launcher-item]').forEach(node => {
+    const id = node.dataset.launcherItem
+    if (id) rects.set(id, node.getBoundingClientRect())
+  })
+  return rects
+}
+
+function animateLauncherReflow(before: Map<string, DOMRect>, token: number) {
+  if (token !== dragPreviewAnimationToken) return
+  pageViewport.value?.querySelectorAll<HTMLElement>('[data-launcher-item]').forEach(node => {
+    const id = node.dataset.launcherItem
+    if (!id) return
+    const previous = before.get(id)
+    if (!previous) return
+    const next = node.getBoundingClientRect()
+    const dx = previous.left - next.left
+    const dy = previous.top - next.top
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+    node.getAnimations().filter(animation => animation.id === 'launcher-reflow').forEach(animation => animation.cancel())
+    const animation = node.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px) scale(.985)` },
+        { transform: 'translate(0, 0) scale(1)' }
+      ],
+      { duration: 280, easing: 'cubic-bezier(.2,.9,.28,1.16)' }
+    )
+    animation.id = 'launcher-reflow'
+  })
+}
+
+function setDragPreview(next: HomeAppearancePreferences | undefined, signature = '') {
+  if (signature && signature === dragPreviewSignature) return
+  if (!signature && !dragPreviewAppearance.value) return
+  const before = captureLauncherRects()
+  dragPreviewSignature = signature
+  dragPreviewAppearance.value = next
+  const token = ++dragPreviewAnimationToken
+  void nextTick(() => animateLauncherReflow(before, token))
+}
+
 function clearDropTarget() {
   dropTargetKind.value = ''
   dropTargetKey.value = ''
@@ -449,6 +496,7 @@ function clearDropTarget() {
   dropTargetPage.value = -1
   dropTargetX.value = -1
   dropTargetY.value = -1
+  setDragPreview(undefined)
 }
 
 function resetLauncherPointer() {
@@ -620,6 +668,7 @@ function updateDropTarget(event: PointerEvent) {
     dropTargetPage.value = -1
     dropTargetX.value = -1
     dropTargetY.value = -1
+    setDragPreview(undefined)
     return
   }
 
@@ -643,6 +692,8 @@ function updateDropTarget(event: PointerEvent) {
   const occupant = itemAtCell(pageAt(pageIndex), x, y)
   const selfId = `${launcherPointer.itemType}:${launcherPointer.key}`
   if (occupant?.id === selfId && launcherPointer.kind === 'home') {
+    // 预览已经把占位符流动到当前格时，不要下一帧又撤销预览造成来回闪动。
+    if (dragPreviewAppearance.value && dropTargetKind.value === 'home' && dropTargetPage.value === pageIndex && dropTargetX.value === x && dropTargetY.value === y) return
     clearDropTarget()
     return
   }
@@ -653,6 +704,20 @@ function updateDropTarget(event: PointerEvent) {
   dropTargetPage.value = pageIndex
   dropTargetX.value = x
   dropTargetY.value = y
+
+  const previewSignature = `${launcherPointer.itemType}:${launcherPointer.key}:${pageIndex}:${x}:${y}`
+  setDragPreview(
+    moveHomeLayoutItemToGrid(
+      appearance.value,
+      launcherPointer.itemType === 'app'
+        ? { type: 'app', key: launcherPointer.key as HomeAppKey }
+        : { type: 'widget', key: launcherPointer.key as HomeWidgetKey },
+      pageIndex,
+      x,
+      y
+    ),
+    previewSignature
+  )
 }
 
 function handlePointerMove(event: PointerEvent) {
@@ -687,7 +752,7 @@ async function finishHomePointer(event?: PointerEvent, commit = true) {
 
   if (pointer.active && commit) {
     if (dropTargetKind.value === 'home' && dropTargetPage.value >= 0 && dropTargetX.value >= 0 && dropTargetY.value >= 0) {
-      await persistAppearance(moveHomeLayoutItemToGrid(
+      await persistAppearance(dragPreviewAppearance.value ?? moveHomeLayoutItemToGrid(
         appearance.value,
         pointer.itemType === 'app'
           ? { type: 'app', key: pointer.key as HomeAppKey }

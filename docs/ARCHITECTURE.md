@@ -700,3 +700,8 @@ Backup：V12
 
 ## 2026-09-18 · alpha.5.1.12
 Launcher Grid V6 已将 App/Widget 统一为二维布局 Item，并推进 Character Card Import Report、WorldBook/Context Inspector、AgentAction capability boundary、Backup Zod preflight 与 HomeLayout Schema。WorldBook Debug Trace 现在记录每个启用条目的 focused / activated / deferred / not-triggered 判定；Backup Restore 在事务清库前执行 envelope + cross-reference preflight。
+
+
+### Launcher Grid V7 · Insert/Reflow
+
+桌面拖拽语义由“碰撞交换”改为“插入序列 + 网格重新装箱”。App 和 Widget 都是 `HomeLayoutItem`；Widget 的 `w/h` 直接参与 first-fit pack。拖拽期间仅生成 `dragPreviewAppearance`，不写数据库；pointerup 后再原子持久化。目标页溢出的尾部 Item 向下一页级联，而来源页不会从下一页反向抽取内容，因此自由分页意图可以保留。

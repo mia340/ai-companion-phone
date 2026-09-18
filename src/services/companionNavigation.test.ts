@@ -130,14 +130,15 @@ describe('知间桌面入口与布局', () => {
     expect(normalized.homeLayoutPages[1].items[0]).toMatchObject({ key: 'backup', x: 3, y: 5 })
   })
 
-  it('App 与 App 可交换网格位置，Widget 也能移动和调整尺寸', () => {
+  it('App 拖到已有项目之间时按插入顺序流式后移，而不是简单交换', () => {
     const current = normalizeHomeAppearance({
-      homeAppKeys: ['music', 'profile'],
-      homeWidgetKeys: ['companion'],
+      homeAppKeys: ['music', 'profile', 'memory', 'backup'],
+      homeWidgetKeys: [],
       homeLayoutPages: [{ items: [
-        { id: 'app:music', type: 'app', key: 'music', x: 0, y: 1, w: 1, h: 1 },
-        { id: 'app:profile', type: 'app', key: 'profile', x: 1, y: 1, w: 1, h: 1 },
-        { id: 'widget:companion', type: 'widget', key: 'companion', x: 0, y: 0, w: 2, h: 1 }
+        { id: 'app:music', type: 'app', key: 'music', x: 0, y: 0, w: 1, h: 1 },
+        { id: 'app:profile', type: 'app', key: 'profile', x: 1, y: 0, w: 1, h: 1 },
+        { id: 'app:memory', type: 'app', key: 'memory', x: 2, y: 0, w: 1, h: 1 },
+        { id: 'app:backup', type: 'app', key: 'backup', x: 3, y: 0, w: 1, h: 1 }
       ] }],
       dockAppKeys: ['banxin'],
       iconScale: 1,
@@ -145,21 +146,17 @@ describe('知间桌面入口与布局', () => {
       widgetStyle: 'frosted'
     })
 
-    const swapped = moveHomeAppToGrid(current, 'music', 0, 1, 1)
-    const music = swapped.homeLayoutPages[0].items.find(item => item.id === 'app:music')
-    const profile = swapped.homeLayoutPages[0].items.find(item => item.id === 'app:profile')
-    expect(music).toMatchObject({ x: 1, y: 1 })
-    expect(profile).toMatchObject({ x: 0, y: 1 })
-
-    const movedWidget = moveHomeWidgetToGrid(swapped, 'companion', 0, 2, 0)
-    expect(movedWidget.homeLayoutPages[0].items.find(item => item.id === 'widget:companion')).toMatchObject({ x: 2, y: 0, w: 2, h: 1 })
-
-    const resized = resizeHomeWidgetInGrid(movedWidget, 'companion', 2, 2)
-    expect(resized.homeLayoutPages[0].items.find(item => item.id === 'widget:companion')).toMatchObject({ w: 2, h: 2 })
+    const moved = moveHomeAppToGrid(current, 'backup', 0, 1, 0)
+    const ordered = [...moved.homeLayoutPages[0].items]
+      .sort((a, b) => (a.y * HOME_GRID_COLUMNS + a.x) - (b.y * HOME_GRID_COLUMNS + b.x))
+      .map(item => item.key)
+    expect(ordered).toEqual(['music', 'backup', 'profile', 'memory'])
+    expect(moved.homeLayoutPages[0].items.find(item => item.id === 'app:backup')).toMatchObject({ x: 1, y: 0 })
+    expect(moved.homeLayoutPages[0].items.find(item => item.id === 'app:profile')).toMatchObject({ x: 2, y: 0 })
+    expect(moved.homeLayoutPages[0].items.find(item => item.id === 'app:memory')).toMatchObject({ x: 3, y: 0 })
   })
 
-
-  it('Widget 可以像 App 一样跨格换位，被覆盖的 App 回填到 Widget 原来的槽位', () => {
+  it('Widget 与 App 共用插入重排，组件尺寸参与占位并把后续 App 向后推', () => {
     const current = normalizeHomeAppearance({
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: ['companion'],
@@ -176,9 +173,12 @@ describe('知间桌面入口与布局', () => {
 
     const moved = moveHomeWidgetToGrid(current, 'companion', 0, 2, 0)
     const page = moved.homeLayoutPages[0]
-    expect(page.items.find(item => item.id === 'widget:companion')).toMatchObject({ x: 2, y: 0, w: 2, h: 1 })
     expect(page.items.find(item => item.id === 'app:music')).toMatchObject({ x: 0, y: 0 })
     expect(page.items.find(item => item.id === 'app:profile')).toMatchObject({ x: 1, y: 0 })
+    expect(page.items.find(item => item.id === 'widget:companion')).toMatchObject({ x: 2, y: 0, w: 2, h: 1 })
+
+    const resized = resizeHomeWidgetInGrid(moved, 'companion', 2, 2)
+    expect(resized.homeLayoutPages[0].items.find(item => item.id === 'widget:companion')).toMatchObject({ w: 2, h: 2 })
   })
 
   it('保留旧分页迁移函数，兼容历史备份', () => {

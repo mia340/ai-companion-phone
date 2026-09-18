@@ -495,12 +495,51 @@ function layoutItemsFromAppearance(pages: readonly HomeLayoutPage[], type: HomeL
 }
 
 /**
- * Launcher Grid 的统一搬运器。App / Widget 共用一条路径：
- * - 空槽：直接落位；
- * - App ↔ App：交换；
- * - Widget 与 App/Widget 冲突：优先把被挤出的项目放回来源区域，否则找最近空位；
- * - 只有真正含内容的页面会留下，因此一个项目可以独占一页。
+ * Launcher Grid 的统一“插入 + 流式重排”搬运器。
+ *
+ * 与旧版 swap 不同：落点代表“插入位置”。目标页从该位置开始重新排布，
+ * 后面的 App / Widget 会按可用网格自动后移；目标页装不下时继续把尾部项目
+ * 推到下一页。来源页则只在本页向前补位，不会擅自把下一页内容拉回来，
+ * 因此玩家仍然可以保留“一个 App 单独一页”的布局。
  */
+function visualOrderValue(item: Pick<HomeLayoutItem, 'x' | 'y'>) {
+  return item.y * HOME_GRID_COLUMNS + item.x
+}
+
+function sortItemsByVisualOrder(items: readonly HomeLayoutItem[]) {
+  return [...items].sort((left, right) => {
+    const delta = visualOrderValue(left) - visualOrderValue(right)
+    return delta || left.id.localeCompare(right.id)
+  })
+}
+
+function packFlowItems(sequence: readonly HomeLayoutItem[]) {
+  const placed: HomeLayoutItem[] = []
+  for (let index = 0; index < sequence.length; index += 1) {
+    const item = sequence[index]
+    const fit = findFirstFit(placed, item.w, item.h)
+    if (!fit) {
+      return {
+        items: placed,
+        overflow: sequence.slice(index).map(row => ({ ...row }))
+      }
+    }
+    placed.push({ ...item, x: fit.x, y: fit.y })
+  }
+  return { items: placed, overflow: [] as HomeLayoutItem[] }
+}
+
+function insertionIndexForCell(items: readonly HomeLayoutItem[], x: number, y: number) {
+  const ordered = sortItemsByVisualOrder(items)
+  const occupant = ordered.findIndex(item =>
+    x >= item.x && x < item.x + item.w && y >= item.y && y < item.y + item.h
+  )
+  if (occupant >= 0) return occupant
+  const targetOrder = y * HOME_GRID_COLUMNS + x
+  const before = ordered.findIndex(item => visualOrderValue(item) >= targetOrder)
+  return before >= 0 ? before : ordered.length
+}
+
 export function moveHomeLayoutItemToGrid(
   value: HomeAppearancePreferences,
   ref: HomeLayoutMovableRef,
@@ -523,9 +562,8 @@ export function moveHomeLayoutItemToGrid(
     break
   }
 
-  let sourceDockIndex = -1
   if (ref.type === 'app') {
-    sourceDockIndex = dock.indexOf(ref.key)
+    const sourceDockIndex = dock.indexOf(ref.key)
     if (sourceDockIndex >= 0) dock.splice(sourceDockIndex, 1)
   }
 
@@ -536,75 +574,37 @@ export function moveHomeLayoutItemToGrid(
       : createWidgetItem(ref.key, 0, 0)
 
   const targetPageIndex = ensurePage(pages, destinationPageIndex)
-  const targetPage = pages[targetPageIndex]
-  const targetX = normalizeGridCoordinate(x, HOME_GRID_COLUMNS - moving.w)
-  const targetY = normalizeGridCoordinate(y, HOME_GRID_ROWS - moving.h)
-  const targetRect = { x: targetX, y: targetY, w: moving.w, h: moving.h }
-  const conflicts = targetPage.items.filter(item => cellsOverlap(item, targetRect))
-  targetPage.items = targetPage.items.filter(item => !conflicts.some(conflict => conflict.id === item.id))
+  const targetX = normalizeGridCoordinate(x, HOME_GRID_COLUMNS - 1)
+  const targetY = normalizeGridCoordinate(y, HOME_GRID_ROWS - 1)
 
-  moving.x = targetX
-  moving.y = targetY
-  targetPage.items.push(moving)
-
-  const sourcePage = sourcePageIndex >= 0 ? pages[sourcePageIndex] : undefined
-  const sourceRect = sourceItem
-    ? { x: sourceItem.x, y: sourceItem.y, w: sourceItem.w, h: sourceItem.h }
-    : undefined
-
-  const placeConflict = (conflict: HomeLayoutItem, conflictIndex: number) => {
-    // Dock → Home 的交换：目标 App 回到原 Dock 槽位，和真实手机 Dock 交换一致。
-    if (sourceDockIndex >= 0 && conflict.type === 'app' && conflicts.length === 1) {
-      dock.splice(Math.min(sourceDockIndex, dock.length), 0, conflict.key)
-      return true
-    }
-
-    // 优先使用刚腾出的来源矩形。多个 1×1 App 可以依次填回 Widget 腾出的格子。
-    if (sourcePage && sourceRect) {
-      const maxX = sourceRect.x + sourceRect.w - conflict.w
-      const maxY = sourceRect.y + sourceRect.h - conflict.h
-      for (let sy = sourceRect.y; sy <= maxY; sy += 1) {
-        for (let sx = sourceRect.x; sx <= maxX; sx += 1) {
-          if (!canPlace(sourcePage.items, sx, sy, conflict.w, conflict.h)) continue
-          sourcePage.items.push({ ...conflict, x: sx, y: sy })
-          return true
-        }
-      }
-    }
-
-    // 然后尝试目标页、来源页、其他页的第一个可用区域。
-    const pageOrder = [
-      targetPageIndex,
-      sourcePageIndex,
-      ...pages.map((_, index) => index)
-    ].filter((index, position, rows) => index >= 0 && rows.indexOf(index) === position)
-
-    for (const pageIndex of pageOrder) {
-      const page = pages[pageIndex]
-      if (!page) continue
-      const fit = findFirstFit(page.items, conflict.w, conflict.h)
-      if (!fit) continue
-      page.items.push({ ...conflict, ...fit })
-      return true
-    }
-
-    if (pages.length < MAX_HOME_PAGES) {
-      const page: HomeLayoutPage = { items: [] }
-      pages.push(page)
-      const fit = findFirstFit(page.items, conflict.w, conflict.h)
-      if (fit) {
-        page.items.push({ ...conflict, ...fit })
-        return true
-      }
-    }
-
-    // 保证原子性：任何一个冲突项目无法安置，就回滚整次拖动。
-    void conflictIndex
-    return false
+  // 来源页先在自己的页面内向前补位，不从后续页面抽项目回来。
+  // 同页拖动也先把原位置留下的空洞收拢，随后再按指针所在格执行插入，
+  // 这样“拖到第二个图标前”会变成 [A, moving, B, C]，而不是交换 A/B。
+  if (sourcePageIndex >= 0) {
+    const packedSource = packFlowItems(sortItemsByVisualOrder(pages[sourcePageIndex].items))
+    // 移走一个项目只会增加空间，因此来源页正常情况下不应出现 overflow。
+    if (packedSource.overflow.length) return normalized
+    pages[sourcePageIndex].items = packedSource.items
   }
 
-  for (let index = 0; index < conflicts.length; index += 1) {
-    if (!placeConflict(conflicts[index], index)) return normalized
+  const targetItems = sortItemsByVisualOrder(pages[targetPageIndex].items)
+  const insertionIndex = insertionIndexForCell(targetItems, targetX, targetY)
+  targetItems.splice(insertionIndex, 0, moving)
+
+  let carry = packFlowItems(targetItems)
+  pages[targetPageIndex].items = carry.items
+  let overflow = carry.overflow
+  let pageIndex = targetPageIndex + 1
+
+  // 目标页装不下时，像手机 Launcher 一样把尾部项目继续向后推。
+  while (overflow.length) {
+    if (pageIndex >= MAX_HOME_PAGES) return normalized
+    ensurePage(pages, pageIndex)
+    const existing = sortItemsByVisualOrder(pages[pageIndex].items)
+    const packed = packFlowItems([...overflow, ...existing])
+    pages[pageIndex].items = packed.items
+    overflow = packed.overflow
+    pageIndex += 1
   }
 
   const compacted = compactLayoutPages(pages)

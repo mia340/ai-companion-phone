@@ -1,13 +1,13 @@
 # AI Companion Phone 文档中心
 
-当前开发线：**V0.5.0-alpha.5.1.11**
+当前开发线：**V0.5.0-alpha.5.1.13**
 
 ```text
-应用：0.5.0-alpha.5.1.11
+应用：0.5.0-alpha.5.1.13
 IndexedDB：V18
 Backup：V12
-测试定义：38 个测试文件 / 319 个 it/test 声明
-当前 UI 主线：Launcher Grid V5（4×6 网格 / 真机边缘翻页 / transient 新页 / 固定 Dock）+ 玩家自定义 Widget
+测试定义：41 个测试文件 / 333 个 it/test 声明
+当前 UI 主线：Launcher Grid V7（4×6 网格 / insert+reflow 动态让位 / 真机边缘翻页 / 固定 Dock）+ 玩家自定义 Widget
 ```
 
 这里是项目 Markdown 文档的**唯一保管入口**。项目根目录不再散放逐版本说明；版本交付文档统一在 `docs/releases/`，同类项目研究统一在 `docs/research/`。
@@ -18,7 +18,7 @@ Backup：V12
 
 1. `START_HERE_小白启动指南.md`：第一次启动、Build、常见问题。
 2. `部署与更新.md`：长期通用的 Windows / Git / Build 流程。
-3. `releases/V0.5.0-alpha.5.1.11_部署与更新.md`：当前版本的专项验收步骤。
+3. `releases/V0.5.0-alpha.5.1.13_部署与更新.md`：当前版本的专项验收步骤。
 
 ### 当前开发单一事实源
 
@@ -100,4 +100,4 @@ docs/
 
 
 ## 2026-09-18 · alpha.5.1.12
-Launcher Grid V6 已将 App/Widget 统一为二维布局 Item，并推进 Character Card Import Report、WorldBook/Context Inspector、AgentAction capability boundary、Backup Zod preflight 与 HomeLayout Schema。
+Launcher Grid V7 已在二维布局 Item 基础上加入插入式流动重排与实时拖拽预览，并推进 Character Card Import Report、WorldBook/Context Inspector、AgentAction capability boundary、Backup Zod preflight 与 HomeLayout Schema。

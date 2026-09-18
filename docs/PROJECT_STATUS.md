@@ -1,16 +1,25 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.12**
+当前版本：**V0.5.0-alpha.5.1.13**
 
 ```text
-App：0.5.0-alpha.5.1.12
+App：0.5.0-alpha.5.1.13
 IndexedDB：V18
 Backup：V12
 测试定义：41 files / 333 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+## 0. 本轮 alpha.5.1.13 重点
+
+- **Launcher Grid V7**：App / Widget 拖拽从 swap 改成 insert + reflow；拖到某个位置时，后续项目会实时后移、跨行补位。
+- **实时布局预览**：拖动过程中不直接写 IndexedDB，而是基于当前持久布局生成临时 preview；指针跨过格子时立即重排，松手后才提交。
+- **果冻式重排动画**：布局变化使用浏览器 FLIP/WAAPI 位移动画，周围 App / Widget 会连续滑动让位，而不是松手后一瞬间交换。
+- **Widget 参与流式占位**：组件的实际 w×h 进入同一 pack 算法；大组件插入时会一次推开多个后续 App。
+- **页面边界保持玩家意图**：来源页只在本页向前补位；不会主动从下一页抽项目，因此“一个 App 单独一页”仍然成立。目标页装不下时才把尾部内容向后页推进。
+- IndexedDB V18 / Backup V12 不变。
 
 ## 0. 本轮 alpha.5.1.12 重点
 
