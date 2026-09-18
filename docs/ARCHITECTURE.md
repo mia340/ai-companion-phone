@@ -1,22 +1,32 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.5.1.9**。
+> 当前文档版本：**V0.5.0-alpha.5.1.10**。
 > V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V18 / Backup V12（朋友圈、角色社交权限、主屏幕与空间设置均纳入现有备份范围）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
 
 
-## V0.5.0-alpha.5.1.9 Launcher V3：持久分页而非临时切片
+## V0.5.0-alpha.5.1.10 Launcher V4：确定性手势分页与内容驱动页数
 
 ```text
 HomeAppearancePreferences
   ├─ homeAppKeys[]       # 兼容 / 成员集合
-  ├─ homePageKeys[][]    # 真正页面归属与顺序
+  ├─ homePageKeys[][]    # 非空页归属与顺序
   ├─ dockAppKeys[]       # 固定 Dock，最多 4
   └─ homeWidgetKeys[]
+
+Pointer Gesture
+  ↓
+currentPage + swipeOffset
+  ↓
+transform: translate3d(...)
 ```
 
-主屏自身拥有横向分页，但不拥有纵向页面滚动。`PhoneFrame lockScroll` 关闭外层 `.phone-content` scroll layer，Home Page 作为固定画布；编辑菜单只覆盖，不改变 Widget / App 的原坐标。跨页拖拽把目标 page index 传入纯函数 `moveHomeAppPlacement()`，持久化后仍留在目标页。旧版本只有 `homeAppKeys[]` 时由 normalizer 自动迁移，无需 IndexedDB schema 升级。
+主屏不再使用浏览器原生 `overflow-x:auto` / scroll snap 作为分页状态源，而由 Pointer Events 驱动 `currentPage` 与临时 `swipeOffset`，页轨道使用 transform 呈现。这样触屏与鼠标都可以直接左右拖动翻页，同时避免浏览器原生 scrollbar / edge indicator 泄漏进 OS-like 桌面。
+
+页面不是可人工创建的独立实体。`normalizeHomeAppearance()` 会清理空页；整个桌面至少一页。第一页有 Widget 时容量为 4 个 App，其余页容量为 12；内容溢出才自动新增页，某页最后一个 App 被移走后该页自动回收。跨页拖拽产生的非空页归属仍然持久化。
+
+`PhoneFrame lockScroll` 继续关闭外层纵向 scroll layer；Dock 独立于分页，最多 4 个 App。旧版本 `homePageKeys` 中遗留的人为空页会在加载/保存时无迁移自动收敛。
 
 ## V0.5.0-alpha.5.1.8 Launcher / Character Asset Security / Retrieval
 

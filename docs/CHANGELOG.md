@@ -1,3 +1,11 @@
+## V0.5.0-alpha.5.1.10 · Launcher V4 手势翻页 / 自动页数 / 白线根因修复
+
+- 横向分页从浏览器原生 scroll 容器切换为 pointer 手势 + transform 页轨道，避免原生 scrollbar / edge indicator 产生竖白线。
+- 鼠标和触屏都可左右拖动翻页；轻扫按位移和速度判断目标页，边界带阻尼。
+- 页面数量改为内容驱动：至少 1 页，App 溢出自动新增页，空页自动删除。
+- 取消页面编辑器中的“新增一页 / 删除一页”；“编辑页面”改名为“编辑桌面”。
+- 增加空页自动收敛回归测试；测试定义更新为 38 files / 317 cases。
+
 ## V0.5.0-alpha.5.1.9 · Launcher V3 真机修正 / 持久分页 / 音乐图标统一
 
 - 主屏通过 `PhoneFrame lockScroll` 关闭外层纵向滚动，Launcher 页面自身也禁止纵向滚动并强制隐藏 scrollbar，针对用户截图中的左侧竖白线做根因级处理；底部横向 Home Indicator 保留。

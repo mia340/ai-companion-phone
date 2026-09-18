@@ -41,7 +41,7 @@ export interface HomeAppearancePreferences {
   showAppLabels: boolean
   /** 扁平列表只负责“桌面是否显示”，用于兼容旧版本和设置页。 */
   homeAppKeys: HomeAppKey[]
-  /** Launcher V3 的真实分页顺序。每个子数组就是一页，空白页也会被保留。 */
+  /** Launcher V4 的真实分页顺序。每个子数组就是一页；空白页不会持久化。 */
   homePageKeys: HomeAppKey[][]
   dockAppKeys: HomeAppKey[]
   homeWidgetKeys: HomeWidgetKey[]
@@ -49,12 +49,12 @@ export interface HomeAppearancePreferences {
 }
 
 export type HomePlacement = 'home' | 'dock'
-const MIN_HOME_PAGES = 2
+const MIN_HOME_PAGES = 1
 const MAX_HOME_PAGES = 8
 
 /**
  * 旧版只有一维 homeAppKeys。升级时把有 Widget 的第一页控制为一行 App，
- * 其余页按四列三行分页，并至少保留两页，让桌面从一开始就具备真实横向分页。
+ * 其余页按四列三行分页。页数只由内容决定：至少一页，内容溢出才自动新增页面。
  */
 export function paginateHomeAppKeys(
   keys: readonly HomeAppKey[],
@@ -71,26 +71,6 @@ export function paginateHomeAppKeys(
   }
   while (pages.length < Math.max(1, minimumPages)) pages.push([])
   return pages.slice(0, MAX_HOME_PAGES)
-}
-
-export function addHomePage(value: HomeAppearancePreferences): HomeAppearancePreferences {
-  const normalized = normalizeHomeAppearance(value)
-  if (normalized.homePageKeys.length >= MAX_HOME_PAGES) return normalized
-  return normalizeHomeAppearance({
-    ...normalized,
-    homePageKeys: [...normalized.homePageKeys.map(page => [...page]), []]
-  })
-}
-
-export function removeHomePage(value: HomeAppearancePreferences, pageIndex: number): HomeAppearancePreferences {
-  const normalized = normalizeHomeAppearance(value)
-  if (normalized.homePageKeys.length <= MIN_HOME_PAGES) return normalized
-  const pages = normalized.homePageKeys.map(page => [...page])
-  const index = Math.max(0, Math.min(pages.length - 1, Math.floor(pageIndex)))
-  const [removed] = pages.splice(index, 1)
-  const receiver = Math.max(0, Math.min(pages.length - 1, index - 1))
-  pages[receiver].push(...removed)
-  return normalizeHomeAppearance({ ...normalized, homePageKeys: pages })
 }
 
 /**
@@ -347,7 +327,7 @@ export function normalizeHomeAppearance(value: HomeAppearanceInput): HomeAppeara
 function normalizeHomePageKeys(value: unknown, homeAppKeys: HomeAppKey[], hasWidgets: boolean) {
   const allowed = new Set(homeAppKeys)
   const seen = new Set<HomeAppKey>()
-  const pages: HomeAppKey[][] = []
+  const rawPages: HomeAppKey[][] = []
 
   if (Array.isArray(value) && value.some(page => Array.isArray(page))) {
     for (const rawPage of value.slice(0, MAX_HOME_PAGES)) {
@@ -360,18 +340,41 @@ function normalizeHomePageKeys(value: unknown, homeAppKeys: HomeAppKey[], hasWid
         seen.add(key)
         page.push(key)
       }
-      pages.push(page)
+      // 真实手机桌面不保留“人工空白页”。页面清空后自动收掉。
+      if (page.length) rawPages.push(page)
     }
   }
 
-  if (pages.length === 0) {
-    return paginateHomeAppKeys(homeAppKeys, hasWidgets)
+  if (rawPages.length === 0) {
+    return paginateHomeAppKeys(homeAppKeys, hasWidgets, hasWidgets ? 4 : 12, 12, 1)
+  }
+
+  const capacityForPage = (index: number) => index === 0 && hasWidgets ? 4 : 12
+  const pages: HomeAppKey[][] = []
+
+  // 尊重玩家已有页归属，但任何单页超出容量时自动向后溢出生成新页。
+  for (const rawPage of rawPages) {
+    let pending = [...rawPage]
+    while (pending.length && pages.length < MAX_HOME_PAGES) {
+      const capacity = capacityForPage(pages.length)
+      pages.push(pending.splice(0, capacity))
+    }
   }
 
   const missing = homeAppKeys.filter(key => !seen.has(key))
-  if (missing.length) pages[pages.length - 1].push(...missing)
-  while (pages.length < MIN_HOME_PAGES) pages.push([])
-  return pages.slice(0, MAX_HOME_PAGES)
+  for (const key of missing) {
+    let pageIndex = Math.max(0, pages.length - 1)
+    if (pages.length === 0) pages.push([])
+    if (pages[pageIndex].length >= capacityForPage(pageIndex) && pages.length < MAX_HOME_PAGES) {
+      pages.push([])
+      pageIndex = pages.length - 1
+    }
+    if (pages[pageIndex].length < capacityForPage(pageIndex)) pages[pageIndex].push(key)
+  }
+
+  // 清掉因移动/删除产生的空页；整个桌面至少保留一页。
+  const compacted = pages.filter(page => page.length > 0).slice(0, MAX_HOME_PAGES)
+  return compacted.length ? compacted : [[]]
 }
 
 function normalizeAppKeys(value: unknown, fallback: HomeAppKey[]) {

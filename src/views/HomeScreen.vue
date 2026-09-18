@@ -17,11 +17,9 @@ import {
   CUSTOMIZABLE_APPS,
   DEFAULT_HOME_APPEARANCE,
   WIDGET_CATALOG,
-  addHomePage,
   listAppCustomizations,
   loadHomeAppearance,
   moveHomeAppPlacement,
-  removeHomePage,
   resolveDockApps,
   resolveHomeApps,
   saveHomeAppearance,
@@ -49,7 +47,11 @@ const musicTones: [string, string] = ['#8f9cde', '#b9c4ef']
 
 const editMode = ref(false)
 const activeSheet = ref<'widgets' | 'page' | null>(null)
-const pageScroller = ref<HTMLElement | null>(null)
+const pageViewport = ref<HTMLElement | null>(null)
+const pageSwipeOffset = ref(0)
+const pageSwiping = ref(false)
+let pageSwipe: { pointerId: number; startX: number; startY: number; lastX: number; startedAt: number } | undefined
+let suppressAppClickUntil = 0
 const currentPage = ref(0)
 const draggingKey = ref<HomeAppKey | ''>('')
 const dropTargetKey = ref<HomeAppKey | ''>('')
@@ -190,7 +192,7 @@ async function loadHomeState() {
 }
 
 function openApp(app: HomeAppDefinition) {
-  if (editMode.value) return
+  if (editMode.value || performance.now() < suppressAppClickUntil) return
   void router.push(app.route)
 }
 
@@ -416,7 +418,7 @@ function updateDropTarget(event: PointerEvent) {
     dropTargetPage.value = -1
   }
 
-  const scroller = pageScroller.value
+  const scroller = pageViewport.value
   if (!scroller || !launcherPointer?.active) return
   const rect = scroller.getBoundingClientRect()
   if (event.clientX < rect.left + 30 && currentPage.value > 0) queuePageTurn(-1)
@@ -459,38 +461,75 @@ async function finishHomePointer(event?: PointerEvent, commit = true) {
   resetLauncherPointer()
 }
 
-function syncPageFromScroll() {
-  const scroller = pageScroller.value
-  if (!scroller?.clientWidth) return
-  currentPage.value = Math.max(0, Math.min(
-    homePages.value.length - 1,
-    Math.round(scroller.scrollLeft / scroller.clientWidth)
-  ))
+function goToPage(index: number, _behavior: ScrollBehavior = 'auto') {
+  currentPage.value = Math.max(0, Math.min(homePages.value.length - 1, index))
+  pageSwipeOffset.value = 0
 }
 
-function goToPage(index: number, behavior: ScrollBehavior = 'auto') {
-  const scroller = pageScroller.value
-  const next = Math.max(0, Math.min(homePages.value.length - 1, index))
-  currentPage.value = next
-  if (!scroller) return
-  scroller.scrollTo({ left: scroller.clientWidth * next, behavior })
+function startPageSwipe(event: PointerEvent) {
+  if (activeSheet.value || launcherPointer?.active) return
+  if (editMode.value && (event.target as HTMLElement | null)?.closest('[data-launcher-item],.hm-widget,.hm-dock')) return
+  pageSwipe = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    lastX: event.clientX,
+    startedAt: performance.now()
+  }
 }
 
-async function createHomePage() {
-  const before = appearance.value.homePageKeys.length
-  const next = addHomePage(appearance.value)
-  await persistAppearance(next)
-  activeSheet.value = null
-  await new Promise(resolve => window.requestAnimationFrame(resolve))
-  if (appearance.value.homePageKeys.length > before) goToPage(appearance.value.homePageKeys.length - 1, 'smooth')
+function movePageSwipe(event: PointerEvent) {
+  if (!pageSwipe || pageSwipe.pointerId !== event.pointerId || launcherPointer?.active) return
+  const dx = event.clientX - pageSwipe.startX
+  const dy = event.clientY - pageSwipe.startY
+  pageSwipe.lastX = event.clientX
+
+  if (!pageSwiping.value) {
+    if (Math.abs(dx) < 10) return
+    if (Math.abs(dx) <= Math.abs(dy) * 1.1) return
+    pageSwiping.value = true
+    cancelHomeLongPress()
+    if (launcherPointer && !launcherPointer.active) resetLauncherPointer()
+  }
+
+  event.preventDefault()
+  const viewportWidth = pageViewport.value?.clientWidth || 1
+  let offset = dx
+  if ((currentPage.value === 0 && dx > 0) || (currentPage.value === homePages.value.length - 1 && dx < 0)) {
+    offset *= 0.24
+  }
+  pageSwipeOffset.value = Math.max(-viewportWidth, Math.min(viewportWidth, offset))
 }
 
-async function deleteHomePage(pageIndex: number) {
-  if (appearance.value.homePageKeys.length <= 2) return
-  const next = removeHomePage(appearance.value, pageIndex)
-  await persistAppearance(next)
-  if (currentPage.value >= next.homePageKeys.length) goToPage(next.homePageKeys.length - 1)
+function finishPageSwipe(event: PointerEvent) {
+  if (!pageSwipe || pageSwipe.pointerId !== event.pointerId) return
+  if (pageSwiping.value) {
+    const dx = pageSwipe.lastX - pageSwipe.startX
+    const elapsed = Math.max(1, performance.now() - pageSwipe.startedAt)
+    const velocity = dx / elapsed
+    const viewportWidth = pageViewport.value?.clientWidth || 320
+    const threshold = Math.min(72, viewportWidth * 0.18)
+    if ((dx < -threshold || velocity < -0.45) && currentPage.value < homePages.value.length - 1) {
+      currentPage.value += 1
+    } else if ((dx > threshold || velocity > 0.45) && currentPage.value > 0) {
+      currentPage.value -= 1
+    }
+    suppressAppClickUntil = performance.now() + 320
+  }
+  pageSwipeOffset.value = 0
+  pageSwiping.value = false
+  pageSwipe = undefined
 }
+
+function cancelPageSwipe() {
+  pageSwipeOffset.value = 0
+  pageSwiping.value = false
+  pageSwipe = undefined
+}
+
+const pageTrackStyle = computed(() => ({
+  transform: `translate3d(${-currentPage.value * 100}%,0,0) translate3d(${pageSwipeOffset.value}px,0,0)`
+}))
 
 function finishEditing() {
   void finishHomePointer(undefined, false)
@@ -523,6 +562,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   resetLauncherPointer()
+  cancelPageSwipe()
   socialBadgeSubscription?.unsubscribe()
   if (minuteTimer !== undefined) window.clearInterval(minuteTimer)
 })
@@ -558,13 +598,22 @@ onUnmounted(() => {
               <span>❉</span><b>编辑墙纸</b>
             </button>
             <button type="button" @click="activeSheet = 'page'">
-              <span>▦</span><b>编辑页面</b>
+              <span>▦</span><b>编辑桌面</b>
             </button>
           </div>
           <button class="hm-done" type="button" @click="finishEditing">完成</button>
         </div>
 
-        <div ref="pageScroller" class="hm-pages" @scroll.passive="syncPageFromScroll">
+        <div
+          ref="pageViewport"
+          class="hm-pages"
+          :class="{ 'is-swiping': pageSwiping }"
+          @pointerdown="startPageSwipe"
+          @pointermove="movePageSwipe"
+          @pointerup="finishPageSwipe"
+          @pointercancel="cancelPageSwipe"
+        >
+          <div class="hm-pages-track" :style="pageTrackStyle">
           <section
             v-for="(pageApps, pageIndex) in homePages"
             :key="pageIndex"
@@ -662,6 +711,7 @@ onUnmounted(() => {
               </div>
             </div>
           </section>
+          </div>
         </div>
 
         <div v-if="homePages.length > 1" class="hm-page-dots" aria-label="桌面分页">
@@ -692,7 +742,7 @@ onUnmounted(() => {
         <section class="hm-sheet">
           <header>
             <div>
-              <small>{{ activeSheet === 'widgets' ? '小组件库' : '页面布局' }}</small>
+              <small>{{ activeSheet === 'widgets' ? '小组件库' : '桌面布局' }}</small>
               <h2>{{ activeSheet === 'widgets' ? '添加到主屏幕' : '选择显示位置' }}</h2>
             </div>
             <button type="button" aria-label="关闭" @click="activeSheet = null">×</button>
@@ -720,27 +770,6 @@ onUnmounted(() => {
           </div>
 
           <div v-else class="page-editor">
-            <div class="page-manager">
-              <div
-                v-for="(_, pageIndex) in appearance.homePageKeys"
-                :key="`page-${pageIndex}`"
-                class="page-chip"
-                :class="{ active: currentPage === pageIndex }"
-              >
-                <button type="button" class="page-jump" @click="goToPage(pageIndex, 'smooth')">
-                  <span>第 {{ pageIndex + 1 }} 页</span>
-                  <small>{{ appearance.homePageKeys[pageIndex]?.length || 0 }} 个 App</small>
-                </button>
-                <button
-                  v-if="appearance.homePageKeys.length > 2"
-                  type="button"
-                  class="page-delete"
-                  aria-label="删除这一页"
-                  @click="deleteHomePage(pageIndex)"
-                >×</button>
-              </div>
-              <button type="button" class="page-add" @click="createHomePage">＋ 新增一页</button>
-            </div>
             <div class="page-editor-head">
               <span>App</span><span>桌面</span><span>Dock</span>
             </div>
@@ -771,8 +800,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.hm-root{position:relative;height:100%;display:flex;flex-direction:column;overflow:hidden;color:#253b4e}.hm-wall{position:absolute;inset:0;z-index:0;overflow:hidden;background:radial-gradient(115% 68% at 88% -7%,rgba(255,255,255,.97) 0%,rgba(226,244,255,.74) 36%,transparent 64%),radial-gradient(108% 78% at -12% 105%,rgba(192,225,248,.9) 0%,transparent 64%),linear-gradient(165deg,#f7fcff 0%,#e9f5fe 43%,#dbeaf7 100%)}.glow{position:absolute;display:block;border-radius:50%;filter:blur(12px);opacity:.48}.g1{width:230px;height:230px;top:-72px;right:-64px;background:radial-gradient(circle,rgba(165,212,244,.68),transparent 68%)}.g2{width:280px;height:280px;bottom:-110px;left:-100px;background:radial-gradient(circle,rgba(184,222,248,.76),transparent 68%)}.g3{width:180px;height:180px;top:37%;left:20%;background:radial-gradient(circle,rgba(255,255,255,.7),transparent 70%)}.hm-root::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(19,52,78,.035))}.hm-main{position:relative;z-index:1;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0;touch-action:pan-x}.hm-pages{display:flex;flex:1;min-height:0;width:100%;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain;scrollbar-width:none;-ms-overflow-style:none}.hm-pages::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}.hm-root *{scrollbar-color:transparent transparent}.hm-root *::-webkit-scrollbar{display:none!important;width:0!important;height:0!important;background:transparent!important}.hm-root *::-webkit-scrollbar-thumb,.hm-root *::-webkit-scrollbar-track{background:transparent!important}.hm-page{position:relative;flex:0 0 100%;width:100%;min-height:0;overflow:hidden;scroll-snap-align:start;scroll-snap-stop:always;scrollbar-width:none;scrollbar-color:transparent transparent;-ms-overflow-style:none}.hm-page::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}.hm-page-content{height:100%;min-height:0;overflow:hidden;padding:18px 18px 10px;box-sizing:border-box}.hm-widgets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:6px 1px 0}.hm-widget{position:relative;min-width:0;overflow:hidden;border:1px solid rgba(255,255,255,.52);box-shadow:0 12px 27px rgba(42,74,98,.12),inset 0 1px 0 rgba(255,255,255,.45);cursor:pointer}.hm-widgets.style-frosted .hm-widget{background:rgba(247,251,254,.6);backdrop-filter:blur(24px) saturate(1.12);-webkit-backdrop-filter:blur(24px) saturate(1.12)}.hm-widgets.style-clear .hm-widget{background:rgba(255,255,255,.22);backdrop-filter:blur(7px) saturate(1.08);-webkit-backdrop-filter:blur(7px) saturate(1.08)}.hm-widgets.style-solid .hm-widget{background:#f8fbfd}.hm-widget.size-medium{grid-column:span 4;min-height:122px;border-radius:24px}.hm-widget.size-small{grid-column:span 2;min-height:124px;border-radius:24px}.widget-greeting{position:absolute;left:18px;bottom:38px;font-size:27px;line-height:1;font-weight:760;letter-spacing:-.04em}.widget-date{position:absolute;left:18px;top:17px;color:#6d8292;font-size:11px}.widget-caption{position:absolute;left:18px;bottom:16px;color:#6f8494;font-size:10px}.widget-clock{position:absolute;right:17px;top:14px;font-size:27px;font-weight:620;letter-spacing:-.04em;color:#4c6679}.widget-companion,.widget-world{padding:14px}.widget-companion,.widget-world{display:flex;flex-direction:column;justify-content:space-between}.widget-copy{display:grid;gap:2px;min-width:0}.widget-copy small,.music-copy small{color:#8396a5;font-size:9px}.widget-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.widget-copy span,.music-copy span{color:#7b8e9d;font-size:9px}.world-orb{display:grid;place-items:center;width:45px;height:45px;border-radius:15px;background:linear-gradient(145deg,#87b8dc,#c4def0);color:white;font-size:29px;box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}.widget-music{display:flex;align-items:center;gap:12px;padding:15px 16px}.music-art{display:grid;place-items:center;width:72px;height:72px;flex:0 0 auto}.music-copy{display:grid;gap:3px;min-width:0;flex:1}.music-copy b{font-size:14px;line-height:1.35}.music-play{display:grid;place-items:center;width:31px;height:31px;border-radius:50%;background:rgba(255,255,255,.8);color:#6f7fc4;font-size:12px}.hm-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px 8px;margin-top:22px;padding:0 1px}.hm-grid.after-widgets{margin-top:25px}.hm-app-shell{position:relative;display:grid;place-items:start center;min-width:0;transition:transform .16s ease,opacity .16s ease,filter .16s ease}.hm-app-shell.is-dragging{opacity:.2;filter:saturate(.7)}.hm-drag-ghost{position:fixed!important;z-index:9999!important;margin:0!important;pointer-events:none!important;opacity:.94!important;transform:scale(1.06)!important;transform-origin:center!important;filter:drop-shadow(0 16px 18px rgba(32,50,65,.22));transition:none!important}.hm-drag-ghost .hm-app,.hm-drag-ghost .dock-app{animation:none!important}.launcher-source-dragging{opacity:.22!important}
-.hm-app-shell.is-drop-target{transform:scale(.92);outline:1.5px dashed rgba(65,91,110,.4);outline-offset:5px;border-radius:18px}.hm-app{display:flex;min-width:0;flex-direction:column;align-items:center;gap:7px;padding:0;border:0;background:transparent;cursor:pointer;color:inherit}.hm-tile-wrap{position:relative;display:grid;place-items:center}.hm-badge{position:absolute;z-index:3;right:-6px;top:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:11px;background:#ff4b57;color:#fff;font-size:10px;line-height:20px;text-align:center;font-weight:760;border:1.5px solid rgba(255,255,255,.92)}.hm-name{max-width:72px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#2e4659;white-space:nowrap;text-shadow:0 1px 8px rgba(255,255,255,.7)}.hm-page-dots{display:flex;flex:0 0 auto;justify-content:center;gap:7px;padding:8px 0 10px}.hm-page-dots button{width:6px;height:6px;padding:0;border:0;border-radius:50%;background:rgba(63,81,95,.28)}.hm-page-dots button.active{background:rgba(42,62,78,.72)}.hm-dock-holder{flex:0 0 auto;padding:0 21px 10px}.hm-edit-toolbar{position:absolute;z-index:25;inset:8px 0 auto;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none}.hm-done{pointer-events:auto;margin-right:2px;padding:7px 15px;border:1px solid rgba(255,255,255,.55);border-radius:999px;background:rgba(248,250,252,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:#2d4050;font-size:13px;font-weight:700;box-shadow:0 7px 20px rgba(28,47,62,.12)}.hm-edit-menu{pointer-events:auto;width:225px;overflow:hidden;border:1px solid rgba(255,255,255,.54);border-radius:24px;background:rgba(248,247,246,.72);backdrop-filter:blur(28px) saturate(1.15);-webkit-backdrop-filter:blur(28px) saturate(1.15);box-shadow:0 18px 42px rgba(28,45,58,.18)}.hm-edit-menu button{width:100%;height:51px;padding:0 16px;border:0;border-bottom:1px solid rgba(73,84,93,.08);background:transparent;display:flex;align-items:center;gap:13px;text-align:left;color:#202a31}.hm-edit-menu button:last-child{border-bottom:0}.hm-edit-menu button span{width:26px;text-align:center;font-size:20px}.hm-edit-menu button b{font-size:14px;font-weight:620}.hm-remove{position:absolute;z-index:15;left:-7px;top:-7px;width:24px;height:24px;border:1px solid rgba(255,255,255,.72);border-radius:50%;background:rgba(119,127,135,.9);color:#fff;font-size:20px;line-height:20px;display:grid;place-items:center;box-shadow:0 3px 10px rgba(24,39,52,.2)}.hm-remove-app{left:2px;top:-6px}.is-editing .hm-widget,.is-editing .hm-app{animation:home-jiggle .18s ease-in-out infinite alternate}.is-editing .hm-app-shell:nth-child(even) .hm-app,.is-editing .hm-widget:nth-child(even){animation-direction:alternate-reverse}.hm-sheet-backdrop{position:absolute;z-index:40;inset:0;display:flex;align-items:flex-end;background:rgba(24,35,43,.16);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}.hm-sheet{width:100%;max-height:68%;overflow:hidden;border-radius:28px 28px 0 0;background:#f7f9fb;box-shadow:0 -18px 48px rgba(24,45,61,.2)}.hm-sheet header{display:flex;align-items:center;justify-content:space-between;padding:17px 18px 13px;border-bottom:1px solid #e8edf1}.hm-sheet header small{color:#8798a5;font-size:9px}.hm-sheet header h2{margin:2px 0 0;font-size:20px;letter-spacing:-.02em}.hm-sheet header button{width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#536979;font-size:21px}.widget-catalog,.page-editor{max-height:430px;overflow:auto;padding:12px 14px 24px}.widget-choice{width:100%;min-height:72px;display:grid;grid-template-columns:62px 1fr auto;align-items:center;gap:12px;padding:9px 10px;border:0;border-bottom:1px solid #e9eef1;background:transparent;text-align:left;color:#304759}.widget-choice:disabled{opacity:.46}.widget-choice>span:nth-child(2){display:grid;gap:3px}.widget-choice>span:nth-child(2) b{font-size:13px}.widget-choice>span:nth-child(2) small{color:#8495a2;font-size:9px;line-height:1.4}.widget-choice em{font-style:normal;font-size:18px;color:#5d91b6}.widget-sample{display:grid;place-items:center;width:58px;height:50px;border-radius:15px;background:linear-gradient(145deg,#e8f2f8,#fff);box-shadow:inset 0 0 0 1px rgba(80,109,131,.07);color:#5e7b91}.sample-music{background:linear-gradient(145deg,#dfe2f7,#f7f8ff);color:#7783c8}.page-manager{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;scrollbar-width:none}.page-manager::-webkit-scrollbar{display:none}.page-chip,.page-add{position:relative;flex:0 0 auto;min-width:92px;min-height:54px;border:1px solid #e1e9ef;border-radius:14px;background:#f7fafc;color:#536b7d;text-align:left}.page-chip.active{border-color:#a9cde5;background:#edf7fd;color:#376987;box-shadow:inset 0 0 0 1px rgba(104,168,207,.1)}.page-jump{width:100%;height:100%;min-height:52px;padding:8px 28px 8px 10px;border:0;background:transparent;color:inherit;text-align:left}.page-jump span,.page-jump small{display:block}.page-jump span{font-size:11px;font-weight:750}.page-jump small{margin-top:3px;color:#8a9aa6;font-size:8px}.page-delete{position:absolute;right:5px;top:5px;width:18px;height:18px;padding:0;border:0;display:grid;place-items:center;border-radius:50%;background:#dfe6eb;color:#657987;font-size:12px}.page-add{display:grid;place-items:center;min-width:104px;padding:8px 10px;border-style:dashed;color:#64849b;font-size:10px;font-weight:700}.page-editor-head,.page-app-row{display:grid;grid-template-columns:1fr 58px 58px;align-items:center;gap:8px}.page-editor-head{padding:3px 5px 8px;color:#8c9aa5;font-size:9px;text-align:center}.page-editor-head span:first-child{text-align:left}.page-app-row{min-height:58px;border-top:1px solid #e9eef1}.page-app-name{display:flex;align-items:center;gap:9px;min-width:0}.page-app-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.place-toggle{justify-self:center;width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#7a8b97;font-size:15px}.place-toggle.on{background:#dff3ea;color:#159a63;font-weight:800}.place-toggle:disabled{opacity:.32}.sheet-note{margin:12px 4px 0;color:#8d9ba6;font-size:9px;line-height:1.55}
+.hm-root{position:relative;height:100%;display:flex;flex-direction:column;overflow:hidden;color:#253b4e}.hm-wall{position:absolute;inset:0;z-index:0;overflow:hidden;background:radial-gradient(115% 68% at 88% -7%,rgba(255,255,255,.97) 0%,rgba(226,244,255,.74) 36%,transparent 64%),radial-gradient(108% 78% at -12% 105%,rgba(192,225,248,.9) 0%,transparent 64%),linear-gradient(165deg,#f7fcff 0%,#e9f5fe 43%,#dbeaf7 100%)}.glow{position:absolute;display:block;border-radius:50%;filter:blur(12px);opacity:.48}.g1{width:230px;height:230px;top:-72px;right:-64px;background:radial-gradient(circle,rgba(165,212,244,.68),transparent 68%)}.g2{width:280px;height:280px;bottom:-110px;left:-100px;background:radial-gradient(circle,rgba(184,222,248,.76),transparent 68%)}.g3{width:180px;height:180px;top:37%;left:20%;background:radial-gradient(circle,rgba(255,255,255,.7),transparent 70%)}.hm-root::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(19,52,78,.035))}.hm-main{position:relative;z-index:1;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0;touch-action:none}.hm-pages{position:relative;flex:1;min-height:0;width:100%;overflow:hidden;touch-action:pan-y;overscroll-behavior:none}.hm-pages-track{display:flex;width:100%;height:100%;will-change:transform;transition:transform .28s cubic-bezier(.22,.76,.24,1)}.hm-pages.is-swiping .hm-pages-track{transition:none}.hm-pages::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}.hm-root *{scrollbar-color:transparent transparent}.hm-root *::-webkit-scrollbar{display:none!important;width:0!important;height:0!important;background:transparent!important}.hm-root *::-webkit-scrollbar-thumb,.hm-root *::-webkit-scrollbar-track{background:transparent!important}.hm-page{position:relative;flex:0 0 100%;width:100%;min-height:0;overflow:hidden;scrollbar-width:none;scrollbar-color:transparent transparent;-ms-overflow-style:none}.hm-page::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}.hm-page-content{height:100%;min-height:0;overflow:hidden;padding:18px 18px 10px;box-sizing:border-box}.hm-widgets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:6px 1px 0}.hm-widget{position:relative;min-width:0;overflow:hidden;border:1px solid rgba(255,255,255,.52);box-shadow:0 12px 27px rgba(42,74,98,.12),inset 0 1px 0 rgba(255,255,255,.45);cursor:pointer}.hm-widgets.style-frosted .hm-widget{background:rgba(247,251,254,.6);backdrop-filter:blur(24px) saturate(1.12);-webkit-backdrop-filter:blur(24px) saturate(1.12)}.hm-widgets.style-clear .hm-widget{background:rgba(255,255,255,.22);backdrop-filter:blur(7px) saturate(1.08);-webkit-backdrop-filter:blur(7px) saturate(1.08)}.hm-widgets.style-solid .hm-widget{background:#f8fbfd}.hm-widget.size-medium{grid-column:span 4;min-height:122px;border-radius:24px}.hm-widget.size-small{grid-column:span 2;min-height:124px;border-radius:24px}.widget-greeting{position:absolute;left:18px;bottom:38px;font-size:27px;line-height:1;font-weight:760;letter-spacing:-.04em}.widget-date{position:absolute;left:18px;top:17px;color:#6d8292;font-size:11px}.widget-caption{position:absolute;left:18px;bottom:16px;color:#6f8494;font-size:10px}.widget-clock{position:absolute;right:17px;top:14px;font-size:27px;font-weight:620;letter-spacing:-.04em;color:#4c6679}.widget-companion,.widget-world{padding:14px}.widget-companion,.widget-world{display:flex;flex-direction:column;justify-content:space-between}.widget-copy{display:grid;gap:2px;min-width:0}.widget-copy small,.music-copy small{color:#8396a5;font-size:9px}.widget-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.widget-copy span,.music-copy span{color:#7b8e9d;font-size:9px}.world-orb{display:grid;place-items:center;width:45px;height:45px;border-radius:15px;background:linear-gradient(145deg,#87b8dc,#c4def0);color:white;font-size:29px;box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}.widget-music{display:flex;align-items:center;gap:12px;padding:15px 16px}.music-art{display:grid;place-items:center;width:72px;height:72px;flex:0 0 auto}.music-copy{display:grid;gap:3px;min-width:0;flex:1}.music-copy b{font-size:14px;line-height:1.35}.music-play{display:grid;place-items:center;width:31px;height:31px;border-radius:50%;background:rgba(255,255,255,.8);color:#6f7fc4;font-size:12px}.hm-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px 8px;margin-top:22px;padding:0 1px}.hm-grid.after-widgets{margin-top:25px}.hm-app-shell{position:relative;display:grid;place-items:start center;min-width:0;transition:transform .16s ease,opacity .16s ease,filter .16s ease}.hm-app-shell.is-dragging{opacity:.2;filter:saturate(.7)}.hm-drag-ghost{position:fixed!important;z-index:9999!important;margin:0!important;pointer-events:none!important;opacity:.94!important;transform:scale(1.06)!important;transform-origin:center!important;filter:drop-shadow(0 16px 18px rgba(32,50,65,.22));transition:none!important}.hm-drag-ghost .hm-app,.hm-drag-ghost .dock-app{animation:none!important}.launcher-source-dragging{opacity:.22!important}
+.hm-app-shell.is-drop-target{transform:scale(.92);outline:1.5px dashed rgba(65,91,110,.4);outline-offset:5px;border-radius:18px}.hm-app{display:flex;min-width:0;flex-direction:column;align-items:center;gap:7px;padding:0;border:0;background:transparent;cursor:pointer;color:inherit}.hm-tile-wrap{position:relative;display:grid;place-items:center}.hm-badge{position:absolute;z-index:3;right:-6px;top:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:11px;background:#ff4b57;color:#fff;font-size:10px;line-height:20px;text-align:center;font-weight:760;border:1.5px solid rgba(255,255,255,.92)}.hm-name{max-width:72px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#2e4659;white-space:nowrap;text-shadow:0 1px 8px rgba(255,255,255,.7)}.hm-page-dots{display:flex;flex:0 0 auto;justify-content:center;gap:7px;padding:8px 0 10px}.hm-page-dots button{width:6px;height:6px;padding:0;border:0;border-radius:50%;background:rgba(63,81,95,.28)}.hm-page-dots button.active{background:rgba(42,62,78,.72)}.hm-dock-holder{flex:0 0 auto;padding:0 21px 10px}.hm-edit-toolbar{position:absolute;z-index:25;inset:8px 0 auto;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none}.hm-done{pointer-events:auto;margin-right:2px;padding:7px 15px;border:1px solid rgba(255,255,255,.55);border-radius:999px;background:rgba(248,250,252,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:#2d4050;font-size:13px;font-weight:700;box-shadow:0 7px 20px rgba(28,47,62,.12)}.hm-edit-menu{pointer-events:auto;width:225px;overflow:hidden;border:1px solid rgba(255,255,255,.54);border-radius:24px;background:rgba(248,247,246,.72);backdrop-filter:blur(28px) saturate(1.15);-webkit-backdrop-filter:blur(28px) saturate(1.15);box-shadow:0 18px 42px rgba(28,45,58,.18)}.hm-edit-menu button{width:100%;height:51px;padding:0 16px;border:0;border-bottom:1px solid rgba(73,84,93,.08);background:transparent;display:flex;align-items:center;gap:13px;text-align:left;color:#202a31}.hm-edit-menu button:last-child{border-bottom:0}.hm-edit-menu button span{width:26px;text-align:center;font-size:20px}.hm-edit-menu button b{font-size:14px;font-weight:620}.hm-remove{position:absolute;z-index:15;left:-7px;top:-7px;width:24px;height:24px;border:1px solid rgba(255,255,255,.72);border-radius:50%;background:rgba(119,127,135,.9);color:#fff;font-size:20px;line-height:20px;display:grid;place-items:center;box-shadow:0 3px 10px rgba(24,39,52,.2)}.hm-remove-app{left:2px;top:-6px}.is-editing .hm-widget,.is-editing .hm-app{animation:home-jiggle .18s ease-in-out infinite alternate}.is-editing .hm-app-shell:nth-child(even) .hm-app,.is-editing .hm-widget:nth-child(even){animation-direction:alternate-reverse}.hm-sheet-backdrop{position:absolute;z-index:40;inset:0;display:flex;align-items:flex-end;background:rgba(24,35,43,.16);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}.hm-sheet{width:100%;max-height:68%;overflow:hidden;border-radius:28px 28px 0 0;background:#f7f9fb;box-shadow:0 -18px 48px rgba(24,45,61,.2)}.hm-sheet header{display:flex;align-items:center;justify-content:space-between;padding:17px 18px 13px;border-bottom:1px solid #e8edf1}.hm-sheet header small{color:#8798a5;font-size:9px}.hm-sheet header h2{margin:2px 0 0;font-size:20px;letter-spacing:-.02em}.hm-sheet header button{width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#536979;font-size:21px}.widget-catalog,.page-editor{max-height:430px;overflow:auto;padding:12px 14px 24px}.widget-choice{width:100%;min-height:72px;display:grid;grid-template-columns:62px 1fr auto;align-items:center;gap:12px;padding:9px 10px;border:0;border-bottom:1px solid #e9eef1;background:transparent;text-align:left;color:#304759}.widget-choice:disabled{opacity:.46}.widget-choice>span:nth-child(2){display:grid;gap:3px}.widget-choice>span:nth-child(2) b{font-size:13px}.widget-choice>span:nth-child(2) small{color:#8495a2;font-size:9px;line-height:1.4}.widget-choice em{font-style:normal;font-size:18px;color:#5d91b6}.widget-sample{display:grid;place-items:center;width:58px;height:50px;border-radius:15px;background:linear-gradient(145deg,#e8f2f8,#fff);box-shadow:inset 0 0 0 1px rgba(80,109,131,.07);color:#5e7b91}.sample-music{background:linear-gradient(145deg,#dfe2f7,#f7f8ff);color:#7783c8}.page-editor-head,.page-app-row{display:grid;grid-template-columns:1fr 58px 58px;align-items:center;gap:8px}.page-editor-head{padding:3px 5px 8px;color:#8c9aa5;font-size:9px;text-align:center}.page-editor-head span:first-child{text-align:left}.page-app-row{min-height:58px;border-top:1px solid #e9eef1}.page-app-name{display:flex;align-items:center;gap:9px;min-width:0}.page-app-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.place-toggle{justify-self:center;width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#7a8b97;font-size:15px}.place-toggle.on{background:#dff3ea;color:#159a63;font-weight:800}.place-toggle:disabled{opacity:.32}.sheet-note{margin:12px 4px 0;color:#8d9ba6;font-size:9px;line-height:1.55}
 @keyframes home-jiggle{from{transform:rotate(-.65deg) translateY(0)}to{transform:rotate(.65deg) translateY(.4px)}}
 @media(max-width:360px){.hm-page-content{padding-left:14px;padding-right:14px}.hm-dock-holder{padding-left:17px;padding-right:17px}.hm-grid{gap:18px 5px}.hm-name{font-size:10px}.hm-edit-menu{width:205px}}
 </style>

@@ -53,7 +53,7 @@ describe('知间桌面入口与布局', () => {
     expect(normalized.iconScale).toBe(1.12)
     expect(normalized.showAppLabels).toBe(false)
     expect(normalized.homeAppKeys).toEqual(['music', 'turtle-soup'])
-    expect(normalized.homePageKeys).toEqual([['music', 'turtle-soup'], []])
+    expect(normalized.homePageKeys).toEqual([['music', 'turtle-soup']])
     expect(normalized.dockAppKeys).toEqual(['banxin', 'world', 'settings', 'new-character'])
     expect(normalized.homeWidgetKeys).toEqual(['greeting', 'music'])
     expect(normalized.widgetStyle).toBe('clear')
@@ -96,6 +96,30 @@ describe('知间桌面入口与布局', () => {
       ['turtle-soup', 'profile', 'memory'],
       ['backup', 'music']
     ])
+  })
+
+  it('页面只由内容产生：空页自动收掉，桌面至少保留一页', () => {
+    const collapsed = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'backup'],
+      homePageKeys: [['music'], [], ['backup'], []],
+      dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
+      homeWidgetKeys: ['greeting'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+    expect(collapsed.homePageKeys).toEqual([['music'], ['backup']])
+
+    const empty = normalizeHomeAppearance({
+      homeAppKeys: [],
+      homePageKeys: [[], []],
+      dockAppKeys: ['banxin'],
+      homeWidgetKeys: [],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+    expect(empty.homePageKeys).toEqual([[]])
   })
 
 })

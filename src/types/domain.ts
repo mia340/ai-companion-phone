@@ -11,7 +11,7 @@ export interface AppCustomization {
   showAppLabels?: boolean
   /** 主屏幕布局也复用这个非结构化记录；这些字段不参与索引，因此无需升级 IndexedDB。 */
   homeAppKeys?: string[]
-  /** Launcher V3: persisted page-by-page ordering; no Dexie schema migration because the field is not indexed. */
+  /** Launcher V4: content-driven page ordering; empty pages are compacted automatically and the field remains non-indexed. */
   homePageKeys?: string[][]
   dockAppKeys?: string[]
   homeWidgetKeys?: string[]

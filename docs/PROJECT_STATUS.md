@@ -1,24 +1,24 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.9**
+当前版本：**V0.5.0-alpha.5.1.10**
 
 ```text
-App：0.5.0-alpha.5.1.9
+App：0.5.0-alpha.5.1.10
 IndexedDB：V18
 Backup：V12
-测试定义：38 files / 316 it-test declarations
+测试定义：38 files / 317 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
-## 0. 本轮 alpha.5.1.9 重点
+## 0. 本轮 alpha.5.1.10 重点
 
-- **Launcher Runtime V3**：主屏外层和单页纵向 scroll layer 都被锁定，针对真机截图中的左侧竖白线做第二轮根因修正；底部横向 Home Indicator 保留。
-- **编辑态坐标稳定**：编辑菜单作为 overlay，不再用 226px padding 把 Widget / App / Dock 整体向下推。
-- **持久分页**：新增 `homePageKeys[][]`，旧 `homeAppKeys[]` 自动迁移；至少两页，跨页拖拽后目标页归属可持久化，页面编辑器可新增 / 删除页面。
-- **音乐视觉统一**：桌面音乐 App 改成用户指定的单音符图标，「一起听」Widget 直接复用同一 AppIcon。
-- alpha.5.1.8 的 Character Card Security Boundary、WorldBook compatibility 与 Memory Retrieval V2 继续保留。
+- **Launcher Runtime V4**：主屏不再依赖原生横向 scroll 容器，改用 pointer 手势 + transform 页轨道；手机/触屏与桌面鼠标都可左右拖动翻页，并从根源上移除原生滚动条/边缘白线来源。
+- **页数内容驱动**：取消“至少两页”和人工新增/删除空白页；至少 1 页，有内容溢出自动新增，某页 App 清空后自动收页。
+- **布局归属保留**：非空页仍保留玩家跨页拖拽后的归属，不会因为自动收空页把所有 App 强行挤回第一页。
+- **编辑页收敛**：长按桌面仍可进入编辑；“编辑页面”改为“编辑桌面”，只处理 App / Dock 显示位置，不再暴露新增空页按钮。
+- alpha.5.1.8/5.1.9 的 Character Card Security Boundary、WorldBook compatibility、Memory Retrieval V2、单音符音乐图标和编辑态坐标稳定继续保留。
 
 ## 1. 当前产品结构
 
@@ -29,7 +29,7 @@ Backup：V12
 - 四列 App 网格；默认显示音乐、海龟汤、我的资料、记忆、数据备份；
 - 四格 Dock；默认显示知间、新建角色、世界、设置；
 - 可选小组件：今天、最近的人、世界状态、一起听；
-- 长按空白处进入编辑态，可添加小组件、自定义、编辑墙纸和编辑页面；
+- 长按空白处进入编辑态，可添加小组件、自定义、编辑墙纸和编辑桌面；
 - 玩家可在「桌面与小组件」里选择桌面 App、Dock、Widget、壁纸、自定义图标、图标大小与 App 名称。
 
 这些布局偏好全部复用 `appCustomizations` 的非索引字段，不升级 Dexie schema；Backup V12 已包含该表，因此会随备份保存。

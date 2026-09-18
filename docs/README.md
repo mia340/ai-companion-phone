@@ -1,13 +1,13 @@
 # AI Companion Phone 文档中心
 
-当前开发线：**V0.5.0-alpha.5.1.9**
+当前开发线：**V0.5.0-alpha.5.1.10**
 
 ```text
-应用：0.5.0-alpha.5.1.9
+应用：0.5.0-alpha.5.1.10
 IndexedDB：V18
 Backup：V12
-测试定义：38 个测试文件 / 316 个 it/test 声明
-当前 UI 主线：Launcher V3（持久分页 / 跨页拖拽 / 固定 Dock）+ 玩家自定义 Widget
+测试定义：38 个测试文件 / 317 个 it/test 声明
+当前 UI 主线：Launcher V4（手势翻页 / 内容驱动页数 / 自动收空页 / 固定 Dock）+ 玩家自定义 Widget
 ```
 
 这里是项目 Markdown 文档的**唯一保管入口**。项目根目录不再散放逐版本说明；版本交付文档统一在 `docs/releases/`，同类项目研究统一在 `docs/research/`。
@@ -18,7 +18,7 @@ Backup：V12
 
 1. `START_HERE_小白启动指南.md`：第一次启动、Build、常见问题。
 2. `部署与更新.md`：长期通用的 Windows / Git / Build 流程。
-3. `releases/V0.5.0-alpha.5.1.9_部署与更新.md`：当前版本的专项验收步骤。
+3. `releases/V0.5.0-alpha.5.1.10_部署与更新.md`：当前版本的专项验收步骤。
 
 ### 当前开发单一事实源
 
