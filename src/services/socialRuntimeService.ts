@@ -23,6 +23,7 @@ import {
   profileAllows
 } from './socialPresenceService'
 import { addSocialNotification } from './socialNotificationService'
+import { loadCompanionSpaceSettings } from './companionSpaceSettings'
 
 import type {
   Character,
@@ -132,6 +133,8 @@ export async function scheduleSocialForUserPost(
   candidates?: Character[],
   heat: MomentReplyHeat = getReplyHeat()
 ): Promise<SocialActivity[]> {
+  const spaceSettings = await loadCompanionSpaceSettings(post.worldId)
+  if (spaceSettings.visibility === 'private') return []
   const characters = candidates ?? await db.characters.where('worldId').equals(post.worldId).toArray()
   const commentSignals = await buildSocialCandidateSignals({
     post,
@@ -218,7 +221,11 @@ export async function scheduleCharacterReplyToUserComment(input: {
 }): Promise<SocialActivity | undefined> {
   const character = await db.characters.get(input.characterId)
   if (!character) return undefined
-  const profile = await getCharacterSocialProfile(character)
+  const [profile, spaceSettings] = await Promise.all([
+    getCharacterSocialProfile(character),
+    loadCompanionSpaceSettings(input.post.worldId)
+  ])
+  if (spaceSettings.visibility === 'private' || spaceSettings.blacklistCharacterIds.includes(character.id)) return undefined
   if (!profileAllows(profile, 'reply')) return undefined
 
   return enqueueActivity({
@@ -398,7 +405,18 @@ export async function processSocialActivity(activity: SocialActivity): Promise<'
     return 'cancelled'
   }
 
-  const profile = await getCharacterSocialProfile(actor)
+  const [profile, spaceSettings] = await Promise.all([
+    getCharacterSocialProfile(actor),
+    loadCompanionSpaceSettings(post.worldId)
+  ])
+  if (spaceSettings.blacklistCharacterIds.includes(actor.id)) {
+    await markCancelled(activity, '角色已加入知间空间黑名单。')
+    return 'cancelled'
+  }
+  if (post.authorType === 'user' && spaceSettings.visibility === 'private') {
+    await markCancelled(activity, '当前动态仅自己可见。')
+    return 'cancelled'
+  }
   const capability = activity.kind === 'moment-like'
     ? 'like'
     : activity.kind === 'moment-reply'

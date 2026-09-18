@@ -1,7 +1,7 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.4.2**。
-> V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V16 / Backup V11（朋友圈与主屏幕个性化已纳入备份）。
+> 当前文档版本：**V0.5.0-alpha.5.1.6**。
+> V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V18 / Backup V12（朋友圈、角色社交权限、主屏幕与空间设置均纳入现有备份范围）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
 
@@ -536,7 +536,7 @@ Position Router
   └─ Outlet → Preset macro
 ```
 
-Timed Effects 保存在 `ConversationState.lorebookRuntime`，因此属于聊天状态而不是角色卡本体；Branch 只继承分支节点以前仍有效的效果。这个字段不需要新 IndexedDB store，因此数据库仍为 V14。
+Timed Effects 保存在 `ConversationState.lorebookRuntime`，因此属于聊天状态而不是角色卡本体；Branch 只继承分支节点以前仍有效的效果。这个字段不需要独立 IndexedDB store；当前数据库已演进到 V18。
 
 Token Budget 原则：只有资源自己导入/用户手动设置了 `tokenBudget` 才硬裁剪；没有显式预算时只做估算与 Debug，不用应用默认值擅自删作者设定。
 
@@ -562,8 +562,8 @@ Token Budget 原则：只有资源自己导入/用户手动设置了 `tokenBudge
 Dexie / IndexedDB：
 
 ```text
-IndexedDB：V14
-Backup：V9
+IndexedDB：V18
+Backup：V12
 ```
 
 图片主要使用 Data URL；当前没有跨设备云同步。

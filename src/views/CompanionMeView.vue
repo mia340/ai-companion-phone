@@ -42,9 +42,9 @@ onUnmounted(() => subscription?.unsubscribe())
       </button>
 
       <div class="me-group">
-        <button class="me-row" type="button" @click="router.push('/app/朋友圈')">
-          <span class="row-symbol moments" aria-hidden="true">✿</span>
-          <span>朋友圈</span>
+        <button class="me-row" type="button" @click="router.push('/companion/space-settings')">
+          <span class="row-symbol space" aria-hidden="true">✤</span>
+          <span>空间设置</span>
           <span class="chevron" aria-hidden="true">›</span>
         </button>
       </div>
@@ -75,5 +75,5 @@ onUnmounted(() => subscription?.unsubscribe())
 .profile-row{width:100%;display:flex;align-items:center;gap:14px;text-align:left;background:#fff;border:0;padding:26px 19px 27px;cursor:pointer}
 .profile-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}.profile-copy strong{font-size:20px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .signature{font-size:13px;color:#687d8d;overflow-wrap:anywhere}.profile-help{font-size:11px;color:#9aa8b2}
-.chevron{margin-left:auto;color:#abb6be;font-size:23px;font-weight:300;flex-shrink:0}.me-group{margin-top:14px;background:#fff}.me-row{width:100%;display:flex;align-items:center;gap:13px;padding:14px 19px;min-height:54px;background:#fff;border:0;text-align:left;color:#263747;font-size:16px;cursor:pointer}.row-symbol{display:grid;place-items:center;width:25px;height:25px;font-size:23px}.moments{color:#16bb75}.wallet{color:#d3a049}.settings{color:#7894b0}.row-note{font-size:12px;color:#91a0ac;margin-left:auto}.me-tip{padding:10px 20px;color:#98a5ad;font-size:11px;line-height:1.65}
+.chevron{margin-left:auto;color:#abb6be;font-size:23px;font-weight:300;flex-shrink:0}.me-group{margin-top:14px;background:#fff}.me-row{width:100%;display:flex;align-items:center;gap:13px;padding:14px 19px;min-height:54px;background:#fff;border:0;text-align:left;color:#263747;font-size:16px;cursor:pointer}.row-symbol{display:grid;place-items:center;width:25px;height:25px;font-size:23px}.space{color:#16bb75}.wallet{color:#d3a049}.settings{color:#7894b0}.row-note{font-size:12px;color:#91a0ac;margin-left:auto}.me-tip{padding:10px 20px;color:#98a5ad;font-size:11px;line-height:1.65}
 </style>

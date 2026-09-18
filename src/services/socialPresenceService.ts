@@ -1,4 +1,5 @@
 import { db } from '../db/database'
+import { loadCompanionSpaceSettings } from './companionSpaceSettings'
 
 import type {
   Character,
@@ -229,12 +230,14 @@ export async function buildSocialCandidateSignals(input: {
   now?: number
 }): Promise<SocialCandidateSignal[]> {
   const now = input.now ?? Date.now()
-  const [profiles, conversations, memories, activities] = await Promise.all([
+  const [profiles, conversations, memories, activities, spaceSettings] = await Promise.all([
     listCharacterSocialProfiles(input.characters),
     db.conversations.where('worldId').equals(input.post.worldId).toArray(),
     db.memories.toArray(),
-    db.socialActivities.where('worldId').equals(input.post.worldId).toArray()
+    db.socialActivities.where('worldId').equals(input.post.worldId).toArray(),
+    loadCompanionSpaceSettings(input.post.worldId)
   ])
+  const blacklisted = new Set(spaceSettings.blacklistCharacterIds)
 
   const profileById = new Map(profiles.map(profile => [profile.characterId, profile]))
   const memoriesByCharacter = new Map<string, string[]>()
@@ -246,6 +249,7 @@ export async function buildSocialCandidateSignals(input: {
 
   const signals: SocialCandidateSignal[] = []
   for (const character of input.characters) {
+    if (blacklisted.has(character.id)) continue
     const profile = profileById.get(character.id) ?? defaultCharacterSocialProfile(character)
     if (!profileAllows(profile, input.capability)) continue
 

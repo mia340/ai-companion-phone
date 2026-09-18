@@ -5,6 +5,7 @@ import { generateCharacterPost } from './momentGenerationService'
 import { listCharacterSharedMemories } from './memoryService'
 import { scheduleSocialForCharacterPost } from './socialRuntimeService'
 import { listCharacterSocialProfiles, profileAllows } from './socialPresenceService'
+import { loadCompanionSpaceSettings } from './companionSpaceSettings'
 import type { Character, MomentPost } from '../types/domain'
 
 export {
@@ -158,11 +159,15 @@ export async function runAutoActivityOnce(): Promise<AutoActivityOutcome | null>
     .where('worldId')
     .equals(worldId)
     .toArray()
-  const profiles = await listCharacterSocialProfiles(characters)
+  const [profiles, spaceSettings] = await Promise.all([
+    listCharacterSocialProfiles(characters),
+    loadCompanionSpaceSettings(worldId)
+  ])
   const profileById = new Map(profiles.map(profile => [profile.characterId, profile]))
+  const blacklisted = new Set(spaceSettings.blacklistCharacterIds)
   const posters = characters.filter(character => {
     const profile = profileById.get(character.id)
-    return characterHasVoice(character) && Boolean(profile && profileAllows(profile, 'post'))
+    return !blacklisted.has(character.id) && characterHasVoice(character) && Boolean(profile && profileAllows(profile, 'post'))
   })
   if (!posters.length) return null
 

@@ -1,6 +1,6 @@
 # 从这里开始
 
-当前开发线：**V0.5.0-alpha.4.2.1**。
+当前开发线：**V0.5.0-alpha.5.1.6**。
 
 如果你只是想把我给你的新源码更新到 Git 仓库，直接先看：`部署与更新.md`。
 
@@ -44,15 +44,15 @@ npm run dev
 
 ## 当前 V0.5 重点
 
-V0.5 仍以稳定 Runtime 为主；用户新增朋友圈 / 音乐 / 海龟汤后，alpha.3.1 先把这些 App 纳入可靠性门禁：
+V0.5 当前重点是“Runtime 稳定 + 知间 UI 收敛”，不是继续无边界增加 App：
 
-- delete / reset / rewind / branch / opening reset 使用统一 Conversation Runtime；
-- 从旧消息建立分支时按目标时间点重放状态，避免未来 Memory / State 穿越；
-- greeting / free opening 的跨表清理不再由 ChatRoom 手写；
-- 当前源码测试矩阵为 26 个测试文件 / 244 个用例；
-- 新增 App 全绿后，再继续拆 Generation Orchestrator；不要在红灯时继续加功能。
+- Conversation / Generation Runtime 已把 delete / restart / rewind / branch / opening / provider / response persistence 的关键编排从 View 外移；
+- Community Chat 保持“手机壳归 App，消息内部 Presentation 尊重作者资源”的兼容原则；
+- Social Runtime V2 已有持久活动队列、角色权限、加权候选、通知，并在 alpha.5.1.6 补上空间可见性和黑名单闭环；
+- 空间桌面当前只保留 6 个核心入口，知间内部为「知间 / 通讯录 / 发现 / 我」；
+- 当前源码定义为 **37 个测试文件 / 308 个 it/test 声明**；完整是否全绿仍以 `npm run verify` 为准。
 
-项目全貌看 `PROJECT_STATUS.md`，为什么这么改看 `ENGINEERING_AUDIT.md`。
+项目全貌看 `PROJECT_STATUS.md`，架构边界看 `ARCHITECTURE.md`，当前版本专项验收看 `releases/V0.5.0-alpha.5.1.6_部署与更新.md`。
 
 ## Build
 

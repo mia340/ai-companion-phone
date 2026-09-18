@@ -16,6 +16,8 @@ import UserProfileView from '../views/UserProfileView.vue'
 import CompanionMeView from '../views/CompanionMeView.vue'
 import CompanionDiscoverView from '../views/CompanionDiscoverView.vue'
 import CompanionWalletView from '../views/CompanionWalletView.vue'
+import CompanionSpaceSettingsView from '../views/CompanionSpaceSettingsView.vue'
+import CompanionSpacePeopleView from '../views/CompanionSpacePeopleView.vue'
 import DataBackupView from '../views/DataBackupView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import AppearanceSettingsView from '../views/AppearanceSettingsView.vue'
@@ -64,6 +66,14 @@ export const router = createRouter({
     {
       path: '/companion/wallet',
       component: CompanionWalletView
+    },
+    {
+      path: '/companion/space-settings',
+      component: CompanionSpaceSettingsView
+    },
+    {
+      path: '/companion/space-settings/people',
+      component: CompanionSpacePeopleView
     },
     {
       path: '/chat',

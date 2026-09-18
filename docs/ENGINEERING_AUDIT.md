@@ -1,5 +1,8 @@
 # AI Companion Phone 工程审查与 V0.5.0 重构路线图
 
+> **2026-09-17 当前快照**：App `0.5.0-alpha.5.1.6`，IndexedDB V18，Backup V12，源码定义 37 个测试文件 / 308 个 `it/test` 声明。下方 alpha.3 / alpha.4 小节保留为审查历史，不应被当作当前版本数字。
+
+
 ## 0.0.5 V0.5.0-alpha.4.2 社区聊天兼容审查结论
 
 本轮修正的是 Presentation Ownership，而不是新增视觉特效：社区卡已有 Regex / WorldBook HTML / 作者 HTML 时，默认保留作者呈现；App 只负责手机 Shell、安全渲染和响应式约束。`first_mes` 与后续回复统一到同一 Contract 后，苏玉尘这类“开场纯文本 `<br>`、后续 WorldBook HTML”资源可以保持视觉连续。
@@ -62,7 +65,7 @@ Windows 对 alpha.3.1 的真实全量结果为 **25/26 test files、243/244 test
 
 - alpha.3.1 当前生产 TS/Vue 约 **36,555 行**，测试代码约 **3,200 行**；新增 App 让总规模继续增长，因此下一阶段必须以“复用边界”而不是单纯堆页面为指标。
 - 原 V0.4.7.1 审查时生产 TS/Vue 约 28,231 行；V0.5 重构期间以趋势而非绝对行数作为指标。
-- 当前测试定义：26 个测试文件、244 个 `it/test` 用例；除 Conversation Runtime 外，朋友圈、音乐、海龟汤和 Provider 也已有纯规则/请求体回归测试。
+- 当前测试定义：37 个测试文件、308 个 `it/test` 声明；除 Conversation Runtime 外，朋友圈、音乐、海龟汤和 Provider 也已有纯规则/请求体回归测试。
 - `ChatRoom.vue`：alpha.3 为 4,576 行，仍是最大架构热点；Conversation lifecycle 已继续外移，但 generation 仍未大拆。
 - 静态依赖扫描覆盖 **99 个生产 TS/Vue 文件**，仍未检测到模块循环依赖，这是当前代码结构的明显优点。
 - 最大风险不是“缺功能”，而是 Conversation/Generation/Persistence 逻辑仍集中在 View，导致删除、回滚、分支、流式生成、状态/记忆等操作难以保持事务一致性。
@@ -145,16 +148,16 @@ Infrastructure   db / provider / backup / browser APIs
 
 | 文件 | 行数 | 主要问题 | V0.5.0 处理 |
 |---|---:|---|---|
-| `src/views/ChatRoom.vue` | 4576 | lifecycle 已部分外移，Generation Runtime 仍集中 | P0 继续拆 |
-| `src/views/CharacterCreate.vue` | 1428 | 创建事务、导入、头像处理都在 View | P1 拆 |
-| `src/services/ai/provider.ts` | 1012 | HTTP/SSE/error/model parsing 混合 | P1 拆 |
-| `src/services/characterCardImportService.ts` | 968 | 多格式 adapter/PNG/import/export 混合 | P1 拆 |
+| `src/views/ChatRoom.vue` | 4433 | lifecycle 已部分外移，Generation Runtime 仍集中 | P0 继续拆 |
+| `src/views/CharacterCreate.vue` | 1427 | 创建事务、导入、头像处理都在 View | P1 拆 |
+| `src/services/ai/provider.ts` | 1030 | HTTP/SSE/error/model parsing 混合 | P1 拆 |
+| `src/services/characterCardImportService.ts` | 1154 | 多格式 adapter/PNG/import/export 混合 | P1 拆 |
 | `src/views/ModelSettingsView.vue` | 897 | 配置、拉模型、测试连接、测试视觉与 UI 混合 | P2 |
 | `src/views/CharacterEditView.vue` | 880 | 表单逻辑偏重 | P2 |
-| `src/db/database.ts` | 831 | 当前 schema + 14 版 migration 同文件 | P1 |
+| `src/db/database.ts` | 890 | 当前 schema + 多版本 migration 同文件 | P1 |
 | `src/services/lorebookService.ts` | 823 | 核心引擎 + DB 查询，无直接测试 | P0 测试先行 |
 | `src/services/interactionProtocol.ts` | 792 | parser/projection/naturalness 混合 | P2，已有较多测试 |
-| `src/types/domain.ts` | 697 | 超高 fan-in 单体类型文件 | P1 渐进拆 |
+| `src/types/domain.ts` | 847 | 超高 fan-in 单体类型文件 | P1 渐进拆 |
 
 ## 5. 技术债
 
@@ -225,7 +228,7 @@ Vite `base` 为 `/ai-companion-phone/`，manifest 中显式设置 `start_url: '/
 
 ## 7. 测试缺口
 
-现状：alpha.3.1 源码定义 26 个测试文件、244 个用例。Regex / Interaction / Community UI 与 Conversation Runtime 都已有基础行为测试，但 Lorebook 主引擎、Backup schema、DB migration、安全渲染仍是最大缺口。
+当前源码定义 37 个测试文件、308 个 `it/test` 声明。Regex / Interaction / Community UI 与 Conversation Runtime 都已有基础行为测试，但 Lorebook 主引擎、Backup schema、DB migration、安全渲染仍是最大缺口。
 
 ### V0.5.0 P0 测试
 

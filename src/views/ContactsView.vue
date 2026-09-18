@@ -55,7 +55,7 @@ onMounted(loadContacts)
     <section class="contacts-page">
       <label class="search-field">
         <span aria-hidden="true">⌕</span>
-        <input v-model="searchText" type="search" placeholder="搜索" aria-label="搜索通讯录" />
+        <input v-model="searchText" type="search" placeholder="搜索联系人" aria-label="搜索通讯录" />
         <button v-if="searchText" type="button" aria-label="清空搜索" @click="searchText = ''">×</button>
       </label>
 

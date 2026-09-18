@@ -167,7 +167,7 @@ onMounted(load)
 
       <section class="setting-group">
         <div class="group-title">
-          <div><b>桌面显示</b><small>保持四列网格，只调整真实手机常见的显示项</small></div>
+          <div><b>桌面显示</b><small>保持三列核心网格，只调整真实手机常见的显示项</small></div>
         </div>
         <div class="segmented-row">
           <span>图标大小</span>
@@ -178,12 +178,12 @@ onMounted(load)
           </div>
         </div>
         <button class="toggle-row" type="button" @click="toggleLabels">
-          <span><b>显示 App 名称</b><small>关闭后桌面与 Dock 只显示图标</small></span>
+          <span><b>显示 App 名称</b><small>关闭后空间桌面只显示图标</small></span>
           <i :class="{on:appearance.showAppLabels}"><em></em></i>
         </button>
       </section>
 
-      <p class="footnote">主屏幕空白处长按可快速进入这里。布局暂时固定为四列，避免主题包和不同屏幕宽度下出现错位。</p>
+      <p class="footnote">主屏幕空白处长按可快速进入这里。布局暂时固定为三列核心入口，避免主题包和不同屏幕宽度下出现错位。</p>
 
       <AppIconEditor
         :open="Boolean(editingApp)"
@@ -199,7 +199,7 @@ onMounted(load)
 
 <style scoped>
 .appearance-page{min-height:100%;padding:10px 14px 42px;background:#f3f7fa;color:#2c4255}.notice{position:sticky;top:6px;z-index:20;margin:0 0 10px;padding:9px 12px;border-radius:13px;background:#557f9f;color:#fff;text-align:center;font-size:11px;box-shadow:0 8px 22px rgba(57,91,116,.18)}
-.preview-card{display:grid;grid-template-columns:136px 1fr;gap:14px;align-items:center;margin-bottom:14px;padding:14px;border:1px solid rgba(51,78,99,.07);border-radius:20px;background:#fff;box-shadow:0 6px 22px rgba(49,76,97,.055)}.preview-phone{height:226px;padding:8px;border-radius:24px;background:linear-gradient(160deg,#edf8ff,#dceefa);background-size:cover;background-position:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.85),0 7px 18px rgba(54,83,106,.12);overflow:hidden}.preview-status{display:flex;justify-content:space-between;padding:2px 4px 7px;font-size:7px;font-weight:700;color:#314a5f}.preview-title{display:grid;padding:4px 4px 8px}.preview-title small{font-size:6px;color:#6b8294}.preview-title b{font-size:13px}.preview-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:11px 4px}.preview-app{display:grid;justify-items:center;gap:3px;min-width:0}.preview-app span{max-width:31px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:5.5px;color:#30495d}.preview-copy small{color:#8b9ba8;font-size:10px}.preview-copy h2{margin:4px 0 7px;font-size:20px;letter-spacing:-.025em}.preview-copy p{margin:0;color:#788a98;font-size:11px;line-height:1.6}
+.preview-card{display:grid;grid-template-columns:136px 1fr;gap:14px;align-items:center;margin-bottom:14px;padding:14px;border:1px solid rgba(51,78,99,.07);border-radius:20px;background:#fff;box-shadow:0 6px 22px rgba(49,76,97,.055)}.preview-phone{height:226px;padding:8px;border-radius:24px;background:linear-gradient(160deg,#edf8ff,#dceefa);background-size:cover;background-position:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.85),0 7px 18px rgba(54,83,106,.12);overflow:hidden}.preview-status{display:flex;justify-content:space-between;padding:2px 4px 7px;font-size:7px;font-weight:700;color:#314a5f}.preview-title{display:grid;padding:4px 4px 8px}.preview-title small{font-size:6px;color:#6b8294}.preview-title b{font-size:13px}.preview-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:11px 4px}.preview-app{display:grid;justify-items:center;gap:3px;min-width:0}.preview-app span{max-width:31px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:5.5px;color:#30495d}.preview-copy small{color:#8b9ba8;font-size:10px}.preview-copy h2{margin:4px 0 7px;font-size:20px;letter-spacing:-.025em}.preview-copy p{margin:0;color:#788a98;font-size:11px;line-height:1.6}
 .setting-group{margin-bottom:14px;overflow:hidden;border:1px solid rgba(51,78,99,.07);border-radius:17px;background:#fff;box-shadow:0 4px 16px rgba(49,76,97,.04)}.group-title{padding:13px 14px 9px;border-bottom:1px solid #eef2f5}.group-title>div{display:grid;gap:2px}.group-title b{font-size:14px}.group-title small{color:#8e9da9;font-size:10px}.wallpaper-row{display:flex;align-items:center;gap:14px;padding:14px}.wallpaper-preview{width:88px;height:124px;flex:0 0 auto;border:1px solid #dbe4ea;border-radius:17px;background:linear-gradient(160deg,#edf8ff,#dceefa);background-size:cover;background-position:center;color:#7890a2;font-size:11px;box-shadow:0 5px 14px rgba(48,78,101,.1)}.wallpaper-actions{display:grid;gap:8px;flex:1}.primary,.secondary{border:0;border-radius:12px;padding:10px 12px;font-size:11px;font-weight:700}.primary{background:#e6f1f8;color:#557f9f}.secondary{background:#f2f4f6;color:#7e8f9c}.primary:disabled{opacity:.55}.error{margin:-5px 14px 12px;color:#b64f63;font-size:10px}.icon-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:17px 6px;padding:16px 8px 18px}.icon-choice{display:grid;justify-items:center;gap:6px;padding:0;border:0;background:transparent;color:#3b5367}.icon-choice span{max-width:68px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.icon-choice:active{transform:scale(.96)}
 .segmented-row,.toggle-row{min-height:62px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px}.segmented-row{border-bottom:1px solid #eef2f5;font-size:13px}.segmented{display:flex;padding:2px;border-radius:10px;background:#eef3f6}.segmented button{min-width:46px;border:0;border-radius:8px;background:transparent;color:#718594;padding:7px 8px;font-size:10px}.segmented button.active{background:#fff;color:#35546b;box-shadow:0 2px 7px rgba(50,77,98,.12);font-weight:700}.toggle-row{width:100%;border:0;background:#fff;text-align:left}.toggle-row>span{display:grid;gap:3px}.toggle-row b{font-size:13px}.toggle-row small{color:#8d9ca8;font-size:10px}.toggle-row i{position:relative;width:42px;height:25px;flex:0 0 auto;border-radius:999px;background:#d4dce2;transition:.18s}.toggle-row i em{position:absolute;left:3px;top:3px;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.13);transition:.18s}.toggle-row i.on{background:#6da8d1}.toggle-row i.on em{transform:translateX(17px)}.footnote{margin:8px 6px 0;color:#94a2ad;font-size:9px;line-height:1.55}
 @media(max-width:360px){.preview-card{grid-template-columns:118px 1fr}.preview-phone{height:206px}.icon-grid{gap:14px 3px}.segmented button{min-width:40px}}

@@ -143,7 +143,7 @@
 
 - `HomeScreen.vue` 将 `longPressTimer` 显式声明为 `number | undefined`，保持浏览器定时器语义。
 - 应用版本提升为 `0.5.0-alpha.4.2.1`；IndexedDB V16 / Backup V11 不变。
-- 新增 `REFERENCE_STUDY_2026-09-13.md`，记录 StoryPhone、AI Virtual Phone、InternalBeyond、Melt、Miya、HiPhone、汪汪机等项目的可吸收工程思路与毕业前优先级。
+- 新增 `research/REFERENCE_STUDY_2026-09-13.md`，记录 StoryPhone、AI Virtual Phone、InternalBeyond、Melt、Miya、HiPhone、汪汪机等项目的可吸收工程思路与毕业前优先级。
 - 明确参考原则：学习问题建模与工程边界，不复制第三方实现；后续优先 Runtime、Memory、Capability、测试与论文证据，不以 App 数量为目标。
 
 ### 验证
@@ -394,7 +394,7 @@ alpha.1 只是让新源码包只保留 14 份长期 Markdown，但用户使用 `
 5. `loadConversation()` 增加递增 epoch，解决 A/B 快速切换时 stale async load 覆盖当前 refs 的竞态。
 6. 新增 6 个 Conversation Mutation 规则测试。
 7. GitHub Pages workflow 在 Build 前执行 `npm test`，避免测试失败仍发布。
-8. docs 做结构清理：`DEVELOPMENT_HISTORY.md`、`COMMUNITY_RUNTIME_HISTORY.md`、`ENGINEERING_AUDIT.md`、`REFERENCE_PROJECTS.md` 分离职责。
+8. docs 做结构清理：`DEVELOPMENT_HISTORY.md`、`COMMUNITY_RUNTIME_HISTORY.md`、`ENGINEERING_AUDIT.md`、`research/REFERENCE_PROJECTS.md` 分离职责。
 
 ### 本轮刻意没有做
 
@@ -592,3 +592,15 @@ Windows 完整 `npm run verify` 暴露出 alpha.5.0.1 的 `normalizePersonaNameT
 - 将新互动、设置和每位好友权限从底部抽屉拆为独立路由；保持原 Social Runtime V2 行为。
 - 用户朋友圈顶部增加自定义封面、本地图片校验压缩、恢复默认；存储复用世界级 appCustomizations，Backup V12 / IndexedDB V18 不变。
 - 新增封面服务的边界单测，避免 SVG/远端 URL 与超大 base64 入库。
+
+
+## 2026-09-17 · V0.5.0-alpha.5.1.6
+
+- 按知间 UI 参考稿收敛四主标签、发现页、通讯录、我页和空间桌面。
+- 新增「我 → 空间设置」及单角色可见/隐藏/黑名单管理。
+- Social Runtime 增加整体 `private` 与黑名单执行前校验，避免只有 UI 隐藏、Runtime 仍在自动互动。
+- 空间桌面从 9 个入口 + Dock 收敛到 6 个核心入口；音乐、日记、海龟汤仍保留代码和历史路由，不在当前桌面展示。
+- 重做知间图标，去除双聊天气泡造型。
+- 所有根目录逐版本 Markdown 移入 `docs/releases/`；参考项目文档移入 `docs/research/`；新增 2026-09-17 同类小手机研究文档。
+- 重写 `docs/README.md` 和 `PROJECT_STATUS.md`，当前事实更新为 App alpha.5.1.6 / IndexedDB V18 / Backup V12 / 37 tests files / 308 test declarations。
+- 当前容器 `npm test` 因 `vitest` 不存在无法执行；`npm ci` 尝试安装依赖超时。全局 `tsc --noEmit` 无报错；正式发布仍以 Windows/CI `npm run verify` 为门禁。

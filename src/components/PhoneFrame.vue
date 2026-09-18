@@ -7,31 +7,42 @@ import {
   ref
 } from 'vue'
 import StatusBar from './StatusBar.vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { liveQuery } from 'dexie'
 import { db } from '../db/database'
 
-const slots = useSlots()
-const route = useRoute()
-const companionTabs = [
-  { label: '聊天', path: '/chat', icon: 'chat' },
-  { label: '通讯录', path: '/contacts', icon: 'contacts' },
-  { label: '发现', path: '/companion/discover', icon: 'discover' },
-  { label: '我', path: '/companion/me', icon: 'me' }
-] as const
-const inCompanion = computed(() => companionTabs.some(tab => tab.path === route.path))
-const unreadChat = ref(0)
-const unreadMoments = ref(0)
-let chatSubscription: { unsubscribe: () => void } | undefined
-let socialSubscription: { unsubscribe: () => void } | undefined
-
-
-defineProps<{
+const props = defineProps<{
   title?: string
   showBack?: boolean
   /** 状态栏文字深浅：锁屏等深色壁纸页用 'light'。 */
   statusTone?: 'dark' | 'light'
 }>()
+
+const slots = useSlots()
+const route = useRoute()
+const router = useRouter()
+const companionTabs = [
+  { label: '知间', path: '/chat', icon: 'chat' },
+  { label: '通讯录', path: '/contacts', icon: 'contacts' },
+  { label: '发现', path: '/companion/discover', icon: 'discover' },
+  { label: '我', path: '/companion/me', icon: 'me' }
+] as const
+const inCompanion = computed(() => companionTabs.some(tab => tab.path === route.path))
+const shouldShowBack = computed(() => Boolean(props.title))
+const unreadChat = ref(0)
+const unreadMoments = ref(0)
+let chatSubscription: { unsubscribe: () => void } | undefined
+let socialSubscription: { unsubscribe: () => void } | undefined
+
+function goBack() {
+  if (inCompanion.value) {
+    void router.push('/home')
+    return
+  }
+  const previous = window.history.state?.back
+  if (previous) router.back()
+  else void router.push('/home')
+}
 
 function syncViewportHeight() {
   const height = window.visualViewport?.height ?? window.innerHeight
@@ -44,11 +55,11 @@ function syncViewportHeight() {
 onMounted(() => {
   if (inCompanion.value) {
     chatSubscription = liveQuery(() => db.conversations.toArray())
-    .subscribe(rows => { unreadChat.value = rows.reduce((sum, row) => sum + Number(row.unread || 0), 0) })
-  socialSubscription = liveQuery(async () => {
-    const world = (await db.worlds.toArray())[0]
-    return db.socialNotifications.where('worldId').equals(world?.id || 'world-default').filter(item => !item.read).count()
-  }).subscribe(count => { unreadMoments.value = count })
+      .subscribe(rows => { unreadChat.value = rows.reduce((sum, row) => sum + Number(row.unread || 0), 0) })
+    socialSubscription = liveQuery(async () => {
+      const world = (await db.worlds.toArray())[0]
+      return db.socialNotifications.where('worldId').equals(world?.id || 'world-default').filter(item => !item.read).count()
+    }).subscribe(count => { unreadMoments.value = count })
   }
   syncViewportHeight()
   window.addEventListener('resize', syncViewportHeight)
@@ -84,18 +95,19 @@ onUnmounted(() => {
         class="app-header"
       >
         <button
-          v-if="showBack"
+          v-if="shouldShowBack"
           class="icon-button"
           type="button"
           aria-label="返回"
-          @click="$router.back()"
+          @click="goBack"
         >
           ‹
         </button>
+        <span v-else></span>
 
         <strong>{{ title }}</strong>
 
-        <span class="header-spacer"></span>
+        <span class="header-right-slot"><slot name="header-right" /></span>
       </div>
 
       <div class="phone-content">
@@ -151,4 +163,5 @@ onUnmounted(() => {
   height: 0;
   display: none;
 }
+.header-right-slot{min-width:42px;height:42px;display:grid;place-items:center}
 </style>

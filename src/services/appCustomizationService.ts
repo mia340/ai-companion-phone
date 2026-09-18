@@ -39,10 +39,7 @@ export const DEFAULT_HOME_APPEARANCE: HomeAppearancePreferences = {
 const APPEARANCE_APP_KEY = '__home-appearance__'
 
 export const HOME_APPS: HomeAppDefinition[] = [
-  { key: 'banxin', label: '知间', route: '/companion', icon: 'banxin', tone: ['#17bd78', '#5fd8a5'] },
-  { key: 'diary', label: '日记', route: '/app/日记', icon: 'diary', tone: ['#e9bb83', '#f5d6a5'] },
-  { key: 'music', label: '音乐', route: '/app/音乐', icon: 'music', tone: ['#8f9cde', '#b9c4ef'] },
-  { key: 'turtle-soup', label: '海龟汤', route: '/app/海龟汤', icon: 'turtle-soup', tone: ['#75bcc4', '#a8d8d3'] },
+  { key: 'banxin', label: '知间', route: '/companion', icon: 'banxin', tone: ['#16b874', '#62d6a4'] },
   { key: 'profile', label: '我的资料', route: '/profile', icon: 'profile', tone: ['#9aa6df', '#c5cdf0'] },
   { key: 'memory', label: '记忆', route: '/memory', icon: 'memory', tone: ['#a8a1dc', '#d0c9ee'] },
   { key: 'world', label: '世界', route: '/world', icon: 'world', tone: ['#7eafd6', '#b6d5ea'] },
@@ -50,12 +47,8 @@ export const HOME_APPS: HomeAppDefinition[] = [
   { key: 'settings', label: '设置', route: '/settings', icon: 'settings', tone: ['#a7b4c3', '#d1d9e2'] }
 ]
 
-export const DOCK_APPS: HomeAppDefinition[] = [
-  HOME_APPS[0],
-  { key: 'new-character', label: '新建角色', route: '/characters/new', icon: 'new-character', tone: ['#8ebce8', '#bddcf4'] },
-  HOME_APPS[6],
-  HOME_APPS[8]
-]
+/** 当前空间桌面不再使用 Dock；保留导出避免旧调用与历史数据升级时出现断点。 */
+export const DOCK_APPS: HomeAppDefinition[] = []
 
 /** 旧入口不再显示在桌面，继续保留其自定义图标及历史路由数据。 */
 export const CUSTOMIZABLE_APPS: HomeAppDefinition[] = Array.from(

@@ -255,13 +255,16 @@ onUnmounted(() => {
 
 <template>
   <PhoneFrame title="知间">
+    <template #header-right>
+      <button class="header-add" type="button" aria-label="新建角色" @click="$router.push('/characters/new')">＋</button>
+    </template>
     <section class="chat-list-page">
       <label class="search-field">
         <span aria-hidden="true">⌕</span>
         <input
           v-model="searchText"
           type="search"
-          placeholder="搜索"
+          placeholder="搜索聊天记录"
           aria-label="搜索角色或聊天内容"
           @focus="closeSwipe()"
         />
@@ -346,6 +349,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.header-add{width:32px;height:32px;padding:0;border:1.5px solid #243d51;border-radius:50%;background:transparent;color:#243d51;font-size:22px;font-weight:350;line-height:28px;display:grid;place-items:center;cursor:pointer}.header-add:active{opacity:.55}
 .chat-list-page {
   min-height: 100%;
   padding: 10px 0 34px;

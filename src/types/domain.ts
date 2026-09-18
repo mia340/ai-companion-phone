@@ -9,6 +9,9 @@ export interface AppCustomization {
   wallpaperDataUrl?: string
   iconScale?: number
   showAppLabels?: boolean
+  /** 知间空间设置复用同一非结构化 store；字段不参与索引，因此无需数据库迁移。 */
+  spaceVisibility?: 'public' | 'friends' | 'private'
+  spaceBlacklistCharacterIds?: UUID[]
   updatedAt: string
 }
 

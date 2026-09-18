@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { liveQuery } from 'dexie'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import {
+  computed,
+  onMounted,
+  onUnmounted,
+  ref
+} from 'vue'
 import { useRouter } from 'vue-router'
-import CharacterAvatar from '../components/CharacterAvatar.vue'
-import DockBar from '../components/DockBar.vue'
 import AppIcon from '../components/AppIcon.vue'
 import PhoneFrame from '../components/PhoneFrame.vue'
 import { db } from '../db/database'
 import {
   DEFAULT_HOME_APPEARANCE,
-  DOCK_APPS,
   HOME_APPS,
   listAppCustomizations,
   loadHomeAppearance,
@@ -21,10 +23,7 @@ const router = useRouter()
 
 const chatUnread = ref(0)
 const momentsUnread = ref(0)
-const worldName = ref('草莓云世界')
 const worldId = ref('world-default')
-const latestCharacterName = ref('')
-const latestCharacterAvatar = ref('🌍')
 const worldStateLabel = ref('日常')
 const customIcons = ref<Record<string, string>>({})
 const appearance = ref<HomeAppearancePreferences>({ ...DEFAULT_HOME_APPEARANCE })
@@ -36,18 +35,11 @@ let longPressStartY = 0
 
 const apps = computed(() => HOME_APPS.map(app => ({
   ...app,
-  badge: app.key === 'banxin' ? chatUnread.value + momentsUnread.value : app.key === 'chat' ? chatUnread.value : app.key === 'moments' ? momentsUnread.value : 0,
+  badge: app.key === 'banxin' ? chatUnread.value + momentsUnread.value : 0,
   customImage: customIcons.value[app.key]
 })))
 
-const dockApps = computed(() => DOCK_APPS.map(app => ({
-  ...app,
-  badge: app.key === 'banxin' ? chatUnread.value + momentsUnread.value : app.key === 'chat' ? chatUnread.value : app.key === 'moments' ? momentsUnread.value : 0,
-  customImage: customIcons.value[app.key]
-})))
-
-const homeIconSize = computed(() => Math.round(62 * appearance.value.iconScale))
-const dockIconSize = computed(() => Math.round(50 * appearance.value.iconScale))
+const homeIconSize = computed(() => Math.round(64 * appearance.value.iconScale))
 const wallpaperStyle = computed(() => appearance.value.wallpaperDataUrl
   ? {
       backgroundImage: `linear-gradient(180deg,rgba(244,250,255,.10),rgba(214,232,246,.18)),url("${appearance.value.wallpaperDataUrl}")`,
@@ -56,14 +48,11 @@ const wallpaperStyle = computed(() => appearance.value.wallpaperDataUrl
     }
   : undefined)
 
-const dateLine = computed(() => {
-  const value = new Date().toLocaleDateString('zh-CN', {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long'
-  })
-  return value.replace(/(\d日)(星期.+)/, '$1 $2')
-})
+const dateLine = computed(() => new Date().toLocaleDateString('zh-CN', {
+  month: 'long',
+  day: 'numeric',
+  weekday: 'long'
+}).replace(/(\d日)(星期.+)/, '$1 $2'))
 
 const greeting = computed(() => {
   const hour = new Date().getHours()
@@ -75,17 +64,13 @@ const greeting = computed(() => {
   return '晚上好'
 })
 
-const homeSummary = computed(() => {
-  if (!latestCharacterName.value) return '还没有联系人 · 先创建一个或导入一个角色吧'
-  return `${latestCharacterName.value} · 世界状态：${worldStateLabel.value}`
-})
+const dateStatus = computed(() => `${dateLine.value} · ${worldStateLabel.value === '暂停' ? '世界已暂停' : '美好正在发生'}`)
 
 async function loadHomeState() {
   const worlds = await db.worlds.toArray()
   const world = worlds[0]
   worldId.value = world?.id || 'world-default'
   if (world) {
-    worldName.value = world.name || '草莓云世界'
     worldStateLabel.value = world.paused
       ? '暂停'
       : world.eventLevel === 'daily'
@@ -108,25 +93,6 @@ async function loadHomeState() {
     savedIcons.filter(item => item.iconDataUrl).map(item => [item.appKey, item.iconDataUrl as string])
   )
   appearance.value = savedAppearance
-
-  const latest = [...conversations]
-    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
-    .find(conversation => conversation.type === 'single' && conversation.memberIds[0])
-
-  let character = latest?.memberIds[0]
-    ? await db.characters.get(latest.memberIds[0])
-    : undefined
-
-  if (!character) {
-    const characters = await db.characters.toArray()
-    character = [...characters].sort((a, b) =>
-      String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt))
-    )[0]
-  }
-
-  if (!character) return
-  latestCharacterName.value = character.name
-  latestCharacterAvatar.value = character.avatar || '🙂'
 }
 
 function openApp(app: HomeAppDefinition) {
@@ -163,6 +129,7 @@ onMounted(async () => {
     momentsUnread.value = count
   })
 })
+
 onUnmounted(() => {
   cancelHomeLongPress()
   socialBadgeSubscription?.unsubscribe()
@@ -176,7 +143,8 @@ onUnmounted(() => {
         <template v-if="!appearance.wallpaperDataUrl">
           <i class="glow g1"></i>
           <i class="glow g2"></i>
-          <i class="glow g3"></i>
+          <i class="cloud c1"></i>
+          <i class="cloud c2"></i>
         </template>
       </div>
 
@@ -189,14 +157,9 @@ onUnmounted(() => {
         @pointerleave="cancelHomeLongPress"
       >
         <header class="hm-topbar">
-          <div class="hm-hello">
-            <div class="hm-date">{{ dateLine }} · {{ worldName }}</div>
-            <h1>{{ greeting }}</h1>
-            <div class="hm-char">
-              <CharacterAvatar :avatar="latestCharacterAvatar" :name="latestCharacterName || worldName" :size="34" />
-              <span>{{ homeSummary }}</span>
-            </div>
-          </div>
+          <div class="hm-date">{{ dateStatus }}</div>
+          <h1>{{ greeting }}</h1>
+          <p>连接真实的你 · 遇见有趣的世界</p>
         </header>
 
         <div class="hm-grid">
@@ -209,23 +172,18 @@ onUnmounted(() => {
           >
             <span class="hm-tile-wrap">
               <AppIcon :icon="app.icon" :custom-image="app.customImage" :tones="app.tone" :size="homeIconSize" />
-              <b v-if="app.badge" class="hm-badge">{{ app.badge }}</b>
+              <b v-if="app.badge" class="hm-badge">{{ app.badge > 99 ? '99+' : app.badge }}</b>
             </span>
             <span v-if="appearance.showAppLabels" class="hm-name">{{ app.label }}</span>
           </button>
         </div>
 
-        <div class="hm-dock-holder">
-          <DockBar :apps="dockApps" :icon-size="dockIconSize" :show-labels="appearance.showAppLabels" />
-        </div>
+        <p class="hm-tip">长按桌面空白处可调整壁纸与图标。</p>
       </div>
     </section>
   </PhoneFrame>
 </template>
 
 <style scoped>
-.hm-root{position:relative;height:100%;display:flex;flex-direction:column;overflow:hidden}.hm-wall{position:absolute;inset:0;z-index:0;overflow:hidden;background:radial-gradient(120% 70% at 86% -8%,rgba(255,255,255,.96) 0%,rgba(226,244,255,.76) 34%,transparent 62%),radial-gradient(100% 75% at -8% 100%,rgba(199,228,249,.88) 0%,transparent 62%),linear-gradient(165deg,#f5fbff 0%,#eaf6ff 44%,#dfeef9 100%)}.glow{position:absolute;display:block;border-radius:50%;filter:blur(10px);opacity:.48}.g1{width:230px;height:230px;top:-70px;right:-60px;background:radial-gradient(circle,rgba(163,210,244,.72),transparent 68%)}.g2{width:260px;height:260px;bottom:-90px;left:-90px;background:radial-gradient(circle,rgba(185,224,249,.72),transparent 66%)}.g3{width:140px;height:140px;top:40%;left:12%;background:radial-gradient(circle,rgba(255,255,255,.88),transparent 70%)}
-.hm-root::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(214,232,246,.1))}.hm-main{position:relative;z-index:1;flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto;padding:22px 18px 14px;-webkit-overflow-scrolling:touch;touch-action:pan-y}.hm-topbar{display:flex;align-items:flex-start;justify-content:flex-start}.hm-hello{min-width:0;color:#24394b;padding:4px 6px 2px}.hm-date{font-size:12px;color:#6e8495;letter-spacing:.45px}.hm-hello h1{margin:7px 0 10px;font-size:34px;line-height:1;font-weight:700;letter-spacing:-.035em}.hm-char{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:5px 12px 5px 6px;border-radius:999px;background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.86);box-shadow:0 7px 22px rgba(62,99,126,.08);backdrop-filter:blur(16px);font-size:12px}.hm-char span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#536b7e}
-.hm-grid{flex:0 0 auto;display:grid;grid-template-columns:repeat(4,1fr);gap:22px 8px;margin-top:34px;padding:0 4px}.hm-app{display:flex;flex-direction:column;align-items:center;gap:7px;padding:0;border:0;background:transparent;cursor:pointer;color:inherit}.hm-tile-wrap{position:relative;display:grid;place-items:center}.hm-badge{position:absolute;z-index:3;right:-6px;top:-6px;min-width:19px;height:19px;padding:0 5px;border-radius:11px;background:#ff5b6a;color:#fff;font-size:10px;line-height:19px;text-align:center;font-weight:750;border:1.5px solid rgba(255,255,255,.9)}.hm-name{font-size:12px;color:#31495c;text-shadow:none;white-space:nowrap}.hm-dock-holder{flex:0 0 auto;margin-top:auto;padding:18px 0 20px}
-@media(max-width:360px){.hm-grid{gap:18px 5px}.hm-name{font-size:11px}.hm-hello h1{font-size:31px}}
+.hm-root{position:relative;height:100%;display:flex;flex-direction:column;overflow:hidden}.hm-wall{position:absolute;inset:0;z-index:0;overflow:hidden;background:radial-gradient(100% 62% at 92% 0%,rgba(255,255,255,.97) 0%,rgba(227,244,255,.72) 36%,transparent 65%),linear-gradient(168deg,#f8fcff 0%,#edf8ff 46%,#dfeefa 100%)}.glow{position:absolute;display:block;border-radius:50%;filter:blur(12px);opacity:.48}.g1{width:230px;height:230px;top:-72px;right:-64px;background:radial-gradient(circle,rgba(165,212,244,.68),transparent 68%)}.g2{width:280px;height:280px;bottom:-110px;left:-100px;background:radial-gradient(circle,rgba(184,222,248,.76),transparent 68%)}.cloud{position:absolute;display:block;border-radius:999px;background:rgba(255,255,255,.56);filter:blur(.2px)}.cloud::before,.cloud::after{content:'';position:absolute;border-radius:50%;background:inherit}.c1{width:180px;height:58px;right:-35px;bottom:40px}.c1::before{width:88px;height:88px;left:18px;bottom:6px}.c1::after{width:112px;height:112px;right:8px;bottom:-2px}.c2{width:128px;height:42px;left:-38px;top:47%}.c2::before{width:72px;height:72px;left:26px;bottom:2px}.c2::after{width:62px;height:62px;right:-8px;bottom:-4px}.hm-root::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(214,232,246,.08))}.hm-main{position:relative;z-index:1;flex:1;min-height:0;overflow-y:auto;padding:26px 22px 28px;-webkit-overflow-scrolling:touch;touch-action:pan-y}.hm-topbar{color:#263d50}.hm-date{font-size:12px;color:#73899a;letter-spacing:.35px}.hm-topbar h1{margin:8px 0 7px;font-size:35px;line-height:1;font-weight:730;letter-spacing:-.035em}.hm-topbar p{margin:0;color:#5e7487;font-size:13px}.hm-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:30px 14px;margin-top:46px;padding:0 4px}.hm-app{display:flex;flex-direction:column;align-items:center;gap:8px;padding:0;border:0;background:transparent;cursor:pointer;color:inherit}.hm-tile-wrap{position:relative;display:grid;place-items:center}.hm-badge{position:absolute;z-index:3;right:-7px;top:-6px;min-width:19px;height:19px;padding:0 5px;border-radius:11px;background:#ff5b6a;color:#fff;font-size:10px;line-height:19px;text-align:center;font-weight:750;border:1.5px solid rgba(255,255,255,.9)}.hm-name{font-size:12px;color:#31495c;white-space:nowrap}.hm-tip{position:relative;margin:58px 0 0;text-align:center;color:#9aa9b4;font-size:10px}@media(max-width:360px){.hm-grid{gap:25px 8px}.hm-name{font-size:11px}.hm-topbar h1{font-size:32px}}
 </style>

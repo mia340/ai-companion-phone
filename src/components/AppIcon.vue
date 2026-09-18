@@ -26,9 +26,11 @@ const props = withDefaults(defineProps<{
 
     <svg v-else class="app-icon-svg" viewBox="0 0 64 64" aria-hidden="true">
       <g v-if="props.icon === 'banxin'">
-        <path d="M15 21c0-7 7-12 17-12s17 5 17 12-7 12-17 12c-2 0-4-.2-6-.8l-9 5 2-9C16.4 26 15 23.6 15 21Z" fill="white"/>
-        <path d="M23 38c0-2 .8-3.8 2.3-5 2 .7 4.4 1 7 1 6.5 0 12-2 15-5 3.6 2 5.7 4.6 5.7 7.5 0 5.6-6.3 10-14.2 10-1.7 0-3.4-.2-5-.5l-7.5 4 .8-6.5C24.2 41.5 23 40 23 38Z" fill="rgba(255,255,255,.76)"/>
-        <circle cx="26" cy="21" r="2" fill="var(--icon-a)"/><circle cx="37" cy="21" r="2" fill="var(--icon-a)"/>
+        <path d="M17 17.5c0-4.1 3.4-7.5 7.5-7.5H39c4.4 0 8 3.6 8 8v28.5c0 4.1-3.4 7.5-7.5 7.5H25c-4.4 0-8-3.6-8-8V17.5Z" fill="rgba(255,255,255,.94)"/>
+        <path d="M25 18.5h14c1.7 0 3 1.3 3 3v21c0 1.7-1.3 3-3 3H25c-1.7 0-3-1.3-3-3v-21c0-1.7 1.3-3 3-3Z" fill="none" stroke="var(--icon-a)" stroke-width="3.2" opacity=".72"/>
+        <path d="M32 22v20M27 28h10M27 36h10" stroke="var(--icon-a)" stroke-width="2.8" stroke-linecap="round" opacity=".55"/>
+        <circle cx="43.5" cy="17.5" r="5.5" fill="white"/>
+        <path d="m43.5 14.8.9 1.8 2 .3-1.4 1.4.3 2-1.8-.9-1.8.9.3-2-1.4-1.4 2-.3.9-1.8Z" fill="var(--icon-a)"/>
       </g>
       <g v-else-if="props.icon === 'chat'">
         <path d="M14 17.5c0-4.1 3.3-7.5 7.5-7.5h21c4.1 0 7.5 3.4 7.5 7.5v13c0 4.1-3.4 7.5-7.5 7.5H31l-9.5 8v-8h0A7.5 7.5 0 0 1 14 30.5v-13Z" fill="rgba(255,255,255,.94)"/>
