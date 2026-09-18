@@ -3,7 +3,9 @@ import {
   CUSTOMIZABLE_APPS,
   DOCK_APPS,
   HOME_APPS,
-  normalizeHomeAppearance
+  normalizeHomeAppearance,
+  moveHomeAppPlacement,
+  paginateHomeAppKeys
 } from './appCustomizationService'
 
 describe('知间桌面入口与布局', () => {
@@ -55,4 +57,27 @@ describe('知间桌面入口与布局', () => {
     expect(normalized.homeWidgetKeys).toEqual(['greeting', 'music'])
     expect(normalized.widgetStyle).toBe('clear')
   })
+
+  it('按真实手机规则分页，并在 Dock 满位时支持拖拽交换', () => {
+    expect(paginateHomeAppKeys([
+      'music', 'turtle-soup', 'profile', 'memory', 'backup', 'world', 'settings', 'banxin',
+      'new-character'
+    ], true)).toEqual([
+      ['music', 'turtle-soup', 'profile', 'memory', 'backup', 'world', 'settings', 'banxin'],
+      ['new-character']
+    ])
+
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'turtle-soup', 'profile'],
+      dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
+      homeWidgetKeys: [],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+    const moved = moveHomeAppPlacement(current, 'music', 'dock', 'world')
+    expect(moved.dockAppKeys).toEqual(['banxin', 'new-character', 'music', 'settings'])
+    expect(moved.homeAppKeys).toEqual(['world', 'turtle-soup', 'profile'])
+  })
+
 })

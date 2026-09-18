@@ -1,10 +1,47 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.5.1.7**。
+> 当前文档版本：**V0.5.0-alpha.5.1.8**。
 > V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V18 / Backup V12（朋友圈、角色社交权限、主屏幕与空间设置均纳入现有备份范围）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
 
+
+## V0.5.0-alpha.5.1.8 Launcher / Character Asset Security / Retrieval
+
+### Launcher Runtime V2
+
+```text
+HomeAppearancePreferences
+   ↓ normalize
+HomeScreen page compiler
+   ├─ page 0: optional widgets + app grid
+   ├─ page N: app grid
+   └─ fixed Dock (max 4)
+          ↓ pointer runtime
+      long-press / drag / reorder / cross-page / home↔dock
+```
+
+桌面是 Presentation Runtime，不拥有角色或剧情事实。App 被移出桌面 / Dock 只改变入口位置，不删除业务数据。Launcher 自己负责横向分页，滚动条隐藏；Phone Shell 继续拥有系统 Home Indicator。
+
+### Character Card Security Boundary
+
+```text
+Original Community Asset ───────→ Resource Archive (raw)
+          │
+          └─ sanitize(import) → Working Character Model
+                                  │
+                                  └─ sanitize(export) → Shareable Card
+```
+
+安全净化递归处理 extension / metadata：API 凭据、发送者主题 / CSS / 音效 / 语音偏好、角色分组 ID 与 phoneState / dream / VR / buff 等本地 runtime 残留不进入工作模型，也不会二次传播。标准 Character Card / Character Book 字段和未知安全扩展继续保留。
+
+### Memory Retrieval V2 第一批
+
+检索评分在原有 lexical overlap / importance / recency / layer / lock / due / conflict 基础上，引入 `confidence` 和 capped `log2(hitCount + 1)` feedback。冲突 penalty 保持更强，避免错误旧事实因高召回次数垄断上下文。
+
+### WorldBook 输入兼容
+
+内部 WorldBook Engine V2 不变；Import Adapter 扩大 SullyOS / SillyTavern-shaped 字段兼容，所有输入最终仍收敛到项目自己的 LorebookEntry 语义模型。
 
 ## V0.5.0-alpha.5.1.7 Home Launcher / Widget Runtime
 

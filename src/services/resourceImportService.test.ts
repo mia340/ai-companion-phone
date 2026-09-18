@@ -163,3 +163,50 @@ it('读取 WorldBook Engine V2 的 snake_case 扩展字段与资源级设置', (
   expect(row.matchScenario).toBe(true)
   expect(row.matchCreatorNotes).toBe(true)
 })
+
+it('兼容 SullyOS 风格 WorldbookEntryConfig 并保持停用条目停用', () => {
+  const parsed = parseLorebookJson(JSON.stringify({
+    name: 'Sully-shaped Worldbook',
+    entries: [{
+      uid: 23,
+      title: '学院夜禁',
+      key: ['学院'],
+      keysecondary: ['夜禁'],
+      content: '午夜后主楼关闭。',
+      constant: false,
+      selective: true,
+      selectiveLogic: 2,
+      order: 314,
+      position: 4,
+      disable: true,
+      probability: 76,
+      useProbability: true,
+      depth: 3,
+      role: 1,
+      scanDepth: 5,
+      caseSensitive: true,
+      matchWholeWords: true,
+      sourceUid: 987,
+      sullyExtra: 'preserve-me'
+    }]
+  }), 'SullyOS-worldbook.json')
+
+  const row = parsed.entries[0]
+  expect(row.keywords).toEqual(['学院'])
+  expect(row.secondaryKeys).toEqual(['夜禁'])
+  expect(row.enabled).toBe(false)
+  expect(row.selective).toBe(true)
+  expect(row.selectiveLogic).toBe(2)
+  expect(row.insertionOrder).toBe(314)
+  expect(row.position).toBe(4)
+  expect(row.probability).toBe(76)
+  expect(row.useProbability).toBe(true)
+  expect(row.depth).toBe(3)
+  expect(row.role).toBe(1)
+  expect(row.scanDepth).toBe(5)
+  expect(row.caseSensitive).toBe(true)
+  expect(row.matchWholeWords).toBe(true)
+  expect(row.sourceEntryId).toBe(23)
+  expect(row.rawExtensions?.sourceUid).toBe(987)
+  expect(row.rawExtensions?.sullyExtra).toBe('preserve-me')
+})

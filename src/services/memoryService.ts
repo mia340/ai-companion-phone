@@ -677,16 +677,23 @@ export function selectMemoryHitsDetailed(
           reasons.push(diffDays < 0 ? '约定刚刚到期' : '约定日期临近')
         }
       }
+      const confidence = Math.max(0, Math.min(1, Number(memory.confidence ?? .82)))
+      const confidenceBoost = Math.round((confidence - .5) * 6)
+      if (confidence >= .9) reasons.push('高置信记忆')
+      else if (confidence <= .45) reasons.push('低置信，降低权重')
+      const hitCount = Math.max(0, Number(memory.hitCount || 0))
+      const recallBoost = Math.min(4, Math.floor(Math.log2(hitCount + 1)))
+      if (recallBoost > 0) reasons.push(`历史召回 ${hitCount} 次`)
       const conflictPenalty = memory.status === 'conflict' ? -15 : 0
       if (memory.status === 'conflict') reasons.push('存在冲突，已降低权重')
-      const score = overlap * 4 + memory.importance * 3 + recency + layerBoost + lockedBoost + dueBoost + conflictPenalty
+      const score = overlap * 4 + memory.importance * 3 + recency + layerBoost + lockedBoost + dueBoost + confidenceBoost + recallBoost + conflictPenalty
       return { memory, score, reasons: reasons.length ? reasons : ['重要度与近期性匹配'] }
     })
 
   const ranked = scored
     .sort((a, b) => b.score - a.score || b.memory.updatedAt.localeCompare(a.memory.updatedAt))
   const relevant = ranked.filter(item =>
-    item.reasons.some(reason => /关键词|约定|锁定/.test(reason)) ||
+    item.reasons.some(reason => /关键词|约定|锁定|置信|召回/.test(reason)) ||
     item.memory.importance >= 4 ||
     memoryLayerFor(item.memory) === 'relationship'
   )

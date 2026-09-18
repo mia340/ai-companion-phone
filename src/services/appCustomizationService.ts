@@ -45,6 +45,91 @@ export interface HomeAppearancePreferences {
   widgetStyle: HomeWidgetStyle
 }
 
+
+export type HomePlacement = 'home' | 'dock'
+
+/**
+ * 真实手机桌面的分页规则。第一页如果有 Widget，会主动少放一行 App；
+ * 后续页固定四列三行。这里只决定顺序/分页，不改变玩家保存的数据。
+ */
+export function paginateHomeAppKeys(
+  keys: readonly HomeAppKey[],
+  hasWidgets = false,
+  firstPageCapacity = hasWidgets ? 8 : 12,
+  pageCapacity = 12
+): HomeAppKey[][] {
+  const firstCap = Math.max(1, Math.floor(firstPageCapacity))
+  const nextCap = Math.max(1, Math.floor(pageCapacity))
+  const rows: HomeAppKey[][] = []
+  rows.push([...keys.slice(0, firstCap)])
+  for (let offset = firstCap; offset < keys.length; offset += nextCap) {
+    rows.push([...keys.slice(offset, offset + nextCap)])
+  }
+  return rows.length ? rows : [[]]
+}
+
+/**
+ * 在桌面和 Dock 之间移动 / 排序 App。两个区域共用一份唯一集合，避免同一个 App
+ * 同时出现在桌面和 Dock。Dock 满 4 个时，拖到某个 Dock App 上会进行交换，
+ * 被换出的 App 回到来源桌面的原位置附近。
+ */
+export function moveHomeAppPlacement(
+  value: HomeAppearancePreferences,
+  key: HomeAppKey,
+  destination: HomePlacement,
+  beforeKey?: HomeAppKey
+): HomeAppearancePreferences {
+  const originalHome = [...value.homeAppKeys]
+  const originalDock = [...value.dockAppKeys]
+  const source: HomePlacement | undefined = originalDock.includes(key)
+    ? 'dock'
+    : originalHome.includes(key)
+      ? 'home'
+      : undefined
+  const sourceHomeIndex = originalHome.indexOf(key)
+
+  const home = originalHome.filter(item => item !== key)
+  const dock = originalDock.filter(item => item !== key)
+
+  const insertBefore = (target: HomeAppKey[], item: HomeAppKey, marker?: HomeAppKey) => {
+    const index = marker ? target.indexOf(marker) : -1
+    target.splice(index >= 0 ? index : target.length, 0, item)
+  }
+
+  if (destination === 'home') {
+    // 如果目标 App 原本在 Dock，拖到它上面表示先放回桌面，不复制。
+    if (beforeKey && dock.includes(beforeKey)) {
+      const displacedIndex = dock.indexOf(beforeKey)
+      dock.splice(displacedIndex, 1)
+      const returnIndex = sourceHomeIndex >= 0 ? Math.min(sourceHomeIndex, home.length) : home.length
+      home.splice(returnIndex, 0, beforeKey)
+    }
+    insertBefore(home, key, beforeKey)
+  } else {
+    if (dock.length >= 4) {
+      // Dock 满位：只有明确拖到某个 Dock App 上时才允许交换。
+      const targetIndex = beforeKey ? dock.indexOf(beforeKey) : -1
+      if (targetIndex < 0) return normalizeHomeAppearance(value)
+      const displaced = dock[targetIndex]
+      dock[targetIndex] = key
+      if (displaced && displaced !== key) {
+        const returnIndex = source === 'home' && sourceHomeIndex >= 0
+          ? Math.min(sourceHomeIndex, home.length)
+          : home.length
+        home.splice(returnIndex, 0, displaced)
+      }
+    } else {
+      insertBefore(dock, key, beforeKey)
+    }
+  }
+
+  return normalizeHomeAppearance({
+    ...value,
+    homeAppKeys: home,
+    dockAppKeys: dock
+  })
+}
+
 /**
  * 宽松的存储输入。IndexedDB 中旧版本记录使用 string[]，因此加载时先接收 unknown，
  * 再统一经过 normalizeHomeAppearance 白名单收窄，避免旧数据与新联合类型直接冲突。

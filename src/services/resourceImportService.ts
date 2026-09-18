@@ -95,7 +95,7 @@ function parseLorebookEntry(raw: Record<string, unknown>, index: number) {
   const probability = asNumber(raw.probability ?? extensions.probability, 100)
   const caseSensitiveValue = raw.caseSensitive ?? raw.case_sensitive ?? extensions.caseSensitive ?? extensions.case_sensitive
   const knownKeys = new Set([
-    'id', 'uid', 'name', 'comment', 'key', 'keys', 'keysecondary', 'secondary_keys', 'secondaryKeys', 'content',
+    'id', 'uid', 'name', 'title', 'comment', 'key', 'keys', 'keysecondary', 'secondary_keys', 'secondaryKeys', 'content',
     'enabled', 'disable', 'constant', 'caseSensitive', 'case_sensitive', 'matchWholeWords', 'use_regex', 'useRegex',
     'selective', 'selectiveLogic', 'selective_logic', 'priority', 'insertion_order', 'order', 'position', 'depth', 'role',
     'probability', 'useProbability', 'sticky', 'cooldown', 'delay', 'group', 'groupOverride', 'group_override',
@@ -109,7 +109,7 @@ function parseLorebookEntry(raw: Record<string, unknown>, index: number) {
 
   return {
     characterId: undefined,
-    title: asText(raw.name) || asText(raw.comment) || `条目 ${index + 1}`,
+    title: asText(raw.name) || asText(raw.title) || asText(raw.comment) || `条目 ${index + 1}`,
     keywords: keys,
     secondaryKeys,
     content: asText(raw.content),
@@ -144,7 +144,7 @@ function parseLorebookEntry(raw: Record<string, unknown>, index: number) {
     matchCharacterDepthPrompt: asBoolean(raw.matchCharacterDepthPrompt ?? raw.match_character_depth_prompt ?? extensions.matchCharacterDepthPrompt ?? extensions.match_character_depth_prompt, false),
     matchScenario: asBoolean(raw.matchScenario ?? raw.match_scenario ?? extensions.matchScenario ?? extensions.match_scenario, false),
     matchCreatorNotes: asBoolean(raw.matchCreatorNotes ?? raw.match_creator_notes ?? extensions.matchCreatorNotes ?? extensions.match_creator_notes, false),
-    sourceEntryId: raw.uid as number | string | undefined ?? raw.id as number | string | undefined,
+    sourceEntryId: raw.uid as number | string | undefined ?? raw.id as number | string | undefined ?? raw.sourceUid as number | string | undefined,
     rawExtensions
   }
 }

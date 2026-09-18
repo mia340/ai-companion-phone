@@ -2,6 +2,7 @@ import type { Character, CharacterExampleDialogue, LorebookEntry, LorebookResour
 import { parseLorebookJson, parseRegexJson } from './resourceImportService'
 import type { ImportedPersonaPreview } from './personaImportService'
 import { parseExampleDialogues } from './characterCardService'
+import { sanitizeCharacterCardMetadata } from './characterCardSecurity'
 import { parsePersonaText } from './personaImportService'
 
 interface CardPayload {
@@ -689,7 +690,9 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
     throw new Error('角色卡 JSON 结构无效。')
   }
 
-  const record = root as Record<string, unknown>
+  const originalRecord = root as Record<string, unknown>
+  const security = sanitizeCharacterCardMetadata(originalRecord)
+  const record = security.value as Record<string, unknown>
   if (looksLikeStandaloneLorebook(record)) {
     throw new Error('检测到这是世界书 JSON，不是角色卡。请到世界书页面导入。')
   }
@@ -743,7 +746,9 @@ export function parseCharacterCardJson(value: string): ImportedCharacterCard {
     sourceSpec,
     sourceSpecVersion
   })) as Record<string, unknown>
-  const notes: string[] = []
+  const notes: string[] = security.removedPaths.length
+    ? [`安全边界已剥离 ${security.removedPaths.length} 个凭据 / 本地 UI / 运行时字段；原文件仍可由资源归档单独保留。`]
+    : []
   const numericSpecVersion = Number.parseFloat(sourceSpecVersion || '')
   if (format === 'sillytavern-v3' && Number.isFinite(numericSpecVersion) && numericSpecVersion > 3) {
     notes.push(`角色卡 spec_version=${sourceSpecVersion} 高于当前已知 CCv3 3.0；已继续导入并完整保留未知字段，未识别的新能力不会擅自执行。`)
@@ -1104,7 +1109,7 @@ export function exportCharacterCardJson(character: Character, resources: { loreb
       : `{{user}}:\n${character.embeddedUserTemplate.split('\n').map(line => `  ${line}`).join('\n')}`
     : ''
 
-  return JSON.stringify({
+  const exportPayload = {
     ...rootMetadata,
     ...(Object.keys(storedRootExtensions).length ? { extensions: storedRootExtensions } : {}),
     spec: exportAsV3 ? 'chara_card_v3' : 'chara_card_v2',
@@ -1147,7 +1152,8 @@ export function exportCharacterCardJson(character: Character, resources: { loreb
         modification_date: asNumber(storedV3.modification_date)
       } : {})
     }
-  }, null, 2)
+  }
+  return JSON.stringify(sanitizeCharacterCardMetadata(exportPayload).value, null, 2)
 }
 
 /** 旧调用名保留兼容；现在会优先保持原卡 V2/V3 规格，不再强制把 V3 降级成 V2。 */

@@ -4,7 +4,8 @@ import {
   computed,
   onMounted,
   onUnmounted,
-  ref
+  ref,
+  watch
 } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
@@ -18,12 +19,15 @@ import {
   WIDGET_CATALOG,
   listAppCustomizations,
   loadHomeAppearance,
+  moveHomeAppPlacement,
+  paginateHomeAppKeys,
   resolveDockApps,
   resolveHomeApps,
   saveHomeAppearance,
   type HomeAppDefinition,
   type HomeAppKey,
   type HomeAppearancePreferences,
+  type HomePlacement,
   type HomeWidgetKey
 } from '../services/appCustomizationService'
 
@@ -43,7 +47,29 @@ const now = ref(new Date())
 
 const editMode = ref(false)
 const activeSheet = ref<'widgets' | 'page' | null>(null)
+const pageScroller = ref<HTMLElement | null>(null)
+const currentPage = ref(0)
+const draggingKey = ref<HomeAppKey | ''>('')
+const dropTargetKey = ref<HomeAppKey | ''>('')
+const dropTargetKind = ref<HomePlacement | ''>('')
+
+type LauncherPointerState = {
+  pointerId: number
+  key: HomeAppKey
+  kind: HomePlacement
+  startX: number
+  startY: number
+  active: boolean
+  host: HTMLElement
+  sourceElement: HTMLElement
+  ghost?: HTMLElement
+  grabOffsetX?: number
+  grabOffsetY?: number
+}
+
+let launcherPointer: LauncherPointerState | undefined
 let longPressTimer: number | undefined
+let pageTurnTimer: number | undefined
 let socialBadgeSubscription: { unsubscribe: () => void } | undefined
 let minuteTimer: number | undefined
 let longPressStartX = 0
@@ -51,6 +77,16 @@ let longPressStartY = 0
 
 const apps = computed(() => resolveHomeApps(appearance.value).map(enrichApp))
 const dockApps = computed(() => resolveDockApps(appearance.value).map(enrichApp))
+const homePageKeys = computed(() => paginateHomeAppKeys(
+  appearance.value.homeAppKeys,
+  appearance.value.homeWidgetKeys.length > 0
+))
+const homePages = computed(() => {
+  const byKey = new Map(apps.value.map(app => [app.key, app]))
+  return homePageKeys.value.map(page => page
+    .map(key => byKey.get(key))
+    .filter((item): item is ReturnType<typeof enrichApp> => Boolean(item)))
+})
 const activeWidgets = computed(() => appearance.value.homeWidgetKeys
   .map(key => WIDGET_CATALOG.find(widget => widget.key === key))
   .filter((widget): widget is (typeof WIDGET_CATALOG)[number] => Boolean(widget)))
@@ -234,7 +270,59 @@ function cancelHomeLongPress() {
   longPressTimer = undefined
 }
 
-function startHomeLongPress(event: PointerEvent) {
+function clearPageTurn() {
+  if (pageTurnTimer !== undefined) window.clearTimeout(pageTurnTimer)
+  pageTurnTimer = undefined
+}
+
+function removeLauncherGhost() {
+  launcherPointer?.ghost?.remove()
+  if (launcherPointer?.sourceElement) launcherPointer.sourceElement.classList.remove('launcher-source-dragging')
+}
+
+function resetLauncherPointer() {
+  cancelHomeLongPress()
+  clearPageTurn()
+  removeLauncherGhost()
+  launcherPointer = undefined
+  draggingKey.value = ''
+  dropTargetKey.value = ''
+  dropTargetKind.value = ''
+}
+
+
+function activateLauncherDrag(event: PointerEvent) {
+  if (!launcherPointer || launcherPointer.ghost) return
+  const rect = launcherPointer.sourceElement.getBoundingClientRect()
+  const ghost = launcherPointer.sourceElement.cloneNode(true) as HTMLElement
+  ghost.removeAttribute('data-launcher-item')
+  ghost.removeAttribute('data-launcher-kind')
+  ghost.querySelectorAll('[data-launcher-item],[data-launcher-kind]').forEach(node => {
+    node.removeAttribute('data-launcher-item')
+    node.removeAttribute('data-launcher-kind')
+  })
+  ghost.classList.add('hm-drag-ghost')
+  ghost.querySelectorAll('.hm-remove,.hm-dock-remove').forEach(node => node.remove())
+  Object.assign(ghost.style, {
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`
+  })
+  document.body.appendChild(ghost)
+  launcherPointer.ghost = ghost
+  launcherPointer.grabOffsetX = event.clientX - rect.left
+  launcherPointer.grabOffsetY = event.clientY - rect.top
+  launcherPointer.sourceElement.classList.add('launcher-source-dragging')
+}
+
+function moveLauncherGhost(event: PointerEvent) {
+  if (!launcherPointer?.ghost) return
+  launcherPointer.ghost.style.left = `${event.clientX - (launcherPointer.grabOffsetX || 0)}px`
+  launcherPointer.ghost.style.top = `${event.clientY - (launcherPointer.grabOffsetY || 0)}px`
+}
+
+function beginBlankLongPress(event: PointerEvent) {
   if (editMode.value) return
   const target = event.target as HTMLElement | null
   if (target?.closest('button,a,input,textarea,select,.hm-widget,.hm-dock')) return
@@ -248,12 +336,137 @@ function startHomeLongPress(event: PointerEvent) {
   }, 520)
 }
 
-function moveHomeLongPress(event: PointerEvent) {
-  if (longPressTimer === undefined) return
-  if (Math.hypot(event.clientX - longPressStartX, event.clientY - longPressStartY) > 8) cancelHomeLongPress()
+function beginLauncherItemPointer(event: PointerEvent, item: HTMLElement) {
+  const key = item.dataset.launcherItem as HomeAppKey | undefined
+  const kind = item.dataset.launcherKind as HomePlacement | undefined
+  if (!key || (kind !== 'home' && kind !== 'dock')) return
+  cancelHomeLongPress()
+  launcherPointer = {
+    pointerId: event.pointerId,
+    key,
+    kind,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: editMode.value,
+    host: event.currentTarget as HTMLElement,
+    sourceElement: item
+  }
+  if (editMode.value) {
+    draggingKey.value = key
+    activateLauncherDrag(event)
+    try { launcherPointer.host.setPointerCapture(event.pointerId) } catch { /* browser may already release it */ }
+    event.preventDefault()
+    return
+  }
+  longPressTimer = window.setTimeout(() => {
+    if (!launcherPointer || launcherPointer.pointerId !== event.pointerId) return
+    launcherPointer.active = true
+    draggingKey.value = key
+    editMode.value = true
+    activateLauncherDrag(event)
+    activeSheet.value = null
+    try { launcherPointer.host.setPointerCapture(event.pointerId) } catch { /* ignore */ }
+  }, 520)
+}
+
+function startHomePointer(event: PointerEvent) {
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.hm-remove,.hm-dock-remove')) return
+  const item = target?.closest<HTMLElement>('[data-launcher-item]')
+  if (item) {
+    beginLauncherItemPointer(event, item)
+    return
+  }
+  beginBlankLongPress(event)
+}
+
+function queuePageTurn(direction: -1 | 1) {
+  if (!launcherPointer?.active || homePages.value.length <= 1) return
+  if (pageTurnTimer !== undefined) return
+  pageTurnTimer = window.setTimeout(() => {
+    pageTurnTimer = undefined
+    goToPage(Math.max(0, Math.min(homePages.value.length - 1, currentPage.value + direction)), 'smooth')
+  }, 520)
+}
+
+function updateDropTarget(event: PointerEvent) {
+  const hit = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+  const item = hit?.closest<HTMLElement>('[data-launcher-item]')
+  const zone = hit?.closest<HTMLElement>('[data-launcher-zone]')
+  const kind = (item?.dataset.launcherKind || zone?.dataset.launcherZone) as HomePlacement | undefined
+  const key = item?.dataset.launcherItem as HomeAppKey | undefined
+  if ((kind === 'home' || kind === 'dock') && key === launcherPointer?.key && kind === launcherPointer?.kind) {
+    dropTargetKind.value = ''
+    dropTargetKey.value = ''
+  } else if (kind === 'home' || kind === 'dock') {
+    dropTargetKind.value = kind
+    dropTargetKey.value = key && key !== launcherPointer?.key ? key : ''
+  } else {
+    dropTargetKind.value = ''
+    dropTargetKey.value = ''
+  }
+
+  const scroller = pageScroller.value
+  if (!scroller || !launcherPointer?.active) return
+  const rect = scroller.getBoundingClientRect()
+  if (event.clientX < rect.left + 30 && currentPage.value > 0) queuePageTurn(-1)
+  else if (event.clientX > rect.right - 30 && currentPage.value < homePages.value.length - 1) queuePageTurn(1)
+  else clearPageTurn()
+}
+
+function moveHomePointer(event: PointerEvent) {
+  if (launcherPointer && launcherPointer.pointerId === event.pointerId) {
+    const distance = Math.hypot(event.clientX - launcherPointer.startX, event.clientY - launcherPointer.startY)
+    if (!launcherPointer.active) {
+      if (distance > 9) resetLauncherPointer()
+      return
+    }
+    event.preventDefault()
+    moveLauncherGhost(event)
+    updateDropTarget(event)
+    return
+  }
+  if (longPressTimer !== undefined && Math.hypot(event.clientX - longPressStartX, event.clientY - longPressStartY) > 8) {
+    cancelHomeLongPress()
+  }
+}
+
+async function finishHomePointer(event?: PointerEvent, commit = true) {
+  const pointer = launcherPointer
+  if (pointer?.active && commit && dropTargetKind.value) {
+    const next = moveHomeAppPlacement(
+      appearance.value,
+      pointer.key,
+      dropTargetKind.value,
+      dropTargetKey.value || undefined
+    )
+    await persistAppearance(next)
+  }
+  if (pointer && event) {
+    try { pointer.host.releasePointerCapture(event.pointerId) } catch { /* ignore */ }
+  }
+  resetLauncherPointer()
+}
+
+function syncPageFromScroll() {
+  const scroller = pageScroller.value
+  if (!scroller?.clientWidth) return
+  currentPage.value = Math.max(0, Math.min(
+    homePages.value.length - 1,
+    Math.round(scroller.scrollLeft / scroller.clientWidth)
+  ))
+}
+
+function goToPage(index: number, behavior: ScrollBehavior = 'auto') {
+  const scroller = pageScroller.value
+  const next = Math.max(0, Math.min(homePages.value.length - 1, index))
+  currentPage.value = next
+  if (!scroller) return
+  scroller.scrollTo({ left: scroller.clientWidth * next, behavior })
 }
 
 function finishEditing() {
+  void finishHomePointer(undefined, false)
   editMode.value = false
   activeSheet.value = null
 }
@@ -264,6 +477,10 @@ function openAppearance(section: 'customize' | 'wallpaper') {
     query: { section }
   })
 }
+
+watch(() => homePages.value.length, length => {
+  if (currentPage.value >= length) goToPage(Math.max(0, length - 1))
+})
 
 onMounted(async () => {
   await loadHomeState()
@@ -278,7 +495,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  cancelHomeLongPress()
+  resetLauncherPointer()
   socialBadgeSubscription?.unsubscribe()
   if (minuteTimer !== undefined) window.clearInterval(minuteTimer)
 })
@@ -297,11 +514,10 @@ onUnmounted(() => {
 
       <div
         class="hm-main"
-        @pointerdown="startHomeLongPress"
-        @pointermove="moveHomeLongPress"
-        @pointerup="cancelHomeLongPress"
-        @pointercancel="cancelHomeLongPress"
-        @pointerleave="cancelHomeLongPress"
+        @pointerdown="startHomePointer"
+        @pointermove="moveHomePointer"
+        @pointerup="finishHomePointer"
+        @pointercancel="finishHomePointer($event, false)"
       >
         <div v-if="editMode" class="hm-edit-toolbar">
           <div class="hm-edit-menu">
@@ -321,88 +537,122 @@ onUnmounted(() => {
           <button class="hm-done" type="button" @click="finishEditing">完成</button>
         </div>
 
-        <section v-if="activeWidgets.length" class="hm-widgets" :class="`style-${appearance.widgetStyle}`">
-          <article
-            v-for="widget in activeWidgets"
-            :key="widget.key"
-            class="hm-widget"
-            :class="[`size-${widget.size}`, `widget-${widget.key}`]"
-            @click="openWidget(widget.key)"
+        <div ref="pageScroller" class="hm-pages" @scroll.passive="syncPageFromScroll">
+          <section
+            v-for="(pageApps, pageIndex) in homePages"
+            :key="pageIndex"
+            class="hm-page"
+            data-launcher-zone="home"
           >
-            <button
-              v-if="editMode"
-              class="hm-remove"
-              type="button"
-              :aria-label="`移除${widget.label}小组件`"
-              @click.stop="removeWidget(widget.key)"
-            >−</button>
+            <div class="hm-page-content">
+              <section
+                v-if="pageIndex === 0 && activeWidgets.length"
+                class="hm-widgets"
+                :class="`style-${appearance.widgetStyle}`"
+              >
+                <article
+                  v-for="widget in activeWidgets"
+                  :key="widget.key"
+                  class="hm-widget"
+                  :class="[`size-${widget.size}`, `widget-${widget.key}`]"
+                  @click="openWidget(widget.key)"
+                >
+                  <button
+                    v-if="editMode"
+                    class="hm-remove"
+                    type="button"
+                    :aria-label="`移除${widget.label}小组件`"
+                    @click.stop="removeWidget(widget.key)"
+                  >−</button>
 
-            <template v-if="widget.key === 'greeting'">
-              <div class="widget-date">{{ dateLine }}</div>
-              <div class="widget-greeting">{{ greeting }}</div>
-              <div class="widget-caption">{{ worldName }} · {{ worldStateLabel }}</div>
-              <div class="widget-clock">{{ timeLine }}</div>
-            </template>
+                  <template v-if="widget.key === 'greeting'">
+                    <div class="widget-date">{{ dateLine }}</div>
+                    <div class="widget-greeting">{{ greeting }}</div>
+                    <div class="widget-caption">{{ worldName }} · {{ worldStateLabel }}</div>
+                    <div class="widget-clock">{{ timeLine }}</div>
+                  </template>
 
-            <template v-else-if="widget.key === 'companion'">
-              <CharacterAvatar :avatar="latestCharacterAvatar" :name="latestCharacterName || '知间'" :size="45" />
-              <div class="widget-copy">
-                <small>最近的人</small>
-                <b>{{ latestCharacterName || '还没有联系人' }}</b>
-                <span>{{ latestCharacterName ? '继续刚才的对话' : '去知间认识一个人' }}</span>
+                  <template v-else-if="widget.key === 'companion'">
+                    <CharacterAvatar :avatar="latestCharacterAvatar" :name="latestCharacterName || '知间'" :size="45" />
+                    <div class="widget-copy">
+                      <small>最近的人</small>
+                      <b>{{ latestCharacterName || '还没有联系人' }}</b>
+                      <span>{{ latestCharacterName ? '继续刚才的对话' : '去知间认识一个人' }}</span>
+                    </div>
+                  </template>
+
+                  <template v-else-if="widget.key === 'world'">
+                    <div class="world-orb">◎</div>
+                    <div class="widget-copy">
+                      <small>世界</small>
+                      <b>{{ worldName }}</b>
+                      <span>状态：{{ worldStateLabel }}</span>
+                    </div>
+                  </template>
+
+                  <template v-else-if="widget.key === 'music'">
+                    <div class="music-art">♪</div>
+                    <div class="music-copy">
+                      <small>一起听</small>
+                      <b>把声音留在这个世界里</b>
+                      <span>打开音乐陪伴</span>
+                    </div>
+                    <span class="music-play">▶</span>
+                  </template>
+                </article>
+              </section>
+
+              <div class="hm-grid" :class="{ 'after-widgets': pageIndex === 0 && activeWidgets.length }">
+                <div
+                  v-for="app in pageApps"
+                  :key="app.key"
+                  class="hm-app-shell"
+                  :class="{
+                    'is-dragging': draggingKey === app.key,
+                    'is-drop-target': dropTargetKind === 'home' && dropTargetKey === app.key
+                  }"
+                  :data-launcher-item="app.key"
+                  data-launcher-kind="home"
+                >
+                  <button class="hm-app" type="button" @click="openApp(app)">
+                    <span class="hm-tile-wrap">
+                      <AppIcon :icon="app.icon" :custom-image="app.customImage" :tones="app.tone" :size="homeIconSize" />
+                      <b v-if="app.badge" class="hm-badge">{{ app.badge > 99 ? '99+' : app.badge }}</b>
+                    </span>
+                    <span v-if="appearance.showAppLabels" class="hm-name">{{ app.label }}</span>
+                  </button>
+                  <button
+                    v-if="editMode"
+                    class="hm-remove hm-remove-app"
+                    type="button"
+                    :aria-label="`从桌面移除${app.label}`"
+                    @click.stop="removeHomeApp(app.key)"
+                  >−</button>
+                </div>
               </div>
-            </template>
-
-            <template v-else-if="widget.key === 'world'">
-              <div class="world-orb">◎</div>
-              <div class="widget-copy">
-                <small>世界</small>
-                <b>{{ worldName }}</b>
-                <span>状态：{{ worldStateLabel }}</span>
-              </div>
-            </template>
-
-            <template v-else-if="widget.key === 'music'">
-              <div class="music-art">♪</div>
-              <div class="music-copy">
-                <small>一起听</small>
-                <b>把声音留在这个世界里</b>
-                <span>打开音乐陪伴</span>
-              </div>
-              <span class="music-play">▶</span>
-            </template>
-          </article>
-        </section>
-
-        <div class="hm-grid" :class="{ 'after-widgets': activeWidgets.length }">
-          <div v-for="app in apps" :key="app.key" class="hm-app-shell">
-            <button class="hm-app" type="button" @click="openApp(app)">
-              <span class="hm-tile-wrap">
-                <AppIcon :icon="app.icon" :custom-image="app.customImage" :tones="app.tone" :size="homeIconSize" />
-                <b v-if="app.badge" class="hm-badge">{{ app.badge > 99 ? '99+' : app.badge }}</b>
-              </span>
-              <span v-if="appearance.showAppLabels" class="hm-name">{{ app.label }}</span>
-            </button>
-            <button
-              v-if="editMode"
-              class="hm-remove hm-remove-app"
-              type="button"
-              :aria-label="`从桌面移除${app.label}`"
-              @click.stop="removeHomeApp(app.key)"
-            >−</button>
-          </div>
+            </div>
+          </section>
         </div>
 
-        <div class="hm-page-dots" aria-hidden="true">
-          <i></i><i class="active"></i><i></i>
+        <div v-if="homePages.length > 1" class="hm-page-dots" aria-label="桌面分页">
+          <button
+            v-for="(_, index) in homePages"
+            :key="index"
+            type="button"
+            :class="{ active: currentPage === index }"
+            :aria-label="`第 ${index + 1} 页`"
+            @click="goToPage(index, 'smooth')"
+          ></button>
         </div>
 
-        <div class="hm-dock-holder">
+        <div class="hm-dock-holder" data-launcher-zone="dock">
           <DockBar
             :apps="dockApps"
             :icon-size="dockIconSize"
             :show-labels="false"
             :editing="editMode"
+            :dragging-key="draggingKey"
+            :drop-target-key="dropTargetKind === 'dock' ? dropTargetKey : ''"
             @remove="removeDockApp"
           />
         </div>
@@ -470,7 +720,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.hm-root{position:relative;height:100%;display:flex;flex-direction:column;overflow:hidden;color:#253b4e}.hm-wall{position:absolute;inset:0;z-index:0;overflow:hidden;background:radial-gradient(115% 68% at 88% -7%,rgba(255,255,255,.97) 0%,rgba(226,244,255,.74) 36%,transparent 64%),radial-gradient(108% 78% at -12% 105%,rgba(192,225,248,.9) 0%,transparent 64%),linear-gradient(165deg,#f7fcff 0%,#e9f5fe 43%,#dbeaf7 100%)}.glow{position:absolute;display:block;border-radius:50%;filter:blur(12px);opacity:.48}.g1{width:230px;height:230px;top:-72px;right:-64px;background:radial-gradient(circle,rgba(165,212,244,.68),transparent 68%)}.g2{width:280px;height:280px;bottom:-110px;left:-100px;background:radial-gradient(circle,rgba(184,222,248,.76),transparent 68%)}.g3{width:180px;height:180px;top:37%;left:20%;background:radial-gradient(circle,rgba(255,255,255,.7),transparent 70%)}.hm-root::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(19,52,78,.035))}.hm-main{position:relative;z-index:1;flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto;padding:18px 18px 14px;-webkit-overflow-scrolling:touch;touch-action:pan-y}.hm-widgets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:6px 1px 0}.hm-widget{position:relative;min-width:0;overflow:hidden;border:1px solid rgba(255,255,255,.52);box-shadow:0 12px 27px rgba(42,74,98,.12),inset 0 1px 0 rgba(255,255,255,.45);cursor:pointer}.hm-widgets.style-frosted .hm-widget{background:rgba(247,251,254,.6);backdrop-filter:blur(24px) saturate(1.12);-webkit-backdrop-filter:blur(24px) saturate(1.12)}.hm-widgets.style-clear .hm-widget{background:rgba(255,255,255,.22);backdrop-filter:blur(7px) saturate(1.08);-webkit-backdrop-filter:blur(7px) saturate(1.08)}.hm-widgets.style-solid .hm-widget{background:#f8fbfd}.hm-widget.size-medium{grid-column:span 4;min-height:122px;border-radius:24px}.hm-widget.size-small{grid-column:span 2;min-height:124px;border-radius:24px}.widget-greeting{position:absolute;left:18px;bottom:38px;font-size:27px;line-height:1;font-weight:760;letter-spacing:-.04em}.widget-date{position:absolute;left:18px;top:17px;color:#6d8292;font-size:11px}.widget-caption{position:absolute;left:18px;bottom:16px;color:#6f8494;font-size:10px}.widget-clock{position:absolute;right:17px;top:14px;font-size:27px;font-weight:620;letter-spacing:-.04em;color:#4c6679}.widget-companion,.widget-world{padding:14px}.widget-companion,.widget-world{display:flex;flex-direction:column;justify-content:space-between}.widget-copy{display:grid;gap:2px;min-width:0}.widget-copy small,.music-copy small{color:#8396a5;font-size:9px}.widget-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.widget-copy span,.music-copy span{color:#7b8e9d;font-size:9px}.world-orb{display:grid;place-items:center;width:45px;height:45px;border-radius:15px;background:linear-gradient(145deg,#87b8dc,#c4def0);color:white;font-size:29px;box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}.widget-music{display:flex;align-items:center;gap:12px;padding:15px 16px}.music-art{display:grid;place-items:center;width:72px;height:72px;flex:0 0 auto;border-radius:19px;background:linear-gradient(145deg,#8d99df,#c2c9f3);color:#fff;font-size:35px;box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}.music-copy{display:grid;gap:3px;min-width:0;flex:1}.music-copy b{font-size:14px;line-height:1.35}.music-play{display:grid;place-items:center;width:31px;height:31px;border-radius:50%;background:rgba(255,255,255,.8);color:#6f7fc4;font-size:12px}.hm-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px 8px;margin-top:22px;padding:0 1px}.hm-grid.after-widgets{margin-top:25px}.hm-app-shell{position:relative;display:grid;place-items:start center;min-width:0}.hm-app{display:flex;min-width:0;flex-direction:column;align-items:center;gap:7px;padding:0;border:0;background:transparent;cursor:pointer;color:inherit}.hm-tile-wrap{position:relative;display:grid;place-items:center}.hm-badge{position:absolute;z-index:3;right:-6px;top:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:11px;background:#ff4b57;color:#fff;font-size:10px;line-height:20px;text-align:center;font-weight:760;border:1.5px solid rgba(255,255,255,.92)}.hm-name{max-width:72px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#2e4659;white-space:nowrap;text-shadow:0 1px 8px rgba(255,255,255,.7)}.hm-page-dots{display:flex;justify-content:center;gap:7px;margin-top:auto;padding:22px 0 13px}.hm-page-dots i{width:6px;height:6px;border-radius:50%;background:rgba(63,81,95,.28)}.hm-page-dots i.active{background:rgba(42,62,78,.72)}.hm-dock-holder{flex:0 0 auto;padding:0 3px 10px}.hm-edit-toolbar{position:absolute;z-index:25;inset:8px 0 auto;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none}.hm-done{pointer-events:auto;margin-right:2px;padding:7px 15px;border:1px solid rgba(255,255,255,.55);border-radius:999px;background:rgba(248,250,252,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:#2d4050;font-size:13px;font-weight:700;box-shadow:0 7px 20px rgba(28,47,62,.12)}.hm-edit-menu{pointer-events:auto;width:225px;overflow:hidden;border:1px solid rgba(255,255,255,.54);border-radius:24px;background:rgba(248,247,246,.72);backdrop-filter:blur(28px) saturate(1.15);-webkit-backdrop-filter:blur(28px) saturate(1.15);box-shadow:0 18px 42px rgba(28,45,58,.18)}.hm-edit-menu button{width:100%;height:51px;padding:0 16px;border:0;border-bottom:1px solid rgba(73,84,93,.08);background:transparent;display:flex;align-items:center;gap:13px;text-align:left;color:#202a31}.hm-edit-menu button:last-child{border-bottom:0}.hm-edit-menu button span{width:26px;text-align:center;font-size:20px}.hm-edit-menu button b{font-size:14px;font-weight:620}.hm-remove{position:absolute;z-index:15;left:-7px;top:-7px;width:24px;height:24px;border:1px solid rgba(255,255,255,.72);border-radius:50%;background:rgba(119,127,135,.9);color:#fff;font-size:20px;line-height:20px;display:grid;place-items:center;box-shadow:0 3px 10px rgba(24,39,52,.2)}.hm-remove-app{left:2px;top:-6px}.is-editing .hm-widget,.is-editing .hm-app{animation:home-jiggle .18s ease-in-out infinite alternate}.is-editing .hm-app-shell:nth-child(even) .hm-app,.is-editing .hm-widget:nth-child(even){animation-direction:alternate-reverse}.is-editing .hm-main{padding-top:226px}.hm-sheet-backdrop{position:absolute;z-index:40;inset:0;display:flex;align-items:flex-end;background:rgba(24,35,43,.16);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}.hm-sheet{width:100%;max-height:68%;overflow:hidden;border-radius:28px 28px 0 0;background:#f7f9fb;box-shadow:0 -18px 48px rgba(24,45,61,.2)}.hm-sheet header{display:flex;align-items:center;justify-content:space-between;padding:17px 18px 13px;border-bottom:1px solid #e8edf1}.hm-sheet header small{color:#8798a5;font-size:9px}.hm-sheet header h2{margin:2px 0 0;font-size:20px;letter-spacing:-.02em}.hm-sheet header button{width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#536979;font-size:21px}.widget-catalog,.page-editor{max-height:430px;overflow:auto;padding:12px 14px 24px}.widget-choice{width:100%;min-height:72px;display:grid;grid-template-columns:62px 1fr auto;align-items:center;gap:12px;padding:9px 10px;border:0;border-bottom:1px solid #e9eef1;background:transparent;text-align:left;color:#304759}.widget-choice:disabled{opacity:.46}.widget-choice>span:nth-child(2){display:grid;gap:3px}.widget-choice>span:nth-child(2) b{font-size:13px}.widget-choice>span:nth-child(2) small{color:#8495a2;font-size:9px;line-height:1.4}.widget-choice em{font-style:normal;font-size:18px;color:#5d91b6}.widget-sample{display:grid;place-items:center;width:58px;height:50px;border-radius:15px;background:linear-gradient(145deg,#e8f2f8,#fff);box-shadow:inset 0 0 0 1px rgba(80,109,131,.07);color:#5e7b91}.sample-music{background:linear-gradient(145deg,#dfe2f7,#f7f8ff);color:#7783c8}.page-editor-head,.page-app-row{display:grid;grid-template-columns:1fr 58px 58px;align-items:center;gap:8px}.page-editor-head{padding:3px 5px 8px;color:#8c9aa5;font-size:9px;text-align:center}.page-editor-head span:first-child{text-align:left}.page-app-row{min-height:58px;border-top:1px solid #e9eef1}.page-app-name{display:flex;align-items:center;gap:9px;min-width:0}.page-app-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.place-toggle{justify-self:center;width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#7a8b97;font-size:15px}.place-toggle.on{background:#dff3ea;color:#159a63;font-weight:800}.place-toggle:disabled{opacity:.32}.sheet-note{margin:12px 4px 0;color:#8d9ba6;font-size:9px;line-height:1.55}
+.hm-root{position:relative;height:100%;display:flex;flex-direction:column;overflow:hidden;color:#253b4e}.hm-wall{position:absolute;inset:0;z-index:0;overflow:hidden;background:radial-gradient(115% 68% at 88% -7%,rgba(255,255,255,.97) 0%,rgba(226,244,255,.74) 36%,transparent 64%),radial-gradient(108% 78% at -12% 105%,rgba(192,225,248,.9) 0%,transparent 64%),linear-gradient(165deg,#f7fcff 0%,#e9f5fe 43%,#dbeaf7 100%)}.glow{position:absolute;display:block;border-radius:50%;filter:blur(12px);opacity:.48}.g1{width:230px;height:230px;top:-72px;right:-64px;background:radial-gradient(circle,rgba(165,212,244,.68),transparent 68%)}.g2{width:280px;height:280px;bottom:-110px;left:-100px;background:radial-gradient(circle,rgba(184,222,248,.76),transparent 68%)}.g3{width:180px;height:180px;top:37%;left:20%;background:radial-gradient(circle,rgba(255,255,255,.7),transparent 70%)}.hm-root::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(19,52,78,.035))}.hm-main{position:relative;z-index:1;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0;touch-action:pan-x}.hm-pages{display:flex;flex:1;min-height:0;width:100%;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain;scrollbar-width:none;-ms-overflow-style:none}.hm-pages::-webkit-scrollbar{display:none;width:0;height:0}.hm-page{position:relative;flex:0 0 100%;width:100%;min-height:0;overflow-y:auto;scroll-snap-align:start;scroll-snap-stop:always;scrollbar-width:none;-ms-overflow-style:none}.hm-page::-webkit-scrollbar{display:none;width:0;height:0}.hm-page-content{min-height:100%;padding:18px 18px 10px;box-sizing:border-box}.hm-widgets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:6px 1px 0}.hm-widget{position:relative;min-width:0;overflow:hidden;border:1px solid rgba(255,255,255,.52);box-shadow:0 12px 27px rgba(42,74,98,.12),inset 0 1px 0 rgba(255,255,255,.45);cursor:pointer}.hm-widgets.style-frosted .hm-widget{background:rgba(247,251,254,.6);backdrop-filter:blur(24px) saturate(1.12);-webkit-backdrop-filter:blur(24px) saturate(1.12)}.hm-widgets.style-clear .hm-widget{background:rgba(255,255,255,.22);backdrop-filter:blur(7px) saturate(1.08);-webkit-backdrop-filter:blur(7px) saturate(1.08)}.hm-widgets.style-solid .hm-widget{background:#f8fbfd}.hm-widget.size-medium{grid-column:span 4;min-height:122px;border-radius:24px}.hm-widget.size-small{grid-column:span 2;min-height:124px;border-radius:24px}.widget-greeting{position:absolute;left:18px;bottom:38px;font-size:27px;line-height:1;font-weight:760;letter-spacing:-.04em}.widget-date{position:absolute;left:18px;top:17px;color:#6d8292;font-size:11px}.widget-caption{position:absolute;left:18px;bottom:16px;color:#6f8494;font-size:10px}.widget-clock{position:absolute;right:17px;top:14px;font-size:27px;font-weight:620;letter-spacing:-.04em;color:#4c6679}.widget-companion,.widget-world{padding:14px}.widget-companion,.widget-world{display:flex;flex-direction:column;justify-content:space-between}.widget-copy{display:grid;gap:2px;min-width:0}.widget-copy small,.music-copy small{color:#8396a5;font-size:9px}.widget-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.widget-copy span,.music-copy span{color:#7b8e9d;font-size:9px}.world-orb{display:grid;place-items:center;width:45px;height:45px;border-radius:15px;background:linear-gradient(145deg,#87b8dc,#c4def0);color:white;font-size:29px;box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}.widget-music{display:flex;align-items:center;gap:12px;padding:15px 16px}.music-art{display:grid;place-items:center;width:72px;height:72px;flex:0 0 auto;border-radius:19px;background:linear-gradient(145deg,#8d99df,#c2c9f3);color:#fff;font-size:35px;box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}.music-copy{display:grid;gap:3px;min-width:0;flex:1}.music-copy b{font-size:14px;line-height:1.35}.music-play{display:grid;place-items:center;width:31px;height:31px;border-radius:50%;background:rgba(255,255,255,.8);color:#6f7fc4;font-size:12px}.hm-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px 8px;margin-top:22px;padding:0 1px}.hm-grid.after-widgets{margin-top:25px}.hm-app-shell{position:relative;display:grid;place-items:start center;min-width:0;transition:transform .16s ease,opacity .16s ease,filter .16s ease}.hm-app-shell.is-dragging{opacity:.2;filter:saturate(.7)}.hm-drag-ghost{position:fixed!important;z-index:9999!important;margin:0!important;pointer-events:none!important;opacity:.94!important;transform:scale(1.06)!important;transform-origin:center!important;filter:drop-shadow(0 16px 18px rgba(32,50,65,.22));transition:none!important}.hm-drag-ghost .hm-app,.hm-drag-ghost .dock-app{animation:none!important}.launcher-source-dragging{opacity:.22!important}
+.hm-app-shell.is-drop-target{transform:scale(.92);outline:1.5px dashed rgba(65,91,110,.4);outline-offset:5px;border-radius:18px}.hm-app{display:flex;min-width:0;flex-direction:column;align-items:center;gap:7px;padding:0;border:0;background:transparent;cursor:pointer;color:inherit}.hm-tile-wrap{position:relative;display:grid;place-items:center}.hm-badge{position:absolute;z-index:3;right:-6px;top:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:11px;background:#ff4b57;color:#fff;font-size:10px;line-height:20px;text-align:center;font-weight:760;border:1.5px solid rgba(255,255,255,.92)}.hm-name{max-width:72px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#2e4659;white-space:nowrap;text-shadow:0 1px 8px rgba(255,255,255,.7)}.hm-page-dots{display:flex;flex:0 0 auto;justify-content:center;gap:7px;padding:8px 0 10px}.hm-page-dots button{width:6px;height:6px;padding:0;border:0;border-radius:50%;background:rgba(63,81,95,.28)}.hm-page-dots button.active{background:rgba(42,62,78,.72)}.hm-dock-holder{flex:0 0 auto;padding:0 21px 10px}.hm-edit-toolbar{position:absolute;z-index:25;inset:8px 0 auto;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none}.hm-done{pointer-events:auto;margin-right:2px;padding:7px 15px;border:1px solid rgba(255,255,255,.55);border-radius:999px;background:rgba(248,250,252,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:#2d4050;font-size:13px;font-weight:700;box-shadow:0 7px 20px rgba(28,47,62,.12)}.hm-edit-menu{pointer-events:auto;width:225px;overflow:hidden;border:1px solid rgba(255,255,255,.54);border-radius:24px;background:rgba(248,247,246,.72);backdrop-filter:blur(28px) saturate(1.15);-webkit-backdrop-filter:blur(28px) saturate(1.15);box-shadow:0 18px 42px rgba(28,45,58,.18)}.hm-edit-menu button{width:100%;height:51px;padding:0 16px;border:0;border-bottom:1px solid rgba(73,84,93,.08);background:transparent;display:flex;align-items:center;gap:13px;text-align:left;color:#202a31}.hm-edit-menu button:last-child{border-bottom:0}.hm-edit-menu button span{width:26px;text-align:center;font-size:20px}.hm-edit-menu button b{font-size:14px;font-weight:620}.hm-remove{position:absolute;z-index:15;left:-7px;top:-7px;width:24px;height:24px;border:1px solid rgba(255,255,255,.72);border-radius:50%;background:rgba(119,127,135,.9);color:#fff;font-size:20px;line-height:20px;display:grid;place-items:center;box-shadow:0 3px 10px rgba(24,39,52,.2)}.hm-remove-app{left:2px;top:-6px}.is-editing .hm-widget,.is-editing .hm-app{animation:home-jiggle .18s ease-in-out infinite alternate}.is-editing .hm-app-shell:nth-child(even) .hm-app,.is-editing .hm-widget:nth-child(even){animation-direction:alternate-reverse}.is-editing .hm-page-content{padding-top:226px}.hm-sheet-backdrop{position:absolute;z-index:40;inset:0;display:flex;align-items:flex-end;background:rgba(24,35,43,.16);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}.hm-sheet{width:100%;max-height:68%;overflow:hidden;border-radius:28px 28px 0 0;background:#f7f9fb;box-shadow:0 -18px 48px rgba(24,45,61,.2)}.hm-sheet header{display:flex;align-items:center;justify-content:space-between;padding:17px 18px 13px;border-bottom:1px solid #e8edf1}.hm-sheet header small{color:#8798a5;font-size:9px}.hm-sheet header h2{margin:2px 0 0;font-size:20px;letter-spacing:-.02em}.hm-sheet header button{width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#536979;font-size:21px}.widget-catalog,.page-editor{max-height:430px;overflow:auto;padding:12px 14px 24px}.widget-choice{width:100%;min-height:72px;display:grid;grid-template-columns:62px 1fr auto;align-items:center;gap:12px;padding:9px 10px;border:0;border-bottom:1px solid #e9eef1;background:transparent;text-align:left;color:#304759}.widget-choice:disabled{opacity:.46}.widget-choice>span:nth-child(2){display:grid;gap:3px}.widget-choice>span:nth-child(2) b{font-size:13px}.widget-choice>span:nth-child(2) small{color:#8495a2;font-size:9px;line-height:1.4}.widget-choice em{font-style:normal;font-size:18px;color:#5d91b6}.widget-sample{display:grid;place-items:center;width:58px;height:50px;border-radius:15px;background:linear-gradient(145deg,#e8f2f8,#fff);box-shadow:inset 0 0 0 1px rgba(80,109,131,.07);color:#5e7b91}.sample-music{background:linear-gradient(145deg,#dfe2f7,#f7f8ff);color:#7783c8}.page-editor-head,.page-app-row{display:grid;grid-template-columns:1fr 58px 58px;align-items:center;gap:8px}.page-editor-head{padding:3px 5px 8px;color:#8c9aa5;font-size:9px;text-align:center}.page-editor-head span:first-child{text-align:left}.page-app-row{min-height:58px;border-top:1px solid #e9eef1}.page-app-name{display:flex;align-items:center;gap:9px;min-width:0}.page-app-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.place-toggle{justify-self:center;width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#7a8b97;font-size:15px}.place-toggle.on{background:#dff3ea;color:#159a63;font-weight:800}.place-toggle:disabled{opacity:.32}.sheet-note{margin:12px 4px 0;color:#8d9ba6;font-size:9px;line-height:1.55}
 @keyframes home-jiggle{from{transform:rotate(-.65deg) translateY(0)}to{transform:rotate(.65deg) translateY(.4px)}}
-@media(max-width:360px){.hm-main{padding-left:14px;padding-right:14px}.hm-grid{gap:18px 5px}.hm-name{font-size:10px}.hm-edit-menu{width:205px}.is-editing .hm-main{padding-top:224px}}
+@media(max-width:360px){.hm-page-content{padding-left:14px;padding-right:14px}.hm-dock-holder{padding-left:17px;padding-right:17px}.hm-grid{gap:18px 5px}.hm-name{font-size:10px}.hm-edit-menu{width:205px}.is-editing .hm-page-content{padding-top:224px}}
 </style>

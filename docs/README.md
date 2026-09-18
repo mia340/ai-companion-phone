@@ -1,13 +1,13 @@
 # AI Companion Phone 文档中心
 
-当前开发线：**V0.5.0-alpha.5.1.7**
+当前开发线：**V0.5.0-alpha.5.1.8**
 
 ```text
-应用：0.5.0-alpha.5.1.7
+应用：0.5.0-alpha.5.1.8
 IndexedDB：V18
 Backup：V12
-测试定义：37 个测试文件 / 308 个 it/test 声明
-当前 UI 主线：真实手机桌面 + 4 格 Dock + 玩家自定义 Widget / App 布局
+测试定义：38 个测试文件 / 315 个 it/test 声明
+当前 UI 主线：真实手机 Launcher V2（多页 / 拖拽 / Dock）+ 玩家自定义 Widget
 ```
 
 这里是项目 Markdown 文档的**唯一保管入口**。项目根目录不再散放逐版本说明；版本交付文档统一在 `docs/releases/`，同类项目研究统一在 `docs/research/`。
@@ -18,7 +18,7 @@ Backup：V12
 
 1. `START_HERE_小白启动指南.md`：第一次启动、Build、常见问题。
 2. `部署与更新.md`：长期通用的 Windows / Git / Build 流程。
-3. `releases/V0.5.0-alpha.5.1.7_部署与更新.md`：当前版本的专项验收步骤。
+3. `releases/V0.5.0-alpha.5.1.8_部署与更新.md`：当前版本的专项验收步骤。
 
 ### 当前开发单一事实源
 
@@ -33,6 +33,7 @@ Backup：V12
 ### 研究 / 参考项目
 
 - `research/REFERENCE_PROJECTS.md`：长期参考项目索引和学习原则。
+- `research/SULLYOS_DEEP_STUDY_2026-09-18.md`：SullyOS·糯米机 Launcher / Character Card / WorldBook / Memory / 主动消息深度研究与吸收记录。
 - `research/REFERENCE_STUDY_2026-09-13.md`：早一轮工程研究。
 - `research/REFERENCE_STUDY_SMALL_PHONES_2026-09-17.md`：本轮 20+ 小手机/辅助工具案例研究与可吸收机制。
 - `research/HOME_WIDGET_CUSTOMIZATION_STUDY_2026-09-18.md`：Apple / Widgetsmith / Color Widgets / ScreenKit 主屏与 Widget 自定义研究。

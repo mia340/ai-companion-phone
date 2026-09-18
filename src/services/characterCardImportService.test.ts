@@ -363,3 +363,54 @@ it('V3 读取 nickname / multilingual notes / assets，并按 V3 回写', () => 
   expect(exported.data.creator_notes_multilingual.zh).toBe('中文作者说明')
   expect(exported.data.assets).toHaveLength(1)
 })
+
+it('导入和再导出都剥离角色卡中的私密凭据、UI 偏好与运行时存档', () => {
+  const result = parseCharacterCardJson(JSON.stringify({
+    spec: 'chara_card_v3',
+    spec_version: '3.0',
+    apiKey: 'root-secret',
+    data: {
+      name: '安全边界测试',
+      description: '角色设定',
+      extensions: {
+        api_key: 'nested-secret',
+        bubbleStyle: { background: '#000' },
+        custom_safe_extension: { foo: 'bar' }
+      },
+      phoneState: { localOnly: true }
+    }
+  }))
+
+  const archivedRuntime = JSON.stringify(result.patch.rawCardExtensions)
+  expect(archivedRuntime).not.toContain('root-secret')
+  expect(archivedRuntime).not.toContain('nested-secret')
+  expect(archivedRuntime).not.toContain('bubbleStyle')
+  expect(archivedRuntime).toContain('custom_safe_extension')
+  expect(result.notes.some(note => note.includes('安全边界已剥离'))).toBe(true)
+
+  const now = '2026-09-18T00:00:00.000Z'
+  const json = exportCharacterCardJson({
+    id: 'safe-char',
+    worldId: 'world',
+    name: '安全边界测试',
+    avatar: '',
+    persona: '角色设定',
+    relationship: '',
+    mood: '',
+    activity: '',
+    replySpeed: 'natural',
+    createdAt: now,
+    rawCardExtensions: {
+      dataExtensions: {
+        custom_safe_extension: { foo: 'bar' },
+        refreshToken: 'never-share',
+        thinkingChainCustomCss: '.private{}'
+      },
+      rootMetadata: { dreamLogs: [{ secret: true }] }
+    }
+  })
+  expect(json).not.toContain('never-share')
+  expect(json).not.toContain('thinkingChainCustomCss')
+  expect(json).not.toContain('dreamLogs')
+  expect(json).toContain('custom_safe_extension')
+})

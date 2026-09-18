@@ -1,6 +1,6 @@
 # AI Companion Phone 工程审查与 V0.5.0 重构路线图
 
-> **2026-09-18 当前快照**：App `0.5.0-alpha.5.1.7`，IndexedDB V18，Backup V12，源码定义 37 个测试文件 / 308 个 `it/test` 声明。alpha.5.1.7 恢复真实手机式 4 列桌面、4 格 Dock 与可持久化 Widget / App 布局；下方早期小节保留为审查历史，不应被当作当前版本数字。
+> **2026-09-18 当前快照**：App `0.5.0-alpha.5.1.8`，IndexedDB V18，Backup V12，源码定义 38 个测试文件 / 315 个 `it/test` 声明。alpha.5.1.8 在真实手机桌面基础上补多页拖拽 Launcher、Character Card 双向安全净化、SullyOS-shaped WorldBook 回归和 Memory Retrieval V2 第一批；下方早期小节保留为审查历史，不应被当作当前版本数字。
 
 
 ## 0.0.5 V0.5.0-alpha.4.2 社区聊天兼容审查结论
@@ -65,7 +65,7 @@ Windows 对 alpha.3.1 的真实全量结果为 **25/26 test files、243/244 test
 
 - alpha.3.1 当前生产 TS/Vue 约 **36,555 行**，测试代码约 **3,200 行**；新增 App 让总规模继续增长，因此下一阶段必须以“复用边界”而不是单纯堆页面为指标。
 - 原 V0.4.7.1 审查时生产 TS/Vue 约 28,231 行；V0.5 重构期间以趋势而非绝对行数作为指标。
-- 当前测试定义：37 个测试文件、308 个 `it/test` 声明；除 Conversation Runtime 外，朋友圈、音乐、海龟汤和 Provider 也已有纯规则/请求体回归测试。
+- 当前测试定义：38 个测试文件、315 个 `it/test` 声明；除 Conversation Runtime 外，朋友圈、音乐、海龟汤和 Provider 也已有纯规则/请求体回归测试。
 - `ChatRoom.vue`：alpha.3 为 4,576 行，仍是最大架构热点；Conversation lifecycle 已继续外移，但 generation 仍未大拆。
 - 静态依赖扫描覆盖 **99 个生产 TS/Vue 文件**，仍未检测到模块循环依赖，这是当前代码结构的明显优点。
 - 最大风险不是“缺功能”，而是 Conversation/Generation/Persistence 逻辑仍集中在 View，导致删除、回滚、分支、流式生成、状态/记忆等操作难以保持事务一致性。

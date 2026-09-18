@@ -1,3 +1,14 @@
+## V0.5.0-alpha.5.1.8 · Launcher Runtime V2 / Character Card 安全边界 / Memory Retrieval V2
+
+- 修复主桌面左下角出现的竖向白线：Launcher 收敛为横向分页滚动层，并隐藏桌面浏览器 scrollbar；Phone Shell 底部横向 Home Indicator 保留。
+- 主桌面升级为真正的多页 Launcher：长按 App 进入整理态，支持同页排序、桌面↔Dock 拖拽、Dock 满 4 格时交换、拖到左右边缘停留自动跨页。
+- 新增 `paginateHomeAppKeys()` / `moveHomeAppPlacement()` 纯函数和回归测试，让 Launcher 排序与 Vue DOM 手势解耦。
+- 新增 Character Card Security Boundary：导入和导出均递归剥离 API 凭据、发送者 UI / 语音偏好和 runtime 存档残留；原始社区资源仍由 Resource Archive 独立保存。
+- WorldBook Import Adapter 新增 SullyOS-shaped 条目兼容回归：`keysecondary / selectiveLogic / sourceUid / scanDepth / caseSensitive / matchWholeWords` 等字段进入统一内部模型，禁用状态不被改变，unknown extension 继续保留。
+- Memory Retrieval V2 第一批：`confidence` 与 capped `hitCount` recall feedback 进入评分；conflict penalty 仍具有更高优先级。
+- 新增 `docs/research/SULLYOS_DEEP_STUDY_2026-09-18.md`，系统记录 SullyOS Launcher、Character Card、WorldBook、ContextBuilder、Memory、主动消息与备份边界，并明确 PolyForm Noncommercial 许可下只学习思想、独立实现。
+- 静态测试定义：**38 files / 315 it-test declarations**。IndexedDB V18 / Backup V12 不变；完整 `npm run verify` 仍以 Windows / CI 为发布门禁。
+
 ## V0.5.0-alpha.5.1.7 · 真实手机桌面 + Dock + 小组件自定义
 
 - 恢复主屏幕上的「音乐」与「海龟汤」入口；两者继续使用既有真实路由与 Runtime，不降级为占位页。

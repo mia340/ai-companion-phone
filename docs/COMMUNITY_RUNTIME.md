@@ -7,6 +7,17 @@
 > 当前文档只描述通用协议与运行边界。测试角色卡只能作为回归样本，生产逻辑禁止按角色名、作者名、卡 ID 或文件名特判。
 
 
+## V0.5.0-alpha.5.1.8 Character Asset Security / WorldBook Adapter
+
+角色卡兼容不再只讨论“字段能否读出来”，同时建立共享安全边界：
+
+- 原始卡 / PNG / JSON 可继续进入 Resource Archive 保留原样；
+- 进入 Character Runtime 前，递归删除凭据、发送者 UI / 语音偏好、组织 ID 与 runtime 存档；
+- 再导出角色卡前重复执行同一净化，避免历史脏扩展被二次传播；
+- 标准 Character Card / Character Book 字段和未知安全扩展不因安全边界被无差别丢弃。
+
+WorldBook Import Adapter 增加 SullyOS-shaped 字段回归；这只是输入兼容层，激活、递归、预算、sticky/cooldown/delay、group scoring 与 injection 仍由本项目 WorldBook Engine V2 统一执行。
+
 ## 0. V0.5.0-alpha.4.2 Presentation Priority
 
 默认 `scene-merged` 下按以下顺序选择显示路径：

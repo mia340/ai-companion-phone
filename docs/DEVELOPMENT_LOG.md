@@ -1,3 +1,14 @@
+## 2026-09-18 · V0.5.0-alpha.5.1.8｜SullyOS 深度学习 + Runtime 吸收第一批
+
+- 用户要求不要只学糯米机 UI，而要系统学习角色卡、世界书、记忆、Prompt、后台行为、备份等全部可借鉴处理。
+- 阅读 SullyOS 官方 README、Launcher、Character Card 分享边界、WorldBook 类型与主动消息 2.0 说明；研究结果单独归档。
+- Launcher：把 alpha.5.1.7 的“设置里选 App”继续升级为多页拖拽运行时，并修复嵌套滚动造成的竖向白线。
+- Character Card：引入独立的共享安全边界，角色资产与发卡人的凭据 / Presentation 偏好 / Runtime 状态彻底分离；Import / Export 双向净化。
+- WorldBook：不替换现有 Engine V2，而是扩大输入 Adapter，对 SullyOS 常见字段建立显式回归样本。
+- Memory：开始使用已经存在却未充分参与检索的 confidence / hitCount 元数据，形成 Retrieval V2 第一批。
+- 后续路线确定为 Context Inspector、统一 AgentAction / AgentActivity、Backup Zod + atomic validation、正式 HomeLayoutSchema。
+- 当前容器无法完整 `npm ci`（npm cache 缺 `zod@3.25.76`），已做 TS / Vue script 静态语法检查；Windows `npm run verify` 仍是部署硬门禁。
+
 ## 2026-09-18 · V0.5.0-alpha.5.1.7｜主屏回归真实手机 / Widget 自定义
 
 - 用户指出 alpha.5.1.6 过度收敛：音乐、海龟汤和底部 Dock 从桌面消失，主屏更像功能面板而不是手机。

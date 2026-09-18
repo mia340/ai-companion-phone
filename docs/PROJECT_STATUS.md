@@ -1,16 +1,24 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.7**
+当前版本：**V0.5.0-alpha.5.1.8**
 
 ```text
-App：0.5.0-alpha.5.1.7
+App：0.5.0-alpha.5.1.8
 IndexedDB：V18
 Backup：V12
-测试定义：37 files / 308 it-test declarations
+测试定义：38 files / 315 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+## 0. 本轮 alpha.5.1.8 重点
+
+- **Launcher Runtime V2**：主屏升级为横向多页；长按 App 可直接进入整理态并拖拽，支持桌面内排序、桌面与 Dock 双向移动、Dock 满 4 格交换、边缘停留跨页。桌面层隐藏浏览器滚动条，修复左下角竖向白线伪影。
+- **Character Card Security Boundary**：角色卡导入与导出都递归剥离凭据、发送者 UI 偏好和本地运行时残留；原始社区文件仍由 Resource Archive 独立保留，安全工作模型与原始取证不冲突。
+- **WorldBook compatibility**：新增 SullyOS-shaped entry 回归，覆盖 `keysecondary / selectiveLogic / sourceUid / scanDepth / matchWholeWords` 等字段；禁用条目保持禁用，未知扩展继续 round-trip。
+- **Memory Retrieval V2 第一批**：`confidence` 与 capped `hitCount` feedback 正式参与检索评分；冲突惩罚仍高于热门记忆加权。
+- 深度研究记录：`research/SULLYOS_DEEP_STUDY_2026-09-18.md`。
 
 ## 1. 当前产品结构
 

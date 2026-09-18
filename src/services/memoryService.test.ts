@@ -78,3 +78,21 @@ describe('multi-layer memory', () => {
     expect(hits[0].reasons.join('')).toContain('锁定')
   })
 })
+
+it('Memory Retrieval V2 会用置信度与历史召回反馈打破同相关度记忆的平局', () => {
+  const hits = selectMemoryHitsDetailed([
+    make('low', '用户喜欢夜跑', 3, { confidence: .55, hitCount: 0 }),
+    make('trusted', '用户喜欢夜跑', 3, { confidence: .96, hitCount: 8 })
+  ], '你还记得我喜欢夜跑吗', 2)
+  expect(hits[0].memory.id).toBe('trusted')
+  expect(hits[0].reasons.join(' ')).toContain('高置信')
+  expect(hits[0].reasons.join(' ')).toContain('历史召回')
+})
+
+it('冲突惩罚仍高于重复召回反馈，避免错误记忆越召回越强', () => {
+  const hits = selectMemoryHitsDetailed([
+    make('conflicted', '用户住在杭州', 5, { status: 'conflict', confidence: 1, hitCount: 64 }),
+    make('active', '用户住在杭州', 5, { status: 'active', confidence: .8, hitCount: 0 })
+  ], '我住在哪里', 2)
+  expect(hits[0].memory.id).toBe('active')
+})
