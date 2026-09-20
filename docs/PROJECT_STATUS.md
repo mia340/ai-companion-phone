@@ -1,17 +1,31 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-20**  
-当前版本：**V0.5.0-alpha.5.1.25**
+当前版本：**V0.5.0-alpha.5.1.27**
 
 ```text
-App：0.5.0-alpha.5.1.25
+App：0.5.0-alpha.5.1.27
 Launcher：Grid V13（Layout Inspector V4 + Dock/Home 去重 + DOM 绘制诊断）
 IndexedDB：V18
 Backup：V12
-测试定义：42 files / 351 it-test declarations
+测试定义：43 files / 366 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+
+## 0. 本轮 alpha.5.1.27 重点
+
+- **WorldBook Engine 直接测试补强**：新增 `lorebookService.test.ts`，从 `buildLorebookPrompt()` 公共入口覆盖实际 Runtime，而不是只测导入解析。
+- 覆盖关键词/Regex/whole-word/case-sensitive、四种 selective logic、scanDepth/recalled、Persona/Character 上下文匹配、递归与 recursion guard。
+- 覆盖 sticky/cooldown/delay、group scoring、probability、书级 token budget、At-Depth / Outlet。
+- 运行时实现不变；IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+- 测试矩阵：43 文件 / 366 tests；最终以 Windows 两次 `npm run verify` 为准。
+
+## 0.1 alpha.5.1.26 发布安全收口
+
+- 新增 `scripts/release-safety.mjs`，统一 package/lock、Git ignore、main/origin、ignored-but-tracked、staged forbidden paths 检查。
+- `npm run verify` 与 GitHub Actions 共用同一 canonical 门禁；部署脚本不再用 Windows PowerShell 5.1 `ConvertFrom-Json` 直接解析 npm v3 lockfile。
 
 
 ## 0. 本轮 alpha.5.1.25 重点
@@ -280,9 +294,9 @@ parse
 
 ## 6. 验证状态
 
-- 本轮修改的 TypeScript 与 Vue `<script setup lang="ts">` 已用 TypeScript 5.8.3 `transpileModule` 做语法检查：通过；
-- 当前容器无法从离线 npm cache 取得 `zod@3.25.76`，因此无法组成完整 `node_modules`；
-- 因此本轮**没有宣称 Vitest / vue-tsc / Vite Build 已通过**。
+- 新增 `lorebookService.test.ts` 已用 TypeScript 5.8.3 `transpileModule` 做语法检查：通过；
+- 额外建立独立 Node/TypeScript harness，使用同一份 `lorebookService.ts` 实现与 mock DB/binding 跑通本轮 15 个核心场景；
+- 当前容器仍无法稳定完成完整 `npm ci`，因此本轮**不宣称 Vitest / vue-tsc / Vite Build 已在容器通过**。
 
 正式发布门禁仍是：
 

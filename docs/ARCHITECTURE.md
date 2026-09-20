@@ -1,9 +1,14 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.5.1.25**。
+> 当前文档版本：**V0.5.0-alpha.5.1.27**。
 > V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V18 / Backup V12（朋友圈、角色社交权限、主屏幕与空间设置均纳入现有备份范围）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
+
+
+## V0.5.0-alpha.5.1.27：WorldBook Engine Regression Contract
+
+本轮不改变 WorldBook Runtime 算法，而是新增 `lorebookService.test.ts` 直接从 `buildLorebookPrompt()` 公共入口锁定既有语义：关键词 / Regex / selective、扫描深度与 recalled 过滤、上下文匹配、递归、timed effects、group、probability、token budget、At-Depth / Outlet。后续任何 WorldBook 优化都必须保持这组行为测试通过，除非版本文档明确声明语义迁移。
 
 ## V0.5.0-alpha.5.1.25：Launcher Visual Proof Contract
 

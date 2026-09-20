@@ -1,5 +1,19 @@
 # Changelog
 
+## V0.5.0-alpha.5.1.27
+
+- 新增 `lorebookService.test.ts`，直接从公开 `buildLorebookPrompt()` 入口锁定 WorldBook Engine 核心行为，不再只依赖导入解析或语义辅助测试。
+- 新增 15 条回归测试：关键词 / whole-word / case-sensitive / regex、四种 selective logic、scanDepth 与 recalled 过滤、Persona/Character 上下文匹配、多层递归、prevent/exclude recursion、sticky/cooldown/delay、group scoring、probability、token budget、At-Depth 与 Outlet。
+- 运行时实现、IndexedDB V18、Backup V12、Launcher Grid V13 / HomeLayout revision 12 均不变；测试矩阵提升到 43 files / 366 tests。
+- 延续 alpha.5.1.26 Release Safety：Windows 双 `npm run verify`、Git preflight/staged guard、ZIP UTF-8 文件名与 Node 侧 lockfile 版本验证继续作为发布门禁。
+
+## V0.5.0-alpha.5.1.26
+
+- 发布链安全收口：新增 `scripts/release-safety.mjs`，统一校验 package/lock 版本、`.gitignore`、`.gitattributes`、中文发布文档、Git main/origin、ignored-but-tracked 与禁止暂存路径。
+- `npm run verify` 在测试与生产构建后追加 `release:source-check`；GitHub Actions 改为复用同一 canonical verify 门禁。
+- 部署脚本在 commit 前检查 `node_modules / dist / *.tsbuildinfo / .env*`，并使用短 diff 摘要，避免历史 Git 污染再次刷入依赖或构建产物。
+- IndexedDB / Backup / Runtime 行为不变。
+
 ## V0.5.0-alpha.5.1.25
 
 - 修复 `greeting`「今天」Widget 的 CSS 类名碰撞：外层 Launcher Widget 不再与内部问候文字共用 `.widget-greeting`，避免 4×2 Widget 退化为约 1×1 像素并制造视觉幽灵页。
@@ -611,9 +625,3 @@
 - 文档统一归入 `docs/`：逐版本交付到 `docs/releases/`，参考研究到 `docs/research/`。
 - IndexedDB V18 / Backup V12 不变。
 
-## V0.5.0-alpha.5.1.26
-
-- 发布链安全收口：新增 release-safety 脚本与 Git preflight/staged guards。
-- `npm run verify` 统一包含源码发布安全检查。
-- GitHub Actions 统一调用 `npm run verify`，避免本地与 CI 门禁漂移。
-- 不涉及数据库、Backup、角色/聊天/记忆或 Launcher Schema 迁移。

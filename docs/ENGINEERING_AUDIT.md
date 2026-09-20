@@ -1,6 +1,6 @@
 # AI Companion Phone 工程审查与 V0.5.0 重构路线图
 
-> **2026-09-20 当前快照**：App `0.5.0-alpha.5.1.25`，IndexedDB V18，Backup V12，静态定义 42 个测试文件 / 351 个 `it/test` 声明。Launcher 已演进为 4×6 Grid + insert/reflow + Folder + HomeLayout Inspector V4；Generation 调试已具备 WorldBook Activation Inspector 与 Context Inspector。Windows `npm run verify` 仍是发布硬门禁。
+> **2026-09-20 当前快照**：App `0.5.0-alpha.5.1.27`，IndexedDB V18，Backup V12，静态定义 43 个测试文件 / 366 个 `it/test` 声明。Launcher 已演进为 4×6 Grid + insert/reflow + Folder + HomeLayout Inspector V4；Generation 调试已具备 WorldBook Activation Inspector 与 Context Inspector。Windows `npm run verify` 仍是发布硬门禁。
 
 ## 0.0.6 V0.5.0-alpha.5.1.22 可观测性审查结论
 
@@ -94,7 +94,7 @@ Windows 对 alpha.3.1 的真实全量结果为 **25/26 test files、243/244 test
 重点热点：
 - `ai/provider.ts` 1012 行：HTTP、SSE、错误分类、模型列表、文本提取混合。
 - `characterCardImportService.ts` 992 行：JSON/V2/V3 映射、PNG metadata、Persona 推断、导入/导出混合。
-- `lorebookService.ts` 823 行：WorldBook Engine 核心，但没有直接测试文件。
+- `lorebookService.ts` 823 行：WorldBook Engine 核心；V0.5.0-alpha.5.1.27 已新增直接 Runtime 测试，后续重点转向性能与 DB 查询边界。
 - `interactionProtocol.ts` 792 行：较大，但已有 28 个测试，风险相对可控。
 - `memoryService.ts` 685 行：核心长期记忆逻辑，已有基础测试但覆盖仍偏少。
 
@@ -159,7 +159,7 @@ Infrastructure   db / provider / backup / browser APIs
 | `src/views/ModelSettingsView.vue` | 897 | 配置、拉模型、测试连接、测试视觉与 UI 混合 | P2 |
 | `src/views/CharacterEditView.vue` | 880 | 表单逻辑偏重 | P2 |
 | `src/db/database.ts` | 890 | 当前 schema + 多版本 migration 同文件 | P1 |
-| `src/services/lorebookService.ts` | 823 | 核心引擎 + DB 查询，无直接测试 | P0 测试先行 |
+| `src/services/lorebookService.ts` | 823 | 核心引擎 + DB 查询；已补直接 Runtime 测试 | P1 继续拆纯规则/DB I/O |
 | `src/services/interactionProtocol.ts` | 792 | parser/projection/naturalness 混合 | P2，已有较多测试 |
 | `src/types/domain.ts` | 847 | 超高 fan-in 单体类型文件 | P1 渐进拆 |
 
@@ -232,18 +232,17 @@ Vite `base` 为 `/ai-companion-phone/`，manifest 中显式设置 `start_url: '/
 
 ## 7. 测试缺口
 
-当前源码定义 37 个测试文件、308 个 `it/test` 声明。Regex / Interaction / Community UI 与 Conversation Runtime 都已有基础行为测试，但 Lorebook 主引擎、Backup schema、DB migration、安全渲染仍是最大缺口。
+当前源码定义 43 个测试文件、366 个 `it/test` 声明。Regex / Interaction / Community UI / Conversation Runtime 与 Lorebook 主引擎均已有直接行为测试；Backup schema、DB migration、安全渲染仍是主要缺口。
 
 ### V0.5.0 P0 测试
 
-1. `lorebookService.test.ts`
-   - keyword / regex / constant / selective；
-   - recursion；
+1. `lorebookService.test.ts` ✅ V0.5.0-alpha.5.1.27 第一阶段完成
+   - keyword / regex / selective / whole-word / case-sensitive；
+   - recursion + prevent/exclude recursion；
    - sticky/cooldown/delay；
-   - group scoring；
-   - token budget；
+   - group scoring / probability / token budget；
    - position/depth/outlet；
-   - resource binding / session continuation。
+   - 下一阶段仍可补 resource session continuation 与更复杂 binding 组合。
 2. `conversationMutationService.test.ts`
    - delete message；
    - clear/reset；

@@ -1,3 +1,10 @@
+## 2026-09-20 · V0.5.0-alpha.5.1.27
+
+- 新增 `src/services/lorebookService.test.ts`，直接 mock 本地存储和资源绑定，从 `buildLorebookPrompt()` 公共入口验证 WorldBook Runtime。
+- 15 条新回归覆盖关键词、Regex、selective、scanDepth、上下文匹配、递归、timed effects、group、probability、token budget、At-Depth / Outlet。
+- 独立 Node/TypeScript harness 使用同一份 `lorebookService.ts` 逻辑跑通全部 15 个核心场景；正式发布仍以 Windows 两轮 `npm run verify` 为最终门禁。
+- 无 Runtime 行为、IndexedDB、Backup 或 Launcher Schema 迁移。
+
 ## 2026-09-20 · V0.5.0-alpha.5.1.25
 
 - 真机布局诊断确认第二页唯一残留是 `widget:greeting`：persisted 4×2 / 8 cells，但 DOM proof rect 约 1×1，`painted=false`。
