@@ -493,4 +493,21 @@ describe('知间桌面入口与布局', () => {
     expect(repairHomeLayoutIntegrity(current).homeLayoutPages).toHaveLength(1)
   })
 
+
+  it('问候 Widget 的外壳与文字类名不再碰撞，避免 4×2 Widget 退化成视觉 1×1 幽灵', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const source = await readFile(new URL('../views/HomeScreen.vue', import.meta.url), 'utf8')
+    expect(source).toContain('class="hm-widget"')
+    expect(source).toContain('<div class="widget-greeting-text">{{ greeting }}</div>')
+    expect(source).not.toContain('<div class="widget-greeting">{{ greeting }}</div>')
+    expect(source).toContain('.widget-greeting-text{position:absolute;')
+  })
+
+  it('Launcher painted 判定把亚像素/近零尺寸目标视为视觉失效，允许幽灵页进入连续确认自愈', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const source = await readFile(new URL('../views/HomeScreen.vue', import.meta.url), 'utf8')
+    expect(source).toContain('const hasMeaningfulPaintSize = rect.width >= 8 && rect.height >= 8')
+    expect(source).toContain('!hasMeaningfulPaintSize')
+  })
+
 })

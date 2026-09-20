@@ -1,6 +1,6 @@
 # AI Companion Phone 工程审查与 V0.5.0 重构路线图
 
-> **2026-09-20 当前快照**：App `0.5.0-alpha.5.1.24`，IndexedDB V18，Backup V12，静态定义 42 个测试文件 / 349 个 `it/test` 声明。Launcher 已演进为 4×6 Grid + insert/reflow + Folder + HomeLayout Inspector V4；Generation 调试已具备 WorldBook Activation Inspector 与 Context Inspector。Windows `npm run verify` 仍是发布硬门禁。
+> **2026-09-20 当前快照**：App `0.5.0-alpha.5.1.25`，IndexedDB V18，Backup V12，静态定义 42 个测试文件 / 351 个 `it/test` 声明。Launcher 已演进为 4×6 Grid + insert/reflow + Folder + HomeLayout Inspector V4；Generation 调试已具备 WorldBook Activation Inspector 与 Context Inspector。Windows `npm run verify` 仍是发布硬门禁。
 
 ## 0.0.6 V0.5.0-alpha.5.1.22 可观测性审查结论
 

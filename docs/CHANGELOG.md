@@ -1,5 +1,12 @@
 # Changelog
 
+## V0.5.0-alpha.5.1.25
+
+- 修复 `greeting`「今天」Widget 的 CSS 类名碰撞：外层 Launcher Widget 不再与内部问候文字共用 `.widget-greeting`，避免 4×2 Widget 退化为约 1×1 像素并制造视觉幽灵页。
+- Launcher painted 判定加入 8px 最小有效视觉尺寸；DOM 存在但退化为近零尺寸时，不再阻止连续两次确认后的幽灵页自愈。
+- 保留恢复保险：自动回收前仍先尝试安全折叠/reflow，必要时写入 `companion-home-ghost-page:<worldId>` recovery snapshot 后再回收。
+- 增加 2 条 Launcher 回归测试；测试定义更新为 42 files / 351 declarations。IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+
 ## V0.5.0-alpha.5.1.24
 
 - Windows Safe ZIP packaging hotfix: repair historical Chinese filenames that were stored with legacy CP437/mojibake metadata, and rebuild the ZIP with UTF-8 filename flags so Windows PowerShell `Expand-Archive` can extract it reliably.

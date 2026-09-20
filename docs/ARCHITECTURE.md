@@ -1,9 +1,15 @@
 # AI Companion Phone 当前架构
 
-> 当前文档版本：**V0.5.0-alpha.5.1.24**。
+> 当前文档版本：**V0.5.0-alpha.5.1.25**。
 > V0.5.0 开始把 Conversation / Generation 应用编排从 `ChatRoom.vue` 迁入 `src/runtime/`，数据库当前为 IndexedDB V18 / Backup V12（朋友圈、角色社交权限、主屏幕与空间设置均纳入现有备份范围）。
 > 历史架构演进已合并到 `RELEASE_HISTORY.md`。
 
+
+## V0.5.0-alpha.5.1.25：Launcher Visual Proof Contract
+
+Launcher 的“项目存在”与“项目真正可见”继续分离。真机诊断证明 `widget:greeting` 曾因 CSS 类名碰撞从声明的 4×2 Grid item 退化为约 1×1px DOM proof；因此 Runtime 不再把近零尺寸 DOM 当作有效绘制。当前视觉证明至少要求 proof rect 宽高均达到 8px，再进入 visibility/opacity/page-intersection/`elementFromPoint` 命中检查。
+
+`greeting` 外壳仍使用 `widget-greeting` 作为 Widget key class，内部问候文字改为 `widget-greeting-text`，避免 presentation selector 改写 Launcher grid item 自身的 positioning。视觉空白页仍遵循“两次确认 → 先安全 collapse/reflow → recovery snapshot → 必要时回收”的可恢复自愈流程。
 
 
 ## V0.5.0-alpha.5.1.22：Launcher Inspector 与可解释 Context Compiler

@@ -1,3 +1,10 @@
+## 2026-09-20 · V0.5.0-alpha.5.1.25
+
+- 真机布局诊断确认第二页唯一残留是 `widget:greeting`：persisted 4×2 / 8 cells，但 DOM proof rect 约 1×1，`painted=false`。
+- 根因定位为 CSS 类名碰撞：外层 `<article class="hm-widget widget-greeting ...">` 与内部问候文字 `<div class="widget-greeting">` 共用选择器，绝对定位样式误施加到 Launcher 外壳。
+- 内部文字类改为 `.widget-greeting-text`，恢复 Widget 正常 Grid 尺寸；painted guard 同时把 <8px 的近零尺寸 proof 视为视觉失效，确保同类历史异常页能够进入已有的两次确认 + recovery snapshot 自愈路径。
+- 新增 source-contract 回归测试，防止未来再次复用外壳类名。
+
 ## 2026-09-20 · V0.5.0-alpha.5.1.24
 
 - Windows PowerShell `Expand-Archive` failed on alpha.5.1.23 before package validation because several historical Chinese document filenames in the ZIP were encoded as CP437/mojibake without the UTF-8 flag.

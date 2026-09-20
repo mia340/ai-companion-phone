@@ -1,18 +1,26 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-20**  
-当前版本：**V0.5.0-alpha.5.1.24**
+当前版本：**V0.5.0-alpha.5.1.25**
 
 ```text
-App：0.5.0-alpha.5.1.24
+App：0.5.0-alpha.5.1.25
 Launcher：Grid V13（Layout Inspector V4 + Dock/Home 去重 + DOM 绘制诊断）
 IndexedDB：V18
 Backup：V12
-测试定义：42 files / 349 it-test declarations
+测试定义：42 files / 351 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
+
+## 0. 本轮 alpha.5.1.25 重点
+
+- 真机诊断确认 `widget:greeting`「今天」曾以 4×2 布局占 8 格，但因 CSS 类名碰撞实际退化为约 1×1 像素，形成第二页视觉幽灵。
+- 内部问候文字类改名为 `.widget-greeting-text`，外层 Widget 恢复 Grid 正常尺寸。
+- painted guard 增加 8px 最小有效视觉尺寸：近零尺寸 DOM 不再被视为有效绘制，会进入现有连续两次确认、自愈/reflow、recovery snapshot、回收路径。
+- IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+- 测试定义：42 文件 / 351 声明；最终以 Windows 两次 `npm run verify` 为准。
 
 
 

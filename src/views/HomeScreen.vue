@@ -555,7 +555,10 @@ function launcherItemIsActuallyPainted(element: HTMLElement, pageElement: HTMLEl
   const rect = proof.getBoundingClientRect()
   const pageRect = pageElement.getBoundingClientRect()
   const intersectsPage = rect.right > pageRect.left + 1 && rect.left < pageRect.right - 1 && rect.bottom > pageRect.top + 1 && rect.top < pageRect.bottom - 1
-  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) <= 0.05 || rect.width <= 1 || rect.height <= 1 || !intersectsPage) return false
+  // Launcher 的最小真实视觉目标远大于 8px。历史 greeting Widget 曾因 CSS 类名碰撞
+  // 退化为约 1×1px；这种 DOM 虽存在，却不能继续阻止视觉空白页自愈。
+  const hasMeaningfulPaintSize = rect.width >= 8 && rect.height >= 8
+  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) <= 0.05 || !hasMeaningfulPaintSize || !intersectsPage) return false
   if (!elementChainIsVisible(proof, pageElement)) return false
 
   // 透明 shell 本身能被 elementFromPoint 命中，但不代表图标真的画出来。
@@ -584,7 +587,7 @@ function backupGhostPageForRecovery(page: HomeLayoutPage, index: number) {
   try {
     localStorage.setItem(`${GHOST_PAGE_RECOVERY_PREFIX}${worldId.value}`, JSON.stringify({
       version: 1,
-      appVersion: '0.5.0-alpha.5.1.24',
+      appVersion: '0.5.0-alpha.5.1.25',
       capturedAt: new Date().toISOString(),
       pageIndex: index,
       page
@@ -1615,7 +1618,7 @@ onUnmounted(() => {
 
                     <template v-if="item.key === 'greeting'">
                       <div class="widget-date">{{ dateLine }}</div>
-                      <div class="widget-greeting">{{ greeting }}</div>
+                      <div class="widget-greeting-text">{{ greeting }}</div>
                       <div class="widget-caption">{{ worldName }} · {{ worldStateLabel }}</div>
                       <div class="widget-clock">{{ timeLine }}</div>
                     </template>
@@ -1993,7 +1996,7 @@ onUnmounted(() => {
 .hm-music-audio{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}
 .music-widget-play{position:absolute;right:16px;top:50%;transform:translateY(-50%);width:42px;height:42px;border:0;border-radius:50%;background:rgba(255,255,255,.82);color:#7087ce;display:grid;place-items:center;font-size:16px;box-shadow:0 6px 16px rgba(60,82,110,.1);cursor:pointer}.music-widget-play:active{transform:translateY(-50%) scale(.94)}
 .widget-music .music-copy{padding-right:54px}
-.widget-greeting{position:absolute;left:18px;bottom:38px;font-size:27px;line-height:1;font-weight:760;letter-spacing:-.04em}.widget-date{position:absolute;left:18px;top:17px;color:#6d8292;font-size:11px}.widget-caption{position:absolute;left:18px;bottom:16px;color:#6f8494;font-size:10px}.widget-clock{position:absolute;right:17px;top:14px;font-size:27px;font-weight:620;letter-spacing:-.04em;color:#4c6679}
+.widget-greeting-text{position:absolute;left:18px;bottom:38px;font-size:27px;line-height:1;font-weight:760;letter-spacing:-.04em}.widget-date{position:absolute;left:18px;top:17px;color:#6d8292;font-size:11px}.widget-caption{position:absolute;left:18px;bottom:16px;color:#6f8494;font-size:10px}.widget-clock{position:absolute;right:17px;top:14px;font-size:27px;font-weight:620;letter-spacing:-.04em;color:#4c6679}
 .widget-companion,.widget-world{padding:12px 13px;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px}.widget-companion.size-2x2,.widget-world.size-2x2{grid-template-columns:1fr;align-content:space-between;justify-items:start}.widget-copy{display:grid;gap:2px;min-width:0}.widget-copy small,.music-copy small{color:#8396a5;font-size:9px}.widget-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.widget-copy span,.music-copy span{color:#7b8e9d;font-size:9px}.world-orb{display:grid;place-items:center;width:44px;height:44px;border-radius:15px;background:linear-gradient(145deg,#87b8dc,#c4def0);color:white;font-size:27px;box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}
 .widget-music{display:flex;align-items:center;gap:11px;padding:11px 14px}.music-art{display:grid;place-items:center;width:58px;height:58px;flex:0 0 auto}.music-art :deep(.app-icon){transform:scale(.82)}.music-copy{display:grid;gap:3px;min-width:0;flex:1}.music-copy b{font-size:14px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hm-app-shell{position:relative;z-index:3;display:grid;place-items:center;min-width:0;min-height:0;transition:transform .16s ease,opacity .16s ease,filter .16s ease}.hm-app-shell.is-dragging{opacity:.18;filter:saturate(.7)}.hm-app-shell.is-drop-target{transform:scale(.92)}
