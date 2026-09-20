@@ -1,0 +1,389 @@
+<script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
+const props = defineProps<{ html: string }>()
+const emit = defineEmits<{ selectGreeting: [index: number] }>()
+const host = ref<HTMLElement | null>(null)
+let shadow: ShadowRoot | null = null
+let interactionCleanups: Array<() => void> = []
+
+function safeUrl(value: string) {
+  const trimmed = value.trim()
+  if (/^(?:javascript|vbscript):/i.test(trimmed)) return ''
+  return trimmed
+}
+
+function dataFieldLabel(key: string) {
+  const normalized = key.toLowerCase().replace(/^data-/, '')
+  const labels: Record<string, string> = {
+    'lyric-title': '标题', title: '标题', time: '时间', date: '日期', location: '地点',
+    chars: '人物', characters: '人物', people: '人物', outfit: '衣着', clothing: '衣着',
+    weather: '天气', season: '季节', mood: '心情', inner: '内心', action: '行动'
+  }
+  return labels[normalized] || normalized.replace(/[-_]+/g, ' ')
+}
+
+function isPlaceholderContent(value: string) {
+  const text = value.replace(/\s+/g, '')
+  return !text || /^(?:正在解析|加载中|暂无(?:数据|内容|心事)?|loading)[.…。]*$/i.test(text)
+}
+
+function compileSimpleDataContainer(root: HTMLElement) {
+  let compiled = 0
+  const containers = [...root.querySelectorAll<HTMLElement>('[id*="data-container"], [class*="data-container"]')]
+  for (const container of containers) {
+    const dataItems = [...container.querySelectorAll<HTMLElement>('[id^="data-"]')]
+      .map(node => ({ key: node.id.slice(5), value: (node.textContent || '').trim() }))
+      .filter(item => item.key && item.value)
+    if (!dataItems.length) continue
+
+    const titleItem = dataItems.find(item => /(?:^|[-_])(title|lyric)(?:$|[-_])/i.test(item.key))
+    const summary = root.querySelector<HTMLElement>('#summary-title, .summary-title')
+    if (summary && isPlaceholderContent(summary.textContent || '')) {
+      summary.textContent = titleItem?.value || '场景信息'
+      compiled += 1
+    }
+
+    const content = root.querySelector<HTMLElement>('#scene-content-wrapper, .scene-content-wrapper')
+    if (content && isPlaceholderContent(content.textContent || '')) {
+      const documentRef = content.ownerDocument
+      content.textContent = ''
+      for (const item of dataItems.filter(row => row !== titleItem)) {
+        const row = documentRef.createElement('div')
+        row.className = 'info-item safe-compiled-info-item'
+        const label = documentRef.createElement('span')
+        label.className = 'info-label safe-compiled-info-label'
+        label.textContent = `${dataFieldLabel(item.key)}：${item.value}`
+        row.appendChild(label)
+        content.appendChild(row)
+      }
+      compiled += 1
+    }
+  }
+  return compiled
+}
+
+interface StructuredBlock {
+  label: string
+  fields: Array<{ key: string; value: string }>
+}
+
+function parseStructuredBlocks(text: string): StructuredBlock[] {
+  const blocks: StructuredBlock[] = []
+  const blockPattern = /\[([^\]\r\n]{1,40})\]([\s\S]*?)\[\/\1\]/g
+  let match: RegExpExecArray | null
+  while ((match = blockPattern.exec(text))) {
+    const fields: Array<{ key: string; value: string }> = []
+    let current: { key: string; value: string } | undefined
+    for (const rawLine of (match[2] || '').replace(/\r\n/g, '\n').split('\n')) {
+      const line = rawLine.trimEnd()
+      const fieldMatch = line.match(/^\s*([^:：\n]{1,40})\s*[:：]\s*(.*)$/)
+      if (fieldMatch) {
+        if (current) fields.push(current)
+        current = { key: fieldMatch[1].trim(), value: fieldMatch[2].trim() }
+      } else if (current && line.trim()) {
+        current.value += `${current.value ? '\n' : ''}${line.trim()}`
+      }
+    }
+    if (current) fields.push(current)
+    if (fields.length) blocks.push({ label: match[1].trim(), fields })
+  }
+  return blocks
+}
+
+function compileStructuredStatus(root: HTMLElement) {
+  let compiled = 0
+  const sources = [...root.querySelectorAll<HTMLElement>('.status-bar-data-container, [class*="status-data"], [data-status-source]')]
+  for (const source of sources) {
+    const raw = (source.textContent || '').trim()
+    if (!raw) continue
+    const blocks = parseStructuredBlocks(raw)
+    const shell = source.parentElement || root
+    const target = shell.querySelector<HTMLElement>('.status-bar-content, [data-status-content]')
+      || root.querySelector<HTMLElement>('.status-bar-content, [data-status-content]')
+    if (!target || (!isPlaceholderContent(target.textContent || '') && target.children.length > 1)) continue
+
+    const documentRef = target.ownerDocument
+    target.textContent = ''
+    if (blocks.length) {
+      for (const block of blocks) {
+        const card = documentRef.createElement('div')
+        card.className = 'data-block safe-compiled-data-block'
+        const nameField = block.fields.find(field => /^(?:人物|角色|姓名|name|character)$/i.test(field.key))
+        const title = documentRef.createElement('div')
+        title.className = 'data-block-title'
+        title.textContent = nameField?.value || block.label
+        card.appendChild(title)
+        for (const field of block.fields) {
+          if (field === nameField) continue
+          const item = documentRef.createElement('div')
+          item.className = 'data-item'
+          const key = documentRef.createElement('span')
+          key.className = 'data-key'
+          key.textContent = field.key
+          const value = documentRef.createElement('div')
+          value.className = /(?:行动|action)/i.test(field.key) ? 'data-value action-value' : 'data-value thought-value'
+          value.textContent = field.value
+          item.append(key, value)
+          card.appendChild(item)
+        }
+        target.appendChild(card)
+      }
+    } else {
+      const pre = documentRef.createElement('pre')
+      pre.className = 'safe-compiled-raw-data'
+      pre.textContent = raw
+      target.appendChild(pre)
+    }
+    target.setAttribute('data-safe-compiled-content', '1')
+    compiled += 1
+  }
+  return compiled
+}
+
+
+function looksLikeTopLevelUiSurface(node: HTMLElement) {
+  const tag = node.tagName.toLowerCase()
+  if (tag === 'style') return true
+  if (['details', 'table', 'figure', 'svg', 'canvas', 'video', 'audio'].includes(tag)) return true
+  if (node.id || node.className || node.hasAttribute('style')) {
+    if (['div', 'section', 'article', 'aside', 'main', 'nav', 'header', 'footer'].includes(tag)) return true
+  }
+  return Boolean(node.querySelector('[id], [class], [style], details, table, svg, canvas'))
+}
+
+/**
+ * 社区回复经常是“普通剧情正文 + 一个作者 UI”。外层 RichHtml 为了不二次套卡会保持透明，
+ * 如果不处理，正文就会直接铺在聊天背景上。这里只把 UI 之外的顶层自然语言包成白色聊天气泡；
+ * 作者自己的 HTML/CSS 仍保持独立 Surface。
+ */
+function wrapLooseNarrative(root: HTMLElement) {
+  const children = [...root.childNodes]
+  const hasUiSurface = children.some(node => node instanceof HTMLElement && looksLikeTopLevelUiSurface(node))
+  if (!hasUiSurface) return 0
+
+  const doc = root.ownerDocument
+  let bucket: Node[] = []
+  let wrapped = 0
+
+  const isNarrativeElement = (element: HTMLElement) => {
+    const tag = element.tagName.toLowerCase()
+    if (['p', 'span', 'strong', 'b', 'em', 'i', 'br'].includes(tag)) return true
+    return !element.id && !element.className && !element.hasAttribute('style') && !element.querySelector('[id], [class], [style]')
+  }
+
+  const flush = () => {
+    const meaningful = bucket.some(node => (node.textContent || '').trim() || (node instanceof HTMLElement && node.tagName === 'BR'))
+    if (!meaningful) {
+      bucket = []
+      return
+    }
+    const wrapper = doc.createElement('div')
+    wrapper.className = 'safe-rich-narrative'
+    const first = bucket[0]
+    root.insertBefore(wrapper, first)
+    for (const node of bucket) wrapper.appendChild(node)
+    bucket = []
+    wrapped += 1
+  }
+
+  for (const node of children) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if ((node.textContent || '').trim()) bucket.push(node)
+      continue
+    }
+    if (node instanceof HTMLElement && isNarrativeElement(node) && !looksLikeTopLevelUiSurface(node)) {
+      bucket.push(node)
+      continue
+    }
+    flush()
+  }
+  flush()
+  return wrapped
+}
+
+function noteBlockedScripts(root: HTMLElement, hadScripts: boolean) {
+  if (!hadScripts) return
+  // 第三方脚本仍然不会执行，但不把“已阻止”诊断卡长期塞进聊天正文。
+  // 可用的静态 HTML / CSS 与本地安全交互照常显示；诊断信息留给 Prompt Debug / 开发工具。
+  root.setAttribute('data-community-script-blocked', '1')
+}
+
+function sanitize(html: string) {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(`<div id="root">${html}</div>`, 'text/html')
+  const root = doc.querySelector('#root') as HTMLElement
+  const hadScripts = root.querySelectorAll('script').length > 0
+
+  // 不执行第三方 JS。先读取它已经放进 HTML 的静态数据，用本地安全编译器恢复常见 UI。
+  compileSimpleDataContainer(root)
+  compileStructuredStatus(root)
+  noteBlockedScripts(root, hadScripts)
+  wrapLooseNarrative(root)
+
+  root.querySelectorAll('script,iframe,object,embed,link,meta,base,form,input,textarea,select').forEach(node => node.remove())
+  root.querySelectorAll('*').forEach(node => {
+    for (const attr of [...node.attributes]) {
+      const name = attr.name.toLowerCase()
+      if (name === 'onclick') {
+        const switchTab = attr.value.match(/switchTab\(\s*['"]([^'"]+)['"]\s*,\s*this\s*\)/i)
+        if (switchTab?.[1]) node.setAttribute('data-safe-switch-tab', switchTab[1])
+        if (/classList\.toggle\(\s*['"]following['"]\s*\)/i.test(attr.value)) node.setAttribute('data-safe-follow-toggle', '1')
+        // SillyTavern / 酒馆助手常见的开场 swipe 跳转。只提取数字，不执行原 JS。
+        const triggerStory = attr.value.match(/triggerStory\(\s*(\d+)\s*\)/i)
+        const directSwipe = attr.value.match(/setChatMessages\([\s\S]*?swipe_id\s*:\s*(\d+)/i)
+        const greetingIndex = triggerStory?.[1] || directSwipe?.[1]
+        if (greetingIndex) node.setAttribute('data-safe-greeting-index', greetingIndex)
+      }
+      if (name.startsWith('on') || name === 'srcdoc') node.removeAttribute(attr.name)
+      if (['href', 'src', 'poster', 'xlink:href'].includes(name)) {
+        const safe = safeUrl(attr.value)
+        if (!safe) node.removeAttribute(attr.name)
+        else node.setAttribute(attr.name, safe)
+      }
+    }
+    if (node.tagName === 'A') {
+      node.setAttribute('target', '_blank')
+      node.setAttribute('rel', 'noopener noreferrer')
+    }
+  })
+  root.querySelectorAll('style').forEach(style => {
+    style.textContent = (style.textContent || '')
+      .replace(/@import[^;]+;?/gi, '')
+      .replace(/expression\s*\([^)]*\)/gi, '')
+      .replace(/url\s*\(\s*['"]?javascript:[^)]+\)/gi, 'none')
+      // 完整 HTML 模板里的 body/html 在 Shadow DOM 中不存在，映射到宿主组件。
+      .replace(/(^|})\s*(?:html\s*,\s*body|body\s*,\s*html|body|html)\s*\{/gim, '$1:host{')
+  })
+  return root.innerHTML
+}
+
+function bindSafeInteractions() {
+  if (!shadow) return
+  interactionCleanups.forEach(cleanup => cleanup())
+  interactionCleanups = []
+
+  // 不执行社区 JS，但兼容常见 data-target Tab：仅做同一 ShadowRoot 内的 active 切换。
+  const triggers = [...shadow.querySelectorAll<HTMLElement>('[data-target]')]
+  for (const trigger of triggers) {
+    const targetId = trigger.dataset.target?.trim()
+    if (!targetId || !/^[A-Za-z][\w:.-]*$/.test(targetId)) continue
+    const target = shadow.getElementById(targetId)
+    if (!target) continue
+
+    const handler = () => {
+      const group = trigger.parentElement
+      const siblings = group ? [...group.querySelectorAll<HTMLElement>('[data-target]')] : triggers
+      const targetIds = siblings.map(item => item.dataset.target?.trim()).filter((value): value is string => Boolean(value))
+      siblings.forEach(item => item.classList.remove('active'))
+      trigger.classList.add('active')
+      const index = Math.max(0, siblings.indexOf(trigger))
+      group?.style.setProperty('--active-index', String(index))
+      targetIds.forEach(id => shadow?.getElementById(id)?.classList.remove('active'))
+      target.classList.add('active')
+    }
+
+    trigger.addEventListener('click', handler)
+    interactionCleanups.push(() => trigger.removeEventListener('click', handler))
+  }
+
+  // 酒馆社区 UI 常见 switchTab('posts', this) 写法：转成纯 DOM active 切换，不执行原 JS。
+  const safeTabs = [...shadow.querySelectorAll<HTMLElement>('[data-safe-switch-tab]')]
+  for (const trigger of safeTabs) {
+    const key = trigger.dataset.safeSwitchTab?.trim()
+    if (!key || !/^[A-Za-z0-9_-]+$/.test(key)) continue
+    const target = shadow.getElementById(`${key}-feed`) || shadow.getElementById(key)
+    if (!target) continue
+    const handler = () => {
+      safeTabs.forEach(item => item.classList.remove('active'))
+      trigger.classList.add('active')
+      const candidateIds = safeTabs
+        .map(item => item.dataset.safeSwitchTab?.trim())
+        .filter((value): value is string => Boolean(value))
+      candidateIds.forEach(id => {
+        const pane = shadow?.getElementById(`${id}-feed`) || shadow?.getElementById(id)
+        pane?.classList.remove('active')
+      })
+      target.classList.add('active')
+    }
+    trigger.addEventListener('click', handler)
+    interactionCleanups.push(() => trigger.removeEventListener('click', handler))
+  }
+
+  // 常见状态栏脚本只是“点击标题展开/收起”。本地实现同样的视觉行为，不执行原 JS。
+  const statusHeaders = [...shadow.querySelectorAll<HTMLElement>('.status-bar-header, [data-safe-toggle-header]')]
+  for (const header of statusHeaders) {
+    const container = header.closest<HTMLElement>('.status-bar-container') || header.parentElement
+    const content = container?.querySelector<HTMLElement>('.status-bar-content, [data-safe-compiled-content], [data-safe-toggle-content]')
+    if (!content) continue
+    const icon = header.querySelector<HTMLElement>('.header-icon')
+    const handler = (event: Event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const open = content.style.display === 'block'
+      content.style.display = open ? 'none' : 'block'
+      if (icon) icon.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)'
+    }
+    header.addEventListener('click', handler)
+    interactionCleanups.push(() => header.removeEventListener('click', handler))
+  }
+
+  // 社区开场页常用 triggerStory(n) / setChatMessages swipe。
+  // 不执行第三方 JS，只把 swipe 编号交回聊天页，由本地代码安全地切换开场并重置当前剧情分支。
+  const greetingTriggers = [...shadow.querySelectorAll<HTMLElement>('[data-safe-greeting-index]')]
+  for (const trigger of greetingTriggers) {
+    const index = Number(trigger.dataset.safeGreetingIndex)
+    if (!Number.isInteger(index) || index < 0) continue
+    const handler = (event: Event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      emit('selectGreeting', index)
+    }
+    trigger.addEventListener('click', handler)
+    interactionCleanups.push(() => trigger.removeEventListener('click', handler))
+  }
+
+  // 关注按钮仅允许切换本地视觉状态。
+  const followButtons = [...shadow.querySelectorAll<HTMLElement>('[data-safe-follow-toggle]')]
+  for (const button of followButtons) {
+    const handler = () => {
+      const following = button.classList.toggle('following')
+      button.textContent = following ? '已关注' : '关注'
+    }
+    button.addEventListener('click', handler)
+    interactionCleanups.push(() => button.removeEventListener('click', handler))
+  }
+
+  // 常见“点击揭开”遮罩：只隐藏当前遮罩，不触发外部函数、不修改聊天数据。
+  const revealOverlays = [...shadow.querySelectorAll<HTMLElement>('.blur-overlay, [data-reveal-overlay]')]
+  for (const overlay of revealOverlays) {
+    overlay.style.cursor = 'pointer'
+    const handler = (event: Event) => {
+      event.stopPropagation()
+      overlay.style.display = 'none'
+      const greetingHost = overlay.closest<HTMLElement>('[data-safe-greeting-index]')
+      const index = Number(greetingHost?.dataset.safeGreetingIndex)
+      if (Number.isInteger(index) && index >= 0) emit('selectGreeting', index)
+    }
+    overlay.addEventListener('click', handler)
+    interactionCleanups.push(() => overlay.removeEventListener('click', handler))
+  }
+}
+
+function render() {
+  if (!host.value) return
+  shadow ||= host.value.attachShadow({ mode: 'open' })
+  shadow.innerHTML = `<style>:host{display:block;width:100%;max-width:100%;min-width:0;font:inherit;color:inherit;white-space:normal}:host>*:not(style){max-width:100%}*,*::before,*::after{box-sizing:border-box}img,video,canvas,svg{max-width:100%;height:auto}audio{max-width:100%}details,table{max-width:100%}a{color:inherit}.safe-rich-narrative{margin:0 0 10px;padding:11px 14px;border:1px solid rgba(46,78,105,.07);border-radius:18px 18px 18px 6px;background:#fff;color:#263b4d;box-shadow:0 1px 3px rgba(43,72,98,.06);font-size:15px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}.safe-rich-narrative:last-child{margin-bottom:0}.safe-compiled-raw-data{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:inherit;font-size:12px;line-height:1.6}</style>${sanitize(props.html)}`
+  bindSafeInteractions()
+}
+
+onMounted(render)
+onBeforeUnmount(() => interactionCleanups.forEach(cleanup => cleanup()))
+watch(() => props.html, render)
+</script>
+
+<template><div ref="host" class="safe-rich-html" /></template>
+
+<style scoped>
+.safe-rich-html{max-width:min(100%,430px);overflow:hidden}
+</style>

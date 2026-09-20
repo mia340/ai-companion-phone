@@ -1,0 +1,887 @@
+export type UUID = string
+
+export interface AppCustomization {
+  id: UUID
+  worldId: UUID
+  appKey: string
+  iconDataUrl?: string
+  /** Reserved appearance record fields. Kept in the same object store so V16 needs no schema migration. */
+  wallpaperDataUrl?: string
+  iconScale?: number
+  showAppLabels?: boolean
+  /** 主屏幕布局也复用这个非结构化记录；这些字段不参与索引，因此无需升级 IndexedDB。 */
+  homeAppKeys?: string[]
+  /** Legacy launcher page order, kept for backward compatibility. */
+  homePageKeys?: string[][]
+  /** Launcher Grid V9: non-indexed 4×6 page layout, including iPhone-style App folders. */
+  homeLayoutPages?: Array<{ items: Array<
+    | { id: string; type: 'app'; key: string; x: number; y: number; w: number; h: number }
+    | { id: string; type: 'widget'; key: string; x: number; y: number; w: number; h: number }
+    | { id: string; type: 'folder'; key: string; name: string; appKeys: string[]; x: number; y: number; w: number; h: number }
+  > }>
+  dockAppKeys?: string[]
+  homeWidgetKeys?: string[]
+  widgetStyle?: 'clear' | 'frosted' | 'solid'
+  homeThemePreset?: 'default' | 'dark' | 'clear' | 'tinted'
+  homeWidgetSettings?: {
+    photo?: { imageDataUrl?: string; caption?: string }
+    calendar?: { startWeekOnMonday?: boolean }
+  }
+  homeLayoutRevision?: number
+  /** 知间空间设置复用同一非结构化 store；字段不参与索引，因此无需数据库迁移。 */
+  spaceVisibility?: 'public' | 'friends' | 'private'
+  spaceBlacklistCharacterIds?: UUID[]
+  updatedAt: string
+}
+
+export interface World {
+  id: UUID
+  name: string
+  eventLevel: 'quiet' | 'daily' | 'active' | 'dramatic'
+  paused: boolean
+  createdAt: string
+}
+
+export type RoleplayMode = 'daily' | 'immersive' | 'deep'
+export type NarrationStyle = 'none' | 'light' | 'immersive'
+export type InitiativeLevel = 'low' | 'natural' | 'high'
+export type EmojiFrequency = 'none' | 'low' | 'natural' | 'high'
+export type QuestionFrequency = 'low' | 'natural' | 'high'
+export type MessagePacing = 'off' | 'quick' | 'natural' | 'slow'
+export type PresenceMode = 'auto' | 'together' | 'remote'
+export type ConversationPresentationMode = 'scene-merged' | 'phone-text' | 'phone-split'
+export type CompatibilityMode = 'auto' | 'card-first' | 'phone-enhanced'
+export type ActionVisibility = 'off' | 'together' | 'always'
+export type CompanionMessageKind = 'text' | 'emoji' | 'voice' | 'scene_action'
+export type CompanionActionKind = CompanionMessageKind | 'typing_pause' | 'recall_message' | 'react_to_message' | 'image_placeholder'
+export type ProactiveFrequency = 'low' | 'natural' | 'high'
+export type ProactiveSource = 'continue-topic' | 'promise-reminder' | 'daily-share' | 'care' | 'story-event'
+export type MemoryLayer = 'fact' | 'subjective' | 'shared' | 'promise' | 'relationship' | 'story'
+export type MemoryStatus = 'active' | 'conflict' | 'invalid'
+export type MemoryScope = 'conversation' | 'character'
+
+export interface CharacterExampleDialogue {
+  id: UUID
+  user: string
+  assistant: string
+}
+
+export interface Character {
+  id: UUID
+  worldId: UUID
+
+  name: string
+  nickname?: string
+  avatar: string
+  gender?: 'female' | 'male' | 'nonbinary' | 'unspecified'
+  age?: number
+  identity?: string
+  appearance?: string
+
+  persona: string
+  // 社区角色卡原始字段：运行时保留 description / personality 的语义边界，避免合并后丢失作者结构。
+  cardDescription?: string
+  cardPersonality?: string
+  speakingStyle?: string
+  background?: string
+  values?: string
+  habits?: string
+  weaknesses?: string
+  secrets?: string
+  boundaries?: string
+  likes?: string[]
+  dislikes?: string[]
+
+  relationship: string
+  mood: string
+  activity: string
+
+  // V0.4.0 角色卡 V2
+  scenario?: string
+  firstMessage?: string
+  alternateGreetings?: string[]
+  exampleDialogues?: CharacterExampleDialogue[]
+  creatorNotes?: string
+  systemPrompt?: string
+  postHistoryInstructions?: string
+  initiative?: InitiativeLevel
+  narrationStyle?: NarrationStyle
+  emojiFrequency?: EmojiFrequency
+  questionFrequency?: QuestionFrequency
+  tags?: string[]
+  cardVersion?: number | string
+  sourceSpec?: string
+  sourceSpecVersion?: string
+
+  // V0.4.1 资源来源与社区分享信息
+  creator?: string
+  resourceVersion?: string
+  sourceUrl?: string
+  license?: string
+  allowDerivative?: boolean
+  importFormat?: 'native' | 'sillytavern-v2' | 'sillytavern-v3' | 'legacy-json' | 'community-json' | 'png-character-card'
+  embeddedUserTemplate?: string
+  embeddedUserPersonaId?: UUID
+
+  // V0.4.3.4 社区角色卡扩展兼容（安全读取，不执行第三方 JS）
+  talkativeness?: number
+  depthPrompt?: { prompt: string; depth?: number; role?: string }
+  worldBookHint?: string
+  rawCardExtensions?: Record<string, unknown>
+  groupOnlyGreetings?: string[]
+
+  // 旧版通讯录分组字段仅保留备份兼容；V0.4.4.2 起运行时不再使用。
+  groups?: UUID[]
+  replySpeed: 'instant' | 'natural' | 'slow' | 'custom'
+  modelRoute?: UUID
+
+  createdAt: string
+  updatedAt?: string
+}
+
+export interface UserProfile {
+  id: UUID
+  name: string
+  avatar: string
+  identity?: string
+  bio?: string
+  /** 独立于 bio / Persona 的公开展示签名，不注入聊天 Prompt。 */
+  signature?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type PersonaImportFormat =
+  | 'native-v1'
+  | 'native-v2'
+  | 'sillytavern-persona'
+  | 'sillytavern-character-v2'
+  | 'sillytavern-character-v3'
+  | 'tavo-json'
+  | 'tavo-text'
+  | 'generic-json'
+  | 'plain-text'
+
+export interface UserPersona {
+  id: UUID
+  name: string
+  avatar: string
+  title?: string
+  description?: string
+  identity?: string
+  age?: string
+  gender?: string
+  birthday?: string
+  height?: string
+  occupation?: string
+  appearance?: string
+  personality?: string
+  publicPersona?: string
+  privatePersona?: string
+  strengths?: string
+  weaknesses?: string
+  interests?: string
+  habits?: string
+  lifestyle?: string
+  background?: string
+  relationshipNote?: string
+  characterKnowledge?: string
+  boundaries?: string
+  tags?: string[]
+  creator?: string
+  sourceUrl?: string
+  sourceFileName?: string
+  importFormat?: PersonaImportFormat
+  extraFields?: Record<string, unknown>
+  personaScope?: 'global' | 'character'
+  boundCharacterId?: UUID
+  boundCharacterName?: string
+  sourceUserTemplate?: string
+  isCardTemplate?: boolean
+  isDefault: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type ResourceType = 'lorebook' | 'preset' | 'regex'
+export type ResourceSourceFormat = 'native' | 'sillytavern' | 'tavo' | 'character-card' | 'legacy'
+
+export interface LorebookResource {
+  id: UUID
+  worldId: UUID
+  name: string
+  description?: string
+  // characterId 为旧版资源所有权字段，仅用于旧备份兼容；新版本通过 ResourceBinding 决定谁使用资源。
+  characterId?: UUID
+  sourceCharacterId?: UUID
+  sourceCharacterName?: string
+  sourceFileName?: string
+  sourceFormat?: ResourceSourceFormat
+  scanDepth?: number
+  tokenBudget?: number
+  recursiveScanning?: boolean
+  rawExtensions?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LorebookEntry {
+  id: UUID
+  worldId: UUID
+  lorebookId?: UUID
+  characterId?: UUID
+  title: string
+  keywords: string[]
+  secondaryKeys?: string[]
+  content: string
+  enabled: boolean
+  constant: boolean
+  caseSensitive: boolean
+  matchWholeWords?: boolean
+  useRegex?: boolean
+  selective?: boolean
+  selectiveLogic?: number | string
+  priority: number
+  insertionOrder?: number
+  position?: number | string
+  depth?: number
+  role?: number | string
+  probability?: number
+  useProbability?: boolean
+  sticky?: number
+  cooldown?: number
+  delay?: number
+  group?: string
+  groupOverride?: boolean
+  groupWeight?: number
+  scanDepth?: number
+  excludeRecursion?: boolean
+  preventRecursion?: boolean
+  delayUntilRecursion?: boolean
+  useGroupScoring?: boolean
+  matchPersonaDescription?: boolean
+  matchCharacterDescription?: boolean
+  matchCharacterPersonality?: boolean
+  matchCharacterDepthPrompt?: boolean
+  matchScenario?: boolean
+  matchCreatorNotes?: boolean
+  sourceEntryId?: number | string
+  rawExtensions?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PromptPresetPrompt {
+  identifier: string
+  name: string
+  content?: string
+  role?: 'system' | 'user' | 'assistant' | string
+  enabled: boolean
+  marker?: boolean
+  systemPrompt?: boolean
+  injectionPosition?: number
+  injectionDepth?: number
+  forbidOverrides?: boolean
+  raw?: Record<string, unknown>
+}
+
+export interface PromptPreset {
+  id: UUID
+  worldId: UUID
+  name: string
+  prompts: PromptPresetPrompt[]
+  promptOrder: Array<{ identifier: string; enabled: boolean }>
+  promptOrderGroups?: Array<{ characterId?: number | string; order: Array<{ identifier: string; enabled: boolean }> }>
+  sourceFileName?: string
+  sourceFormat?: ResourceSourceFormat
+  rawConfig?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RegexScript {
+  id: UUID
+  worldId: UUID
+  // characterId 为旧版资源所有权字段，仅用于旧备份兼容；新版本通过 ResourceBinding 决定谁使用资源。
+  characterId?: UUID
+  sourceCharacterId?: UUID
+  sourceCharacterName?: string
+  name: string
+  findRegex: string
+  replaceString: string
+  trimStrings: string[]
+  placement: number[]
+  enabled: boolean
+  markdownOnly: boolean
+  promptOnly: boolean
+  runOnEdit: boolean
+  substituteRegex: number
+  order?: number
+  minDepth?: number
+  maxDepth?: number
+  sourceFileName?: string
+  sourceFormat?: ResourceSourceFormat
+  raw?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+
+export type CommunityArchiveKind = ResourceType | 'character-card' | 'persona' | 'theme' | 'unknown'
+
+export interface CommunityResourceArchive {
+  id: UUID
+  worldId: UUID
+  kind: CommunityArchiveKind
+  characterId?: UUID
+  name: string
+  fileName: string
+  mimeType?: string
+  sourceFormat?: ResourceSourceFormat | string
+  rawText?: string
+  rawJson?: unknown
+  importedResourceIds: UUID[]
+  compatibility: {
+    format: string
+    summary: string[]
+    supported: string[]
+    warnings: string[]
+  }
+  createdAt: string
+  updatedAt: string
+}
+export type ResourceBindingScope = 'global' | 'character' | 'conversation' | 'persona'
+
+export interface ResourceBinding {
+  id: UUID
+  worldId: UUID
+  characterId?: UUID
+  scope?: ResourceBindingScope
+  scopeId?: UUID
+  resourceType: ResourceType
+  resourceId: UUID
+  enabled: boolean
+  order: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ContactGroup {
+  id: UUID
+  worldId: UUID
+  name: string
+  order: number
+}
+
+export interface Conversation {
+  id: UUID
+  worldId: UUID
+  type: 'single' | 'group'
+  title: string
+  memberIds: UUID[]
+  pinned: boolean
+  muted: boolean
+  unread: number
+
+  // V0.4.4.7：同一角色允许拥有多份独立聊天。分支关系只属于会话元数据，
+  // 不改变角色卡/资源归属，也不需要升级 IndexedDB 索引。
+  parentConversationId?: UUID
+  rootConversationId?: UUID
+  branchFromMessageId?: UUID
+  openingMode?: 'pending' | 'free' | 'greeting'
+  greetingIndex?: number
+  createdAt?: string
+  updatedAt: string
+}
+
+export type MessageStatus =
+  | 'pending'
+  | 'delivered'
+  | 'read'
+  | 'failed'
+  | 'cancelled'
+
+export interface MessageReplyReference {
+  messageId: UUID
+  senderName: string
+  preview: string
+  type: 'text' | 'music' | 'image'
+}
+
+export interface MessageImage {
+  dataUrl?: string
+  name?: string
+  width?: number
+  height?: number
+  bytes?: number
+  originalBytes?: number
+  originalType?: string
+  outputType?: string
+  processingMode?: 'original' | 'jpeg' | 'webp'
+}
+
+export interface RoleCardUiState {
+  date?: string
+  time?: string
+  location?: string
+  inner?: string
+  surroundings?: string
+  participants?: string
+  relativePosition?: string
+  attire?: string
+  todos?: string[]
+}
+
+export interface Message {
+  id: UUID
+  worldId: UUID
+  conversationId: UUID
+  senderId: UUID | 'user'
+  type: 'text' | 'system' | 'music' | 'image' | 'emoji' | 'voice' | 'action' | 'rich'
+  content: string
+  status: MessageStatus
+  createdAt: string
+  roleCardUi?: RoleCardUiState
+  // V0.4.7.0 Regex Pipeline V2：rawContent 保存进入后续上下文的完整规范化原文；modelOutput 保留模型第一版原始输出；displayContent 只用于显示投影。
+  rawContent?: string
+  modelOutput?: string
+  displayContent?: string
+  regexPipelineVersion?: 2
+  regexApplied?: { storage?: string[]; display?: string[] }
+  richHtml?: string
+  richSource?: 'regex' | 'card-ui' | 'worldbook-ui'
+
+  provider?: string
+  model?: string
+  /** V0.5 Generation Runtime：把同一次生成请求与流式占位、最终消息、调试记录串起来。 */
+  generationId?: UUID
+  errorText?: string
+  replyGroupId?: UUID
+  replySequence?: number
+  replyTo?: MessageReplyReference
+  imageDataUrl?: string
+  imageName?: string
+  imageWidth?: number
+  imageHeight?: number
+  imageBytes?: number
+  images?: MessageImage[]
+  visionUsed?: boolean
+  visionFallback?: boolean
+
+  // 酒馆式候选回复。content 始终保存当前正在展示的版本。
+  alternatives?: string[]
+  activeAlternativeIndex?: number
+  editedAt?: string
+  voiceDurationSeconds?: number
+  protocolVersion?: 1 | 2
+  recalledAt?: string
+  recalledOriginalContent?: string
+  reactionEmoji?: string
+  reactionToMessageId?: UUID
+  proactiveSource?: ProactiveSource
+  placeholderImagePrompt?: string
+
+  // 角色卡开场分支。用于切换开场时识别并替换旧的 seed 消息，避免多个开场叠在同一上下文。
+  isGreetingSeed?: boolean
+  greetingIndex?: number
+}
+
+export type MemoryStrength = 'light' | 'standard' | 'deep'
+export type InnerThoughtVisibility =
+  | 'off'
+  | 'simple'
+  | 'thoughts'
+  | 'detailed'
+export type ReplyLength = 'short' | 'natural' | 'long'
+export interface ChatSettings {
+  id: UUID
+  conversationId: UUID
+  memoryEnabled: boolean
+  memoryStrength: MemoryStrength
+  recentMessageLimit: number
+  replyLength: ReplyLength
+  multiBubble: boolean
+  streamResponse: boolean
+  showTyping: boolean
+  naturalDelay: boolean
+  innerThoughtVisibility: InnerThoughtVisibility
+  proactiveEnabled: boolean
+  proactiveIntervalHours: number
+  proactiveFrequency: ProactiveFrequency
+  proactiveQuietHoursEnabled: boolean
+  proactiveQuietStart: string
+  proactiveQuietEnd: string
+  proactiveAllowedSources: ProactiveSource[]
+  autoReadAloud: boolean
+  voiceName: string
+  voiceRate: number
+
+  // V0.4.0 沉浸角色扮演设置
+  roleplayMode: RoleplayMode
+  personaId?: UUID
+  lorebookEnabled: boolean
+  swipeRepliesEnabled: boolean
+
+  // V0.4.1 互动协议与调试
+  actionProtocolEnabled: boolean
+  messagePacing: MessagePacing
+  promptDebugEnabled: boolean
+
+  // V0.4.2.1 场景距离与动作视角（旧字段继续兼容）
+  presenceMode: PresenceMode
+  actionVisibility: ActionVisibility
+
+  // V0.4.4.5：场景事实与聊天呈现彻底解耦。
+  conversationPresentationMode: ConversationPresentationMode
+  compatibilityMode?: CompatibilityMode
+  updatedAt: string
+}
+
+export interface CharacterMemory {
+  id: UUID
+  conversationId: UUID
+  characterId: UUID
+  /** conversation = 当前剧情线；character = 跨聊天共享的稳定记忆。 */
+  scope?: MemoryScope
+  category:
+    | 'profile'
+    | 'preference'
+    | 'relationship'
+    | 'event'
+    | 'promise'
+    | 'other'
+  content: string
+  importance: 1 | 2 | 3 | 4 | 5
+  sourceMessageId?: UUID
+
+  // V0.4.2 多层记忆与可靠性字段。旧记录缺少这些字段时会按默认值读取。
+  layer?: MemoryLayer
+  subject?: string
+  topicKey?: string
+  confidence?: number
+  locked?: boolean
+  status?: MemoryStatus
+  dueAt?: string
+  sourceType?: 'automatic' | 'manual' | 'imported'
+  lastHitAt?: string
+  hitCount?: number
+  mergedFrom?: UUID[]
+  conflictWith?: UUID[]
+  note?: string
+
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LorebookTimedEffectState {
+  entryUpdatedAt: string
+  activatedAt: string
+  activatedAtMessageId?: UUID
+  activatedAtMessageCount: number
+  stickyUntilMessageCount?: number
+  cooldownUntilMessageCount?: number
+  activationCount: number
+}
+
+export type LorebookRuntimeState = Record<UUID, LorebookTimedEffectState>
+
+export interface ConversationState {
+  id: UUID
+  summary: string
+  summaryMessageCount: number
+  innerMood: string
+  innerActivity: string
+  innerThought: string
+  thoughtUpdatedAt?: string
+  /** 产品调度元数据，不代表角色关系或心理内容。 */
+  lastProactiveAt?: string
+  lastTechnicalError?: string
+  lastProviderNotice?: string
+  location?: string
+  presence?: 'together' | 'remote'
+  reportedPresence?: 'together' | 'remote'
+  presenceResolutionReason?: string
+  presenceResolutionSource?: 'manual' | 'user-transition' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
+
+  // V0.4.4.5：大型按需资源进入后保持会话，直到明确退出或切换其它资源。
+  activeResourceEntryId?: UUID
+  activeResourceTitle?: string
+  activeResourceUpdatedAt?: string
+
+  // WorldBook Engine V2：按会话保存 timed effects。无需升级 IndexedDB schema；分支可继承当前节点前的效果。
+  lorebookRuntime?: LorebookRuntimeState
+
+  relationshipNote?: string
+  timePeriod?: string
+  energy?: string
+  unresolvedTopics?: string[]
+  pendingEvents?: string[]
+  shortTermGoals?: string[]
+  lastCompletedEvent?: string
+  lastActionSummary?: string
+  stateVersion?: 2
+  statusUpdatedAt?: string
+  updatedAt: string
+}
+
+
+export interface ConversationStateHistory {
+  id: UUID
+  conversationId: UUID
+  characterId: UUID
+  field: 'location' | 'presence' | 'timePeriod' | 'energy' | 'mood' | 'activity' | 'relationship' | 'topic' | 'event' | 'goal'
+  label: string
+  previousValue?: string
+  nextValue: string
+  sourceMessageId?: UUID
+  createdAt: string
+}
+
+export interface MusicState {
+  id: UUID
+  title: string
+  artist: string
+  audioUrl: string
+  sourceType: 'url' | 'local'
+  currentTime: number
+  duration: number
+  volume: number
+  isPlaying: boolean
+  lastReactionTrackKey?: string
+  updatedAt: string
+}
+
+export interface PromptDebugMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export interface PromptDebugTrace {
+  id: UUID
+  conversationId: UUID
+  characterId: UUID
+  /** 与最终消息共享的生成请求 ID，便于从 Prompt Trace 追到落库结果。 */
+  generationId?: UUID
+  /** 触发本轮生成的用户消息；主动消息等场景可以为空。 */
+  sourceMessageId?: UUID
+  /** Generation Context 冻结完成的时间。 */
+  contextCreatedAt?: string
+  createdAt: string
+  provider: string
+  model: string
+  roleplayMode: RoleplayMode
+  personaName: string
+  systemPrompt: string
+  recentMessages: PromptDebugMessage[]
+  activatedLorebook: Array<{ id: UUID; title: string; reason?: string }>
+  resourceRouting?: Array<{ id: UUID; title: string; status: 'focused' | 'activated' | 'deferred'; reason: string; characters: number }>
+  estimatedSavedCharacters?: number
+  characterCardRuntime?: {
+    family: 'native' | 'legacy' | 'v2' | 'v3' | 'community'
+    sourceLabel: string
+    macroCharacterName: string
+    systemPromptMode: 'default' | 'replace' | 'replace-with-original' | 'append'
+    postHistoryMode?: 'default' | 'replace' | 'replace-with-original' | 'append'
+    creatorNotesInPrompt: false
+    greetingCount: number
+    notes: string[]
+  }
+  regexPipeline?: {
+    activeScripts: number
+    storageApplied: string[]
+    displayApplied: string[]
+    promptApplied: string[]
+    worldInfoApplied: string[]
+    depthSkipped: string[]
+    unsupported: string[]
+    notes: string[]
+  }
+  lorebookEngine?: {
+    evaluatedEntries: number
+    initialActivated: number
+    recursiveActivated: number
+    recursionSteps: number
+    estimatedBudgetTokens?: number
+    estimatedUsedTokens: number
+    droppedByBudget: number
+    stickyActive: string[]
+    cooldownBlocked: string[]
+    delayBlocked: string[]
+    groupDropped: string[]
+    depthInjections: Array<{ title: string; depth: number; role: 'system' | 'user' | 'assistant' }>
+    decisions?: Array<{
+      id: string
+      title: string
+      status: 'focused' | 'activated' | 'deferred' | 'not-triggered'
+      reason: string
+      activationKind?: 'focus' | 'constant' | 'keyword' | 'sticky' | 'recursive' | 'session'
+      matchScore?: number
+      recursionDepth?: number
+      estimatedTokens?: number
+      priority?: number
+      insertionOrder?: number
+      position?: number | string
+      probability?: number
+      primaryMatches?: string[]
+      secondaryMatches?: string[]
+      selectiveLogic?: 'and_any' | 'and_all' | 'not_any' | 'not_all'
+      scanDepth?: number
+      useRegex?: boolean
+      caseSensitive?: boolean
+      matchWholeWords?: boolean
+    }>
+  }
+  /** Diagnostics from the API response; no raw headers, key, gateway text, or response body. */
+  apiResponseDiagnostics?: {
+    httpStatus?: number
+    finishReason?: string
+    structuredRefusal: boolean
+    textRefusal: boolean
+    outcome: 'structured-refusal' | 'text-refusal' | 'no-refusal-indicator' | 'http-error'
+  }
+  tokenUsage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number; successfulCalls?: number }
+  memoryHits: Array<{ id: UUID; content: string; importance: number; layer?: MemoryLayer; score?: number; reason?: string }>
+  imageCount: number
+  estimatedCharacters: number
+  promptSections?: Array<{ key: string; label: string; characters: number; estimatedTokens?: number; budget?: number; truncated?: boolean }>
+  truncations?: string[]
+  ruleInfluences?: string[]
+  naturalnessScore?: {
+    total: number
+    roleConsistency: number
+    aiToneRisk: number
+    repetitionRisk: number
+    questionBalance: number
+    lengthFit: number
+    relationshipResponse: number
+    userFocus: number
+    imageUse: number
+  }
+  protocolEnabled: boolean
+  rawOutput?: string
+  visibleOutput?: string
+  actionSummary?: string
+  presenceResolution?: {
+    reportedPresence?: 'together' | 'remote'
+    resolvedPresence?: 'together' | 'remote'
+    source: 'manual' | 'user-transition' | 'direct-contact' | 'co-presence' | 'ui-surroundings' | 'reported-status' | 'unknown'
+    reason: string
+    conflict?: boolean
+    uiSurroundings?: string
+  }
+  naturalnessWarnings?: string[]
+}
+
+export type MomentAuthorType = 'character' | 'user'
+export type MomentSource = 'ai' | 'manual'
+
+export interface MomentPostImage {
+  dataUrl?: string
+  name?: string
+  width?: number
+  height?: number
+  bytes?: number
+}
+
+export interface MomentPost {
+  id: UUID
+  worldId: UUID
+  /** character 时为对应角色 id；user 为“我”（当前默认 Persona）。 */
+  authorType: MomentAuthorType
+  authorId: UUID | 'user'
+  content: string
+  images?: MomentPostImage[]
+  location?: string
+  likeCount: number
+  likedByMe: boolean
+  pinned?: boolean
+  /** 可选：动态来源会话。点卡片可跳回该聊天继续聊。 */
+  conversationId?: UUID
+  source: MomentSource
+  aiModel?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MomentComment {
+  id: UUID
+  worldId: UUID
+  momentId: UUID
+  authorType: MomentAuthorType
+  authorId: UUID | 'user'
+  /** 可选：回复哪一条评论。字段不参与 Dexie 索引，因此旧库 V16 可直接兼容。 */
+  replyToCommentId?: UUID
+  content: string
+  source: MomentSource
+  createdAt: string
+}
+
+export type SocialActivityKind =
+  | 'moment-comment'
+  | 'moment-reply'
+  | 'moment-like'
+
+export type SocialActivityStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled'
+
+export type SocialInteractionLevel = 'quiet' | 'normal' | 'active'
+
+/** 每位角色在朋友圈里的可见性与自主互动权限。 */
+export interface CharacterSocialProfile {
+  id: UUID
+  worldId: UUID
+  characterId: UUID
+  canViewMoments: boolean
+  canLikeMoments: boolean
+  canCommentMoments: boolean
+  canReplyToComments: boolean
+  canPostMoments: boolean
+  interactionLevel: SocialInteractionLevel
+  createdAt: string
+  updatedAt: string
+}
+
+export type SocialNotificationType = 'moment-comment' | 'moment-reply'
+
+/** 朋友圈里的未读互动。正文/评论本身仍以 Moment 表为事实源。 */
+export interface SocialNotification {
+  id: UUID
+  worldId: UUID
+  channel: 'moments'
+  type: SocialNotificationType
+  actorCharacterId: UUID
+  momentId: UUID
+  commentId?: UUID
+  preview: string
+  read: boolean
+  createdAt: string
+}
+
+/**
+ * Social Runtime 的持久活动队列。
+ *
+ * 当前只承载朋友圈，但结构故意保留 channel / actor / target，
+ * 后续群聊可以复用同一套“谁在什么社交空间里对谁做什么”的调度思路。
+ */
+export interface SocialActivity {
+  id: UUID
+  worldId: UUID
+  channel: 'moments'
+  kind: SocialActivityKind
+  status: SocialActivityStatus
+  /** 执行动作的角色；当前 Social Runtime 只让角色自动行动。 */
+  actorCharacterId: UUID
+  /** 所属动态。 */
+  momentId: UUID
+  /** 回复目标评论；moment-comment 可为空。 */
+  targetCommentId?: UUID
+  /** 为评论线程保留的深度，防止角色互聊无限递归。 */
+  threadDepth?: number
+  /** 计划执行时间；App 离开朋友圈页仍保留，重新打开时补执行。 */
+  dueAt: string
+  /** 幂等键：避免同一触发被重复排队。 */
+  dedupeKey?: string
+  attempts: number
+  lastError?: string
+  createdAt: string
+  updatedAt: string
+}

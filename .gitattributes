@@ -1,0 +1,4 @@
+# Keep source/docs deterministic across Windows and Linux.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf

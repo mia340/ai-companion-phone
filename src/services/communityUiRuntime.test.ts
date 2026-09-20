@@ -1,0 +1,291 @@
+import { describe, expect, it } from 'vitest'
+import {
+  buildCommunityUiPriorityPrompt,
+  buildCommunityUiStateRepairPrompt,
+  communityUiOutputConforms,
+  detectCommunityUiContract,
+  enforceUserMessageOwnershipInRichHtml,
+  mergeCommunityUiStateRepair,
+  sanitizeCommunityUiText,
+  tryCarryForwardCommunityUiState,
+  tryRepairCommunityUiLocally
+} from './communityUiRuntime'
+import type { Character, RegexScript } from '../types/domain'
+
+const character = {
+  id: 'char', worldId: 'world', name: '测试', avatar: '', persona: '安静', relationship: '朋友', mood: '平静', activity: '', groups: [], replySpeed: 'natural', createdAt: ''
+} as Character
+
+const statusRegex = {
+  id: 'regex', worldId: 'world', name: '状态栏',
+  findRegex: '/<日期>(.*?)<\\/日期>\\s*<时间>(.*?)<\\/时间>\\s*<地点>(.*?)<\\/地点>/s',
+  replaceString: '```html\n<!DOCTYPE html><html><head><style>.card{padding:8px}</style></head><body><div class="card">$1 $2 $3</div></body></html>\n```',
+  trimStrings: [], placement: [2], enabled: true, markdownOnly: false, promptOnly: false, runOnEdit: false, substituteRegex: 0, createdAt: '', updatedAt: ''
+} as RegexScript
+
+describe('community UI priority', () => {
+  it('detects a lorebook-defined per-reply UI contract', () => {
+    const contract = detectCommunityUiContract({
+      character,
+      lorebookPrompt: '====格式规则（最高优先级）====\n每次回复必须在正文末尾生成状态栏，不得省略。\n<日期>{{当前日期}}</日期><地点>{{当前地点}}</地点>'
+    })
+    expect(contract.active).toBe(true)
+    expect(contract.mode).toBe('structured-contract')
+    expect(contract.requiredTagNames).toContain('日期')
+    expect(buildCommunityUiPriorityPrompt(contract)).toContain('不要把它改写成小手机私有格式')
+  })
+
+  it('uses Regex as postprocessing only when an explicit card/worldbook contract asks for matching tags', () => {
+    const contract = detectCommunityUiContract({
+      character,
+      assistantRegex: [statusRegex],
+      lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>{{当前日期}}</日期><时间>{{当前时间}}</时间><地点>{{当前地点}}</地点>'
+    })
+    expect(contract.active).toBe(true)
+    expect(contract.mode).toBe('regex-html')
+    expect(contract.regexInputSkeleton).toContain('<日期>')
+    expect(contract.regexInputSkeleton).toContain('<时间>')
+    expect(communityUiOutputConforms({
+      contract,
+      rawText: '<日期>10月15日</日期><时间>21:00</时间><地点>家</地点>',
+      renderedText: 'Regex 即使没运行也不影响原始结构合规',
+      appliedRegex: []
+    })).toBe(true)
+    expect(communityUiOutputConforms({ contract, rawText: '普通回复', renderedText: '普通回复', appliedRegex: [] })).toBe(false)
+  })
+
+  it('treats a rich multi-field Regex alone as a postprocessor, not a model output contract', () => {
+    const contract = detectCommunityUiContract({ character, assistantRegex: [statusRegex] })
+    expect(contract.active).toBe(false)
+    expect(contract.mode).toBe('none')
+    expect(contract.requiredRegexNames).toEqual([])
+  })
+
+  it('does not resurrect a Regex contract from archived raw card extensions', () => {
+    const card = {
+      ...character,
+      rawCardExtensions: {
+        dataExtensions: {
+          regex_scripts: [{ findRegex: statusRegex.findRegex, replaceString: statusRegex.replaceString }]
+        }
+      }
+    } as Character
+    const contract = detectCommunityUiContract({ character: card, assistantRegex: [statusRegex] })
+    expect(contract.active).toBe(false)
+  })
+
+  it('does not force every reply into UI just because an occasional rich regex exists', () => {
+    const contract = detectCommunityUiContract({ character, assistantRegex: [{ ...statusRegex, name: '开场白', findRegex: '/【主页】/s' }] })
+    expect(contract.active).toBe(false)
+    expect(contract.mode).toBe('none')
+  })
+
+  it('does not let an opening-page regex satisfy an explicit per-reply status UI contract', () => {
+    const openingRegex = { ...statusRegex, id: 'opening', name: '开场白', findRegex: '/【八卦主页】/s' }
+    const perReplyStatus = {
+      ...statusRegex,
+      id: 'status',
+      name: '状态栏',
+      findRegex: '/<日期>(.*?)<\\/日期>\\s*<时间>(.*?)<\\/时间>\\s*<地点>(.*?)<\\/地点>\\s*<环境>(.*?)<\\/环境>/s'
+    }
+    const contract = detectCommunityUiContract({
+      character,
+      assistantRegex: [openingRegex, perReplyStatus],
+      lorebookPrompt: '每次回复必须输出完整状态栏：<日期>日期</日期><时间>时间</时间><地点>地点</地点><环境>环境</环境>'
+    })
+    expect(contract.requiredRegexNames).toEqual(['状态栏'])
+    expect(communityUiOutputConforms({
+      contract,
+      rawText: '【八卦主页】',
+      renderedText: '<style>.home{}</style><div class="home">主页</div>',
+      appliedRegex: ['开场白']
+    })).toBe(false)
+    expect(communityUiOutputConforms({
+      contract,
+      rawText: '<日期>8月14日</日期><时间>10:00</时间><地点>家</地点><环境>安静</环境>',
+      renderedText: '<style>.status{}</style><div class="status">状态</div>',
+      appliedRegex: []
+    })).toBe(true)
+  })
+
+  it('requires HTML only when the original card/source directly defines a mandatory HTML contract', () => {
+    const contract = detectCommunityUiContract({
+      character,
+      lorebookPrompt: '每次回复严格遵守状态栏格式UI，不得省略。状态栏格式UI如下:<div><details><summary>状态</summary></details></div>'
+    })
+    expect(contract.mode).toBe('html-contract')
+    expect(communityUiOutputConforms({ contract, rawText: '只是普通文本' })).toBe(false)
+    expect(communityUiOutputConforms({ contract, rawText: '<div><details><summary>状态</summary></details></div>' })).toBe(true)
+    expect(contract.exactHtmlTemplate).toContain('<details>')
+    expect(buildCommunityUiPriorityPrompt(contract)).toContain('原卡 HTML 模板')
+  })
+
+
+  it('locally restores the original status HTML shell when AI already supplied status facts and body', () => {
+    const contract = detectCommunityUiContract({
+      character,
+      lorebookPrompt: `每次回复必须携带状态栏格式UI。状态栏格式UI如下:
+<div style="width:260px"><details><summary>状态信息</summary><div><div>📆年月日｜时间<br>🗺地点<br>😶在场角色<br>💛姿势<br>▪关系:关系<br>♥内心:心理</div></div></details><div><div>正文</div><div>这里是正文内容区域</div></div><details><summary>角色互动</summary><div><div>NPC占位</div></div></details><details><summary>场外观众席</summary><div><div>观众占位</div></div></details></div>`
+    })
+    const repaired = tryRepairCommunityUiLocally(contract, '📆3824年7月18｜7:00\n🗺后山菜园\n😶在场角色:测试角色；测试用户\n💛负手立于田埂\n▪关系:师徒\n♥内心:平静\n他垂眸看着你。')
+    expect(repaired.repaired).toBe(true)
+    expect(repaired.text).toContain('状态信息')
+    expect(repaired.text).toContain('3824年7月18')
+    expect(repaired.text).toContain('他垂眸看着你。')
+    expect(repaired.text).not.toContain('NPC占位')
+    expect(repaired.text).not.toContain('观众占位')
+  })
+  it('keeps all original-card tags untouched in card-first mode', () => {
+    const text = '<日期>10月15日</日期><地点>公寓</地点>\n<scene_action>抬眼看你</scene_action>\n<companion_packet>{"messages":[]}</companion_packet>'
+    expect(sanitizeCommunityUiText(text)).toBe(text)
+  })
+})
+
+
+it('V0.4.4.6 社区聊天 HTML 不得凭空新增用户侧消息', () => {
+  const html = `<!-- 自己文字消息 (靠右-有气泡) --><div class="mine">我真实说过的话</div>
+<!-- 对方文字消息 (靠左-有气泡) --><div>角色回复</div>
+<!-- 自己文字消息 (靠右-有气泡) --><div class="mine">AI 擅自替用户补的话</div>`
+  const safe = enforceUserMessageOwnershipInRichHtml(html, ['我真实说过的话'])
+  expect(safe).toContain('我真实说过的话')
+  expect(safe).toContain('角色回复')
+  expect(safe).not.toContain('AI 擅自替用户补的话')
+})
+
+it('V0.4.4.7 Community UI Compiler V2 可用紧凑状态和正文恢复作者固定 HTML 外壳', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    lorebookPrompt: `每次回复必须携带状态栏格式UI：<div><details><summary>状态信息</summary><div><div>状态占位</div></div></details><div><div>正文</div><div>正文占位</div></div><details><summary>角色互动</summary><div><div>互动占位</div></div></details></div>`
+  })
+  const priority = buildCommunityUiPriorityPrompt(contract)
+  expect(priority).toContain('Community UI Compiler V2')
+  expect(priority).toContain('不要重复输出整段 HTML/CSS')
+  const repaired = tryRepairCommunityUiLocally(contract, '📆2027.08.31｜21:00\n🗺A市小巷\n♥内心:平静\n【正文】\n他看向你。“走吧。”')
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('2027.08.31')
+  expect(repaired.text).toContain('他看向你。“走吧。”')
+  expect(repaired.text).not.toContain('互动占位')
+})
+
+
+it('V0.4.6.0 Regex/XML UI 缺少状态字段时只继承上一轮 AI 已生成字段，不编造内容', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    assistantRegex: [statusRegex],
+    lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>日期</日期><时间>时间</时间><地点>地点</地点>'
+  })
+  const current = '他看向你。\n\n“今天早点休息。”'
+  const previous = '<日期>8月23日</日期><时间>22:10</时间><地点>家</地点>\n\n上一轮正文'
+  const repaired = tryCarryForwardCommunityUiState(contract, current, [previous])
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('他看向你。')
+  expect(repaired.text).toContain('<日期>8月23日</日期>')
+  expect(repaired.text).toContain('<时间>22:10</时间>')
+  expect(repaired.text).toContain('<地点>家</地点>')
+  expect(repaired.carriedTags).toEqual(expect.arrayContaining(['日期', '时间', '地点']))
+})
+
+it('V0.4.6.0 没有历史真实状态时不伪造 Regex/XML UI 字段', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    assistantRegex: [statusRegex],
+    lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>日期</日期><时间>时间</时间><地点>地点</地点>'
+  })
+  const repaired = tryCarryForwardCommunityUiState(contract, '只有正文', [])
+  expect(repaired.repaired).toBe(false)
+  expect(repaired.text).toBe('只有正文')
+})
+
+
+it('V0.4.6.0 紧凑状态补全只补作者声明标签，不能覆盖本轮新状态', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    assistantRegex: [statusRegex],
+    lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>日期</日期><时间>时间</时间><地点>地点</地点>'
+  })
+  const base = '本轮正文\n<日期>8月23日</日期>'
+  const repair = '<日期>错误覆盖</日期>\n<时间>22:30</时间>\n<地点>卧室</地点>\n<额外>不允许进入</额外>'
+  const merged = mergeCommunityUiStateRepair(contract, base, repair)
+  expect(merged.repaired).toBe(true)
+  expect(merged.text).toContain('<日期>8月23日</日期>')
+  expect(merged.text).not.toContain('错误覆盖')
+  expect(merged.text).toContain('<时间>22:30</时间>')
+  expect(merged.text).toContain('<地点>卧室</地点>')
+  expect(merged.text).not.toContain('<额外>')
+  expect(merged.addedTags).toEqual(['时间', '地点'])
+})
+
+it('V0.4.6.0 紧凑状态补全提示不要求重写正文或 HTML', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    assistantRegex: [statusRegex],
+    lorebookPrompt: '每次回复必须严格遵守状态栏格式，不得省略。<日期>日期</日期><时间>时间</时间><地点>地点</地点>'
+  })
+  const prompt = buildCommunityUiStateRepairPrompt({
+    contract,
+    currentOutput: '他看着你。',
+    authorRules: '每次回复必须输出日期、时间、地点。',
+    roleContext: '测试角色很安静。',
+    conversationState: '当前地点：家。',
+    latestUserText: '几点了？'
+  })
+  expect(prompt).toContain('仅数据，不重写剧情')
+  expect(prompt).toContain('<日期>...</日期>')
+  expect(prompt).toContain('不要输出 Markdown')
+  expect(prompt).toContain('他看着你。')
+})
+
+it('V0.4.7.1 本地 HTML Compiler 识别“【状态栏】”标题并恢复作者模板', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    lorebookPrompt: `每次回复正文开头必须携带状态栏格式UI。状态栏格式UI如下:
+<div style="width:260px;background:#FFFCFD"><details><summary>状态信息</summary><div><div>状态占位</div></div></details><div><div>正文</div><div>正文占位</div></div><details><summary>角色互动</summary><div><div>互动占位</div></div></details><details><summary>场外观众席</summary><div><div>观众占位</div></div></details></div>`
+  })
+  const repaired = tryRepairCommunityUiLocally(contract, `【状态栏】
+📆2027年9月10日 周五｜19:02｜暴雨如注
+🗺地点：A市-田螺公寓｜客厅
+😶在场角色：角色；你
+💛角色站在你身后。
+▪关系：重组家庭继兄妹
+♥内心：担心你。
+
+【正文】
+“对不起什么？”
+他把干净衣服递到你面前。`)
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('#FFFCFD')
+  expect(repaired.text).toContain('状态信息')
+  expect(repaired.text).toContain('对不起什么')
+  expect(repaired.text).not.toContain('【状态栏】')
+})
+
+it('V0.5.0-alpha.4.2 把社区 first_mes 的 <br> 当作状态栏换行，而不是转义成可见文本', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    lorebookPrompt: `每次回复正文开头必须携带状态栏格式UI，严格遵守。状态栏格式UI如下:
+<div style="width:260px;border:1px solid #E8C8D8"><details><summary>状态信息</summary><div><div>状态占位</div></div></details><div><div>正文</div><div>正文占位</div></div><details><summary>角色互动</summary><div><div>互动占位</div></div></details><details><summary>场外观众席</summary><div><div>观众占位</div></div></details></div>`
+  })
+  const firstMes = '📆景和三年 腊月十五｜19:30｜阴雪夜寒<br>🗺明月楼-摘星台<br>😶衣着:素白交领厚缎袍<br>💛体位:抬手抚琴.<br>▪关系:主客<br>▪亲密状态:未发生<br>▪恋爱纪念日:无<br>❤内心:……<br><br>苏玉尘指尖轻轻拂过琴弦,却未敢发出声响.'
+  const repaired = tryRepairCommunityUiLocally(contract, firstMes)
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('景和三年 腊月十五')
+  expect(repaired.text).toContain('明月楼-摘星台')
+  expect(repaired.text).toContain('苏玉尘指尖轻轻拂过琴弦')
+  expect(repaired.text).toContain('<br>🗺明月楼-摘星台')
+  expect(repaired.text).not.toContain('&lt;br&gt;')
+  expect(repaired.text).not.toContain('状态占位')
+})
+
+it('V0.5.0-alpha.4.2 作者 HTML 合同只负责套原模板，不把结构化纯文本改造成小手机私有 UI', () => {
+  const contract = detectCommunityUiContract({
+    character,
+    lorebookPrompt: `每轮回复必须使用状态栏格式UI：<div style="background:#fff"><details><summary>状态信息</summary><div><div>状态占位</div></div></details><div><div>正文</div><div>正文占位</div></div></div>`
+  })
+  const repaired = tryRepairCommunityUiLocally(contract, '📆今天｜08:20\n🗺家\n♥内心:平静\n\n【正文】\n早上好。')
+  expect(contract.mode).toBe('html-contract')
+  expect(repaired.repaired).toBe(true)
+  expect(repaired.text).toContain('background:#fff')
+  expect(repaired.text).toContain('早上好。')
+  expect(repaired.text).not.toContain('role-card-ui')
+  expect(repaired.text).not.toContain('scene_action')
+})

@@ -1,0 +1,2 @@
+<script setup lang="ts">import { computed } from 'vue'; import { useRoute } from 'vue-router'; import PhoneFrame from '../components/PhoneFrame.vue'; const route=useRoute(); const name=computed(()=>String(route.params.name))</script>
+<template><PhoneFrame :title="name" show-back><section class="placeholder"><div>🎀</div><h2>{{ name }}</h2><p>桌面入口和页面容器已经搭好，完整业务逻辑将在后续阶段接入。</p><button class="primary" @click="$router.push('/home')">返回桌面</button></section></PhoneFrame></template>
