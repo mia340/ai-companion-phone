@@ -23,10 +23,13 @@ import {
   listAppCustomizations,
   loadHomeAppearance,
   moveHomeAppPlacement,
+  moveHomeFolderAppToDock,
+  moveHomeFolderAppToGrid,
   moveHomeLayoutItemToGrid,
   resizeHomeWidgetInGrid,
   removeHomeAppFromFolder,
   renameHomeFolder,
+  reorderHomeFolderApps,
   removeHomeLayoutPages,
   resolveDockApps,
   saveHomeAppearance,
@@ -79,7 +82,7 @@ const draggingId = ref('')
 const dropTargetKey = ref<HomeAppKey | ''>('')
 const dropTargetItemId = ref('')
 const dropTargetFolderId = ref('')
-const dropTargetKind = ref<HomePlacement | 'folder' | ''>('')
+const dropTargetKind = ref<HomePlacement | 'folder' | 'folder-order' | ''>('')
 const dropTargetPage = ref(-1)
 const dropTargetX = ref(-1)
 const dropTargetY = ref(-1)
@@ -98,6 +101,7 @@ type LauncherPointerState = {
   itemType: 'app' | 'widget' | 'folder'
   key: string
   kind: HomePlacement
+  originFolderId?: string
   startX: number
   startY: number
   active: boolean
@@ -677,7 +681,7 @@ function activateLauncherDrag(event: PointerEvent) {
     node.removeAttribute('data-launcher-kind')
   })
   ghost.classList.add('hm-drag-ghost')
-  ghost.querySelectorAll('.hm-remove,.hm-dock-remove').forEach(node => node.remove())
+  ghost.querySelectorAll('.hm-remove,.hm-dock-remove,.hm-folder-app-remove').forEach(node => node.remove())
   Object.assign(ghost.style, {
     left: `${rect.left}px`,
     top: `${rect.top}px`,
@@ -745,6 +749,44 @@ function beginLauncherItemPointer(event: PointerEvent, item: HTMLElement) {
   }, 520)
 }
 
+function beginFolderAppPointer(event: PointerEvent, appKey: HomeAppKey) {
+  const folder = openFolder.value
+  const target = event.currentTarget as HTMLElement | null
+  if (!folder || !target || !folder.appKeys.includes(appKey)) return
+  cancelHomeLongPress()
+  launcherPointer = {
+    pointerId: event.pointerId,
+    itemType: 'app',
+    key: appKey,
+    kind: 'home',
+    originFolderId: folder.id,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: editMode.value,
+    sourceElement: target
+  }
+
+  const activate = () => {
+    if (!launcherPointer || launcherPointer.pointerId !== event.pointerId) return
+    launcherPointer.active = true
+    draggingId.value = `folder-app:${folder.id}:${appKey}`
+    editMode.value = true
+    editMenuOpen.value = false
+    activateLauncherDrag(event)
+    activeSheet.value = null
+    event.preventDefault()
+  }
+
+  if (editMode.value) {
+    activate()
+    return
+  }
+  longPressTimer = window.setTimeout(() => {
+    longPressTimer = undefined
+    activate()
+  }, 520)
+}
+
 function startPagePointer(event: PointerEvent) {
   if (activeSheet.value) return
   const target = event.target as HTMLElement | null
@@ -803,17 +845,58 @@ function itemAtCell(page: HomeLayoutPage, x: number, y: number) {
 }
 
 function updateDropTarget(event: PointerEvent) {
+  if (!launcherPointer?.active) return
+  const hit = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+
+  if (launcherPointer.originFolderId && openFolderId.value === launcherPointer.originFolderId) {
+    const member = hit?.closest<HTMLElement>('[data-folder-app-key]')
+    const panel = hit?.closest<HTMLElement>('.hm-folder-panel')
+    if (member) {
+      const targetKey = member.dataset.folderAppKey as HomeAppKey | undefined
+      if (targetKey && targetKey !== launcherPointer.key) {
+        dropTargetKind.value = 'folder-order'
+        dropTargetKey.value = targetKey
+        dropTargetFolderId.value = launcherPointer.originFolderId
+        dropTargetItemId.value = `folder-member:${targetKey}`
+        dropTargetPage.value = -1
+        dropTargetX.value = -1
+        dropTargetY.value = -1
+        setDragPreview(undefined)
+        clearPageTurn()
+        return
+      }
+    }
+    if (panel) {
+      clearDropTarget()
+      clearPageTurn()
+      return
+    }
+
+    // 指针离开文件夹面板后，收起面板，让下面的真实主屏参与命中。
+    openFolderId.value = ''
+    clearDropTarget()
+    clearPageTurn()
+    const clientX = event.clientX
+    const clientY = event.clientY
+    void nextTick(() => updateDesktopDropTarget(clientX, clientY))
+    return
+  }
+
+  updateDesktopDropTarget(event.clientX, event.clientY)
+}
+
+function updateDesktopDropTarget(clientX: number, clientY: number) {
   const viewport = pageViewport.value
   if (!viewport || !launcherPointer?.active) return
   const viewportRect = viewport.getBoundingClientRect()
   const edge = Math.max(38, Math.min(52, viewportRect.width * 0.11))
 
   // iPhone 式边缘翻页：热区就在手机桌面内部，不要求指针越过手机边框。
-  if (event.clientX <= viewportRect.left + edge && canTurnPage(-1)) queuePageTurn(-1)
-  else if (event.clientX >= viewportRect.right - edge && canTurnPage(1)) queuePageTurn(1)
+  if (clientX <= viewportRect.left + edge && canTurnPage(-1)) queuePageTurn(-1)
+  else if (clientX >= viewportRect.right - edge && canTurnPage(1)) queuePageTurn(1)
   else clearPageTurn()
 
-  const hit = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+  const hit = document.elementFromPoint(clientX, clientY) as HTMLElement | null
   const dockItem = hit?.closest<HTMLElement>('[data-launcher-kind="dock"]')
   const dockZone = hit?.closest<HTMLElement>('[data-launcher-zone="dock"]')
   if ((dockItem || dockZone) && launcherPointer.itemType === 'app') {
@@ -859,8 +942,8 @@ function updateDropTarget(event: PointerEvent) {
   }
 
   const rect = grid.getBoundingClientRect()
-  const relativeX = Math.max(0, Math.min(rect.width - 0.01, event.clientX - rect.left))
-  const relativeY = Math.max(0, Math.min(rect.height - 0.01, event.clientY - rect.top))
+  const relativeX = Math.max(0, Math.min(rect.width - 0.01, clientX - rect.left))
+  const relativeY = Math.max(0, Math.min(rect.height - 0.01, clientY - rect.top))
   const x = Math.max(0, Math.min(HOME_GRID_COLUMNS - 1, Math.floor(relativeX / (rect.width / HOME_GRID_COLUMNS))))
   const y = Math.max(0, Math.min(HOME_GRID_ROWS - 1, Math.floor(relativeY / (rect.height / HOME_GRID_ROWS))))
   const occupant = itemAtCell(pageAt(pageIndex), x, y)
@@ -881,8 +964,16 @@ function updateDropTarget(event: PointerEvent) {
   dropTargetY.value = y
 
   const previewSignature = `${launcherPointer.itemType}:${launcherPointer.key}:${pageIndex}:${x}:${y}`
-  setDragPreview(
-    moveHomeLayoutItemToGrid(
+  const preview = launcherPointer.originFolderId && launcherPointer.itemType === 'app'
+    ? moveHomeFolderAppToGrid(
+      appearance.value,
+      launcherPointer.originFolderId,
+      launcherPointer.key as HomeAppKey,
+      pageIndex,
+      x,
+      y
+    )
+    : moveHomeLayoutItemToGrid(
       appearance.value,
       launcherPointer.itemType === 'app'
         ? { type: 'app', key: launcherPointer.key as HomeAppKey }
@@ -892,9 +983,8 @@ function updateDropTarget(event: PointerEvent) {
       pageIndex,
       x,
       y
-    ),
-    previewSignature
-  )
+    )
+  setDragPreview(preview, previewSignature)
 }
 
 function handlePointerMove(event: PointerEvent) {
@@ -933,34 +1023,67 @@ async function finishHomePointer(event?: PointerEvent, commit = true) {
 
   try {
     if (pointer.active && commit) {
-      if (dropTargetKind.value === 'folder' && pointer.itemType === 'app') {
-        const next = dropTargetFolderId.value
-          ? addHomeAppToFolder(appearance.value, pointer.key as HomeAppKey, dropTargetFolderId.value)
-          : dropTargetKey.value
-            ? createHomeFolder(appearance.value, pointer.key as HomeAppKey, dropTargetKey.value)
+      if (dropTargetKind.value === 'folder-order' && pointer.itemType === 'app' && pointer.originFolderId && dropTargetKey.value) {
+        await persistAppearance(reorderHomeFolderApps(
+          appearance.value,
+          pointer.originFolderId,
+          pointer.key as HomeAppKey,
+          dropTargetKey.value
+        ))
+        suppressAppClickUntil = performance.now() + 320
+      } else if (dropTargetKind.value === 'folder' && pointer.itemType === 'app') {
+        if (pointer.originFolderId && dropTargetFolderId.value === pointer.originFolderId) {
+          // 从文件夹里拖出后又放回原文件夹，视为取消，不制造解散/重建抖动。
+          suppressAppClickUntil = performance.now() + 320
+        } else {
+          const source = pointer.originFolderId
+            ? removeHomeAppFromFolder(appearance.value, pointer.originFolderId, pointer.key as HomeAppKey, currentPage.value)
             : appearance.value
+          const next = dropTargetFolderId.value
+            ? addHomeAppToFolder(source, pointer.key as HomeAppKey, dropTargetFolderId.value)
+            : dropTargetKey.value
+              ? createHomeFolder(source, pointer.key as HomeAppKey, dropTargetKey.value)
+              : source
+          await persistAppearance(next)
+          suppressAppClickUntil = performance.now() + 320
+        }
+      } else if (dropTargetKind.value === 'home' && dropTargetPage.value >= 0 && dropTargetX.value >= 0 && dropTargetY.value >= 0) {
+        const next = dragPreviewAppearance.value ?? (pointer.originFolderId && pointer.itemType === 'app'
+          ? moveHomeFolderAppToGrid(
+            appearance.value,
+            pointer.originFolderId,
+            pointer.key as HomeAppKey,
+            dropTargetPage.value,
+            dropTargetX.value,
+            dropTargetY.value
+          )
+          : moveHomeLayoutItemToGrid(
+            appearance.value,
+            pointer.itemType === 'app'
+              ? { type: 'app', key: pointer.key as HomeAppKey }
+              : pointer.itemType === 'widget'
+                ? { type: 'widget', key: pointer.key as HomeWidgetKey }
+                : { type: 'folder', id: pointer.key },
+            dropTargetPage.value,
+            dropTargetX.value,
+            dropTargetY.value
+          ))
         await persistAppearance(next)
         suppressAppClickUntil = performance.now() + 320
-      } else if (dropTargetKind.value === 'home' && dropTargetPage.value >= 0 && dropTargetX.value >= 0 && dropTargetY.value >= 0) {
-        await persistAppearance(dragPreviewAppearance.value ?? moveHomeLayoutItemToGrid(
-          appearance.value,
-          pointer.itemType === 'app'
-            ? { type: 'app', key: pointer.key as HomeAppKey }
-            : pointer.itemType === 'widget'
-              ? { type: 'widget', key: pointer.key as HomeWidgetKey }
-              : { type: 'folder', id: pointer.key },
-          dropTargetPage.value,
-          dropTargetX.value,
-          dropTargetY.value
-        ))
-        suppressAppClickUntil = performance.now() + 320
       } else if (dropTargetKind.value === 'dock' && pointer.itemType === 'app') {
-        await persistAppearance(moveHomeAppPlacement(
-          appearance.value,
-          pointer.key as HomeAppKey,
-          'dock',
-          dropTargetKey.value || undefined
-        ))
+        await persistAppearance(pointer.originFolderId
+          ? moveHomeFolderAppToDock(
+            appearance.value,
+            pointer.originFolderId,
+            pointer.key as HomeAppKey,
+            dropTargetKey.value || undefined
+          )
+          : moveHomeAppPlacement(
+            appearance.value,
+            pointer.key as HomeAppKey,
+            'dock',
+            dropTargetKey.value || undefined
+          ))
         suppressAppClickUntil = performance.now() + 320
       }
     }
@@ -1358,7 +1481,14 @@ onUnmounted(() => {
             <button type="button" aria-label="关闭文件夹" @click="openFolderId = ''">×</button>
           </header>
           <div class="hm-folder-grid">
-            <div v-for="key in openFolder.appKeys" :key="key" class="hm-folder-app">
+            <div
+              v-for="key in openFolder.appKeys"
+              :key="key"
+              class="hm-folder-app"
+              :class="{ 'is-folder-drop-target': dropTargetKind === 'folder-order' && dropTargetKey === key }"
+              :data-folder-app-key="key"
+              @pointerdown.stop="beginFolderAppPointer($event, key)"
+            >
               <button type="button" class="hm-folder-app-main" @click="openFolderApp(key)">
                 <AppIcon
                   :icon="appIconFor(key)"
@@ -1377,7 +1507,7 @@ onUnmounted(() => {
               >−</button>
             </div>
           </div>
-          <p v-if="editMode" class="hm-folder-hint">把其他 App 拖到文件夹上可继续加入；移出后只剩 1 个 App 时会自动解散。</p>
+          <p v-if="editMode" class="hm-folder-hint">长按文件夹里的 App 可排序或直接拖回桌面；只剩 1 个 App 时会自动解散。</p>
         </section>
       </div>
 
@@ -1541,7 +1671,7 @@ onUnmounted(() => {
 .hm-app{display:flex;min-width:0;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:0;border:0;background:transparent;cursor:pointer;color:inherit}.hm-tile-wrap{position:relative;display:grid;place-items:center}.hm-badge{position:absolute;z-index:3;right:-6px;top:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:11px;background:#ff4b57;color:#fff;font-size:10px;line-height:20px;text-align:center;font-weight:760;border:1.5px solid rgba(255,255,255,.92)}.hm-name{max-width:72px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#2e4659;white-space:nowrap;text-shadow:0 1px 8px rgba(255,255,255,.7)}
 .hm-folder-shell{position:relative;z-index:3;display:grid;place-items:center;min-width:0;min-height:0;transition:transform .18s ease,opacity .16s ease,filter .16s ease}.hm-folder-shell.is-dragging{opacity:.18;filter:saturate(.7)}.hm-folder-shell.is-drop-target{transform:scale(.9)}
 .hm-folder{display:flex;min-width:0;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:0;border:0;background:transparent;color:inherit;cursor:pointer}.hm-folder-tile{width:60px;height:60px;padding:7px;border-radius:18px;display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:4px;place-items:center;background:rgba(236,244,250,.64);box-shadow:inset 0 0 0 1px rgba(255,255,255,.62),0 8px 18px rgba(42,74,98,.13);backdrop-filter:blur(18px) saturate(1.1);-webkit-backdrop-filter:blur(18px) saturate(1.1)}.hm-folder-mini{display:grid;place-items:center;width:22px;height:22px;overflow:hidden;border-radius:7px}.hm-folder-mini :deep(.app-icon){box-shadow:none!important}
-.hm-folder-backdrop{position:absolute;z-index:120;inset:0;display:grid;place-items:center;padding:90px 30px 120px;background:rgba(31,47,60,.18);backdrop-filter:blur(18px) saturate(1.04);-webkit-backdrop-filter:blur(18px) saturate(1.04)}.hm-folder-panel{width:min(340px,92%);max-height:520px;padding:18px;border:1px solid rgba(255,255,255,.66);border-radius:32px;background:rgba(244,249,252,.76);box-shadow:0 28px 70px rgba(29,48,62,.24),inset 0 1px 0 rgba(255,255,255,.72);backdrop-filter:blur(28px) saturate(1.12);-webkit-backdrop-filter:blur(28px) saturate(1.12);overflow:auto}.hm-folder-header{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;margin-bottom:18px}.hm-folder-header h2{margin:0;text-align:center;font-size:18px;color:#2d4659}.hm-folder-header input{min-width:0;border:0;border-radius:14px;padding:9px 12px;background:rgba(255,255,255,.72);font:inherit;font-weight:700;color:#2d4659;text-align:center;outline:none}.hm-folder-header button{width:34px;height:34px;border:0;border-radius:50%;background:rgba(111,132,148,.14);font-size:20px;color:#536b7d}.hm-folder-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 10px}.hm-folder-app{position:relative;display:grid;place-items:center}.hm-folder-app-main{display:grid;justify-items:center;gap:7px;min-width:0;border:0;background:transparent;color:#30485b}.hm-folder-app-main span{max-width:88px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hm-folder-app-remove{position:absolute;left:4px;top:-4px;width:22px;height:22px;border:1px solid rgba(255,255,255,.7);border-radius:50%;background:rgba(113,122,130,.9);color:#fff;font-size:18px;line-height:18px}.hm-folder-hint{margin:18px 4px 2px;text-align:center;font-size:9px;line-height:1.6;color:#708698}
+.hm-folder-backdrop{position:absolute;z-index:120;inset:0;display:grid;place-items:center;padding:90px 30px 120px;background:rgba(31,47,60,.18);backdrop-filter:blur(18px) saturate(1.04);-webkit-backdrop-filter:blur(18px) saturate(1.04)}.hm-folder-panel{width:min(340px,92%);max-height:520px;padding:18px;border:1px solid rgba(255,255,255,.66);border-radius:32px;background:rgba(244,249,252,.76);box-shadow:0 28px 70px rgba(29,48,62,.24),inset 0 1px 0 rgba(255,255,255,.72);backdrop-filter:blur(28px) saturate(1.12);-webkit-backdrop-filter:blur(28px) saturate(1.12);overflow:auto}.hm-folder-header{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;margin-bottom:18px}.hm-folder-header h2{margin:0;text-align:center;font-size:18px;color:#2d4659}.hm-folder-header input{min-width:0;border:0;border-radius:14px;padding:9px 12px;background:rgba(255,255,255,.72);font:inherit;font-weight:700;color:#2d4659;text-align:center;outline:none}.hm-folder-header button{width:34px;height:34px;border:0;border-radius:50%;background:rgba(111,132,148,.14);font-size:20px;color:#536b7d}.hm-folder-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 10px}.hm-folder-app{position:relative;display:grid;place-items:center;touch-action:none;transition:transform .16s ease,filter .16s ease}.hm-folder-app.is-folder-drop-target{transform:scale(.9);filter:brightness(1.06)}.hm-folder-app-main{display:grid;justify-items:center;gap:7px;min-width:0;border:0;background:transparent;color:#30485b}.hm-folder-app-main span{max-width:88px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hm-folder-app-remove{position:absolute;left:4px;top:-4px;width:22px;height:22px;border:1px solid rgba(255,255,255,.7);border-radius:50%;background:rgba(113,122,130,.9);color:#fff;font-size:18px;line-height:18px}.hm-folder-hint{margin:18px 4px 2px;text-align:center;font-size:9px;line-height:1.6;color:#708698}
 .hm-drag-ghost{position:fixed!important;z-index:9999!important;margin:0!important;pointer-events:none!important;opacity:.94!important;transform:scale(1.06)!important;transform-origin:center!important;filter:drop-shadow(0 16px 18px rgba(32,50,65,.22));transition:none!important}.hm-drag-ghost .hm-app,.hm-drag-ghost .dock-app{animation:none!important}.launcher-source-dragging{opacity:.18!important}
 .hm-page-dots{display:flex;flex:0 0 auto;justify-content:center;gap:7px;padding:7px 0 9px}.hm-page-dots button{width:6px;height:6px;padding:0;border:0;border-radius:50%;background:rgba(63,81,95,.28)}.hm-page-dots button.active{background:rgba(42,62,78,.72)}
 .hm-dock-holder{flex:0 0 auto;padding:0 21px 10px}

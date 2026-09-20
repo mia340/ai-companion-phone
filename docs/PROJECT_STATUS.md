@@ -1,27 +1,25 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.16**
+当前版本：**V0.5.0-alpha.5.1.17**
 
 ```text
-App：0.5.0-alpha.5.1.16
+App：0.5.0-alpha.5.1.17
 IndexedDB：V18
 Backup：V12
-测试定义：41 files / 338 it-test declarations
+测试定义：41 files / 341 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
 
-## 0. 本轮 alpha.5.1.16 重点
+## 0. 本轮 alpha.5.1.17 重点
 
-- **稳定页二次兜底**：Launcher UI 本身不再渲染 `items.length === 0` 的稳定页；进入某页后如果 DOM 中确实没有任何 Launcher Item，会立即回收该页并夹紧当前页索引，专项处理“第二页幽灵空页”。
-- **HomeLayout Revision 9**：旧布局重新归一化并回写，继续清理历史空页/脏页。
-- **iPhone 式 App 文件夹 V1**：任意两个 App 可通过拖叠形成文件夹；其他 App 继续拖到文件夹上即可加入。
-- 文件夹作为 1×1 Grid Item 可随其他 App/Widget 一起移动；点击打开玻璃质感文件夹面板。
-- 编辑文件夹时可重命名、把 App 移出；只剩 1 个 App 时文件夹自动解散回普通图标。
-- App 文件夹成员仍计入 `homeAppKeys`，HomeLayout/布局备份继续保持本地优先；IndexedDB V18 / Backup V12 不变。
-- 测试定义：41 文件 / 338 声明（最终以 Windows `npm run verify` 输出为准）。
+- Folder Runtime V2：文件夹内 App 支持长按拖出到桌面/跨页/Dock，不再只能通过减号移出。
+- 文件夹内部支持拖动插入排序；拖出后仍复用 Launcher Grid 的 insert + reflow / 边缘翻页。
+- 文件夹仅剩 1 个 App 时继续自动解散；拖回原文件夹视为取消，避免解散/重建闪动。
+- 新增 `moveHomeFolderAppToGrid()` / `moveHomeFolderAppToDock()` / `reorderHomeFolderApps()` 及回归测试。
+- 测试定义：41 文件 / 341 声明（最终以 Windows `npm run verify` 输出为准）。
 
 ## 0. 本轮 alpha.5.1.15 重点
 

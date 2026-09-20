@@ -10,10 +10,13 @@ import {
   normalizeHomeAppearance,
   moveHomeAppPlacement,
   moveHomeAppToGrid,
+  moveHomeFolderAppToDock,
+  moveHomeFolderAppToGrid,
   moveHomeWidgetToGrid,
   resizeHomeWidgetInGrid,
   removeHomeAppFromFolder,
   removeHomeLayoutPages,
+  reorderHomeFolderApps,
   paginateHomeAppKeys
 } from './appCustomizationService'
 
@@ -310,4 +313,66 @@ describe('知间桌面入口与布局', () => {
       ['backup', 'world', 'settings', 'banxin', 'new-character']
     ])
   })
+
+  it('文件夹内 App 可以拖回桌面精确格位，并在只剩一个成员时自动解散', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile', 'memory'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [{ items: [
+        { id: 'folder:profile-music-memory', type: 'folder', key: 'profile-music-memory', name: '常用', appKeys: ['profile', 'music', 'memory'], x: 0, y: 0, w: 1, h: 1 }
+      ] }],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+
+    const moved = moveHomeFolderAppToGrid(current, 'folder:profile-music-memory', 'music', 0, 2, 0)
+    const folder = moved.homeLayoutPages[0].items.find(item => item.type === 'folder')
+    expect(folder?.type === 'folder' ? folder.appKeys : []).toEqual(['profile', 'memory'])
+    expect(moved.homeLayoutPages[0].items.find(item => item.type === 'app' && item.key === 'music')).toMatchObject({ type: 'app', key: 'music' })
+
+    const dissolved = moveHomeFolderAppToGrid(moved, folder?.type === 'folder' ? folder.id : '', 'memory', 0, 3, 0)
+    expect(dissolved.homeLayoutPages[0].items.some(item => item.type === 'folder')).toBe(false)
+    expect(dissolved.homeLayoutPages[0].items.some(item => item.type === 'app' && item.key === 'profile')).toBe(true)
+    expect(dissolved.homeLayoutPages[0].items.some(item => item.type === 'app' && item.key === 'memory')).toBe(true)
+  })
+
+  it('文件夹内 App 可以拖到 Dock，且剩余一个成员时自动解散', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [{ items: [
+        { id: 'folder:profile-music', type: 'folder', key: 'profile-music', name: '文件夹', appKeys: ['profile', 'music'], x: 0, y: 0, w: 1, h: 1 }
+      ] }],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+
+    const moved = moveHomeFolderAppToDock(current, 'folder:profile-music', 'music')
+    expect(moved.dockAppKeys).toContain('music')
+    expect(moved.homeLayoutPages[0].items.some(item => item.type === 'folder')).toBe(false)
+    expect(moved.homeLayoutPages[0].items.some(item => item.type === 'app' && item.key === 'profile')).toBe(true)
+  })
+
+  it('文件夹内部拖动按插入顺序重排成员，而不是只能移出', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile', 'memory'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [{ items: [
+        { id: 'folder:profile-music-memory', type: 'folder', key: 'profile-music-memory', name: '常用', appKeys: ['profile', 'music', 'memory'], x: 0, y: 0, w: 1, h: 1 }
+      ] }],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+
+    const reordered = reorderHomeFolderApps(current, 'folder:profile-music-memory', 'memory', 'profile')
+    const folder = reordered.homeLayoutPages[0].items.find(item => item.type === 'folder')
+    expect(folder?.type === 'folder' ? folder.appKeys : []).toEqual(['memory', 'profile', 'music'])
+  })
+
 })

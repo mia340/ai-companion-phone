@@ -690,3 +690,10 @@ Windows 首轮 `npm run verify` 显示 41 个测试文件 / 329 个测试均先�
 - HomeLayout Item 新增 folder 类型；两个 App 拖叠创建文件夹，后续成员可追加。
 - 文件夹可移动、重命名、打开；成员移出后不足 2 个时自动解散。
 - HomeLayout backup/schema 与 AppCustomization 非索引 JSON 同步兼容 folder，无需 IndexedDB 迁移。
+
+## 2026-09-20 · alpha.5.1.17 Folder Runtime V2
+
+- 修复“App 拖进文件夹后无法再拖出”的交互断点。
+- 文件夹内部 App 现在进入同一 Pointer 生命周期：长按/编辑态拖动、ghost、window pointerup/cancel、跨页和 Dock。
+- 新增文件夹成员内部插入排序；拖离面板时收起 Folder Overlay，再继续命中主屏 Grid。
+- 数据层新增 folder→grid / folder→dock 原子转换，继续保持单成员自动解散。

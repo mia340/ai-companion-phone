@@ -878,6 +878,75 @@ export function removeHomeAppFromFolder(
   })
 }
 
+
+export function reorderHomeFolderApps(
+  value: HomeAppearancePreferences,
+  folderId: string,
+  appKey: HomeAppKey,
+  beforeKey: HomeAppKey
+): HomeAppearancePreferences {
+  if (appKey === beforeKey) return normalizeHomeAppearance(value)
+  const normalized = normalizeHomeAppearance(value)
+  const pages = normalized.homeLayoutPages.map(page => ({
+    items: page.items.map(item => item.type === 'folder' ? { ...item, appKeys: [...item.appKeys] } : { ...item }) as HomeLayoutItem[]
+  }))
+  let changed = false
+  for (const page of pages) {
+    const folder = page.items.find(item => item.type === 'folder' && item.id === folderId)
+    if (folder?.type !== 'folder') continue
+    if (!folder.appKeys.includes(appKey) || !folder.appKeys.includes(beforeKey)) return normalized
+    const next = folder.appKeys.filter(key => key !== appKey)
+    const index = next.indexOf(beforeKey)
+    next.splice(index < 0 ? next.length : index, 0, appKey)
+    folder.appKeys = next
+    changed = true
+    break
+  }
+  if (!changed) return normalized
+  return normalizeHomeAppearance({ ...normalized, homeLayoutPages: pages })
+}
+
+export function moveHomeFolderAppToGrid(
+  value: HomeAppearancePreferences,
+  folderId: string,
+  appKey: HomeAppKey,
+  destinationPageIndex: number,
+  x: number,
+  y: number
+): HomeAppearancePreferences {
+  const normalized = normalizeHomeAppearance(value)
+  const folder = normalized.homeLayoutPages
+    .flatMap(page => page.items)
+    .find((item): item is HomeLayoutFolderItem => item.type === 'folder' && item.id === folderId)
+  if (!folder || !folder.appKeys.includes(appKey)) return normalized
+  const extracted = removeHomeAppFromFolder(normalized, folderId, appKey, destinationPageIndex)
+  const stillNested = extracted.homeLayoutPages.some(page => page.items.some(item =>
+    item.type === 'folder' && item.id === folderId && item.appKeys.includes(appKey)
+  ))
+  if (stillNested) return normalized
+  return moveHomeAppToGrid(extracted, appKey, destinationPageIndex, x, y)
+}
+
+export function moveHomeFolderAppToDock(
+  value: HomeAppearancePreferences,
+  folderId: string,
+  appKey: HomeAppKey,
+  beforeKey?: HomeAppKey
+): HomeAppearancePreferences {
+  const normalized = normalizeHomeAppearance(value)
+  const folder = normalized.homeLayoutPages
+    .flatMap(page => page.items)
+    .find((item): item is HomeLayoutFolderItem => item.type === 'folder' && item.id === folderId)
+  if (!folder || !folder.appKeys.includes(appKey)) return normalized
+  const folderPageIndex = normalized.homeLayoutPages.findIndex(page => page.items.some(item => item.type === 'folder' && item.id === folderId))
+  const extracted = removeHomeAppFromFolder(normalized, folderId, appKey, Math.max(0, folderPageIndex))
+  const stillNested = extracted.homeLayoutPages.some(page => page.items.some(item =>
+    item.type === 'folder' && item.id === folderId && item.appKeys.includes(appKey)
+  ))
+  if (stillNested) return normalized
+  return moveHomeAppPlacement(extracted, appKey, 'dock', beforeKey)
+}
+
 export function renameHomeFolder(
   value: HomeAppearancePreferences,
   folderId: string,

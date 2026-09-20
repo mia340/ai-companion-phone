@@ -712,3 +712,7 @@ Launcher Grid V6 已将 App/Widget 统一为二维布局 Item，并推进 Charac
 HomeLayout Revision 9 在 `app | widget` 之外新增 `folder` Grid Item。Folder 仍占 1×1 槽位，但内部持有 `appKeys[]`；App 是否属于桌面由 direct app 与 folder member 共同推导，避免文件夹成员从 `homeAppKeys` 丢失。两个 App 拖叠时创建 folder，后续 App 可继续加入；移出后仅剩一个成员时自动退化为普通 App Item。
 
 稳定页面现在有三层回收：Domain normalize 删除空 page；Launcher computed 不渲染稳定空 page；当前页 DOM 若确实没有 Launcher Item，则执行持久自愈。临时新页仍只在活动拖拽时存在，不进入 canonical HomeLayout。
+
+## V0.5.0-alpha.5.1.17 · Folder Runtime V2
+
+Launcher 的 Folder 不再是单向容器。文件夹成员拖拽使用 `originFolderId` 标记来源，在 UI 层复用全局 Pointer 生命周期，在 Service 层通过 `moveHomeFolderAppToGrid()` / `moveHomeFolderAppToDock()` 完成先抽离、再进入统一 Grid/Dock Runtime 的原子转换。文件夹面板内可用 `reorderHomeFolderApps()` 进行插入排序；离开面板后 Overlay 收起，指针继续命中真实主屏。
