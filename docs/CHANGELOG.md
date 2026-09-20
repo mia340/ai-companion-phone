@@ -610,3 +610,10 @@
 - 知间图标去除聊天气泡造型。
 - 文档统一归入 `docs/`：逐版本交付到 `docs/releases/`，参考研究到 `docs/research/`。
 - IndexedDB V18 / Backup V12 不变。
+
+## V0.5.0-alpha.5.1.26
+
+- 发布链安全收口：新增 release-safety 脚本与 Git preflight/staged guards。
+- `npm run verify` 统一包含源码发布安全检查。
+- GitHub Actions 统一调用 `npm run verify`，避免本地与 CI 门禁漂移。
+- 不涉及数据库、Backup、角色/聊天/记忆或 Launcher Schema 迁移。

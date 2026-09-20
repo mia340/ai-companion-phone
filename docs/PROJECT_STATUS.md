@@ -292,3 +292,11 @@ npm run verify
 ```
 
 只有 Windows / CI 完整通过后才部署。
+
+## V0.5.0-alpha.5.1.26 发布安全基线
+
+- 发布前必须通过 `npm run release:git-preflight`。
+- 源码同步后、暂存前必须通过 `npm run release:git-working`。
+- `git add -A` 后必须通过 `npm run release:staged-check`。
+- `node_modules/`、`dist/`、`*.tsbuildinfo`、`.env*` 不得进入 Git 跟踪或暂存区。
+- 本地与 GitHub Actions 共用 `npm run verify` 作为质量门禁。
