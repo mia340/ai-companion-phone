@@ -1,5 +1,12 @@
 # Changelog
 
+## V0.5.0-alpha.5.1.18
+
+- Launcher Page Compositor V2：移除分页轨道上的 flex + `contain: paint` 组合，改为每页独立绝对定位并按当前页做 `translate3d`。
+- 这是针对“数据页非空但第二页视觉完全空白”的渲染级修复；不再继续把问题当成空数组清理。
+- 主屏分页仍支持手指/鼠标跟手滑动、编辑态边缘翻页和临时新页；HomeLayout 数据模型、IndexedDB V18、Backup V12 均不变。
+- 部署前仍要求 Windows 两次 `npm run verify` 全部通过。
+
 ## V0.5.0-alpha.5.1.17
 
 - Folder Runtime V2：文件夹内 App 可长按拖回桌面、跨页或 Dock。

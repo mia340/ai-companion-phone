@@ -1,10 +1,10 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.17**
+当前版本：**V0.5.0-alpha.5.1.18**
 
 ```text
-App：0.5.0-alpha.5.1.17
+App：0.5.0-alpha.5.1.18
 IndexedDB：V18
 Backup：V12
 测试定义：41 files / 341 it-test declarations

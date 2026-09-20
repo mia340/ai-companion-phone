@@ -1186,9 +1186,12 @@ function handleWindowBlur() {
   cancelHomeLongPress()
 }
 
-const pageTrackStyle = computed(() => ({
-  transform: `translate3d(${-currentPage.value * 100}%,0,0) translate3d(${pageSwipeOffset.value}px,0,0)`
-}))
+function pageSlideStyle(pageIndex: number) {
+  const relative = pageIndex - currentPage.value
+  return {
+    transform: `translate3d(${relative * 100}%,0,0) translate3d(${pageSwipeOffset.value}px,0,0)`
+  }
+}
 
 function finishEditing() {
   void finishHomePointer(undefined, false)
@@ -1273,12 +1276,12 @@ onUnmounted(() => {
         </div>
 
         <div ref="pageViewport" class="hm-pages" :class="{ 'is-swiping': pageSwiping }" @pointerdown.stop="startPagePointer">
-          <div class="hm-pages-track" :style="pageTrackStyle">
             <section
               v-for="(page, pageIndex) in launcherPages"
               :key="pageIndex"
               class="hm-page"
               :class="{ 'is-transient': pageIndex >= actualPages.length }"
+              :style="pageSlideStyle(pageIndex)"
               :data-launcher-page="pageIndex"
             >
               <div class="hm-launcher-grid" data-launcher-zone="home" data-launcher-grid :data-launcher-page="pageIndex">
@@ -1440,7 +1443,6 @@ onUnmounted(() => {
                 </template>
               </div>
             </section>
-          </div>
         </div>
 
         <div v-if="launcherPages.length > 1" class="hm-page-dots" aria-label="桌面分页">
@@ -1650,11 +1652,10 @@ onUnmounted(() => {
 <style scoped>
 .hm-root{position:relative;height:100%;display:flex;flex-direction:column;overflow:hidden;color:#253b4e;background:linear-gradient(165deg,#f7fcff 0%,#e9f5fe 43%,#dbeaf7 100%)}
 .hm-wall{position:absolute;inset:0;z-index:0;overflow:hidden;background:radial-gradient(120% 75% at 86% -12%,rgba(255,255,255,.96) 0%,rgba(226,244,255,.68) 38%,transparent 66%),radial-gradient(120% 82% at -20% 112%,rgba(192,225,248,.72) 0%,transparent 66%),linear-gradient(165deg,#f7fcff 0%,#e9f5fe 43%,#dbeaf7 100%);background-repeat:no-repeat}
-.hm-main{position:relative;z-index:1;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0;touch-action:none;contain:layout paint}
-.hm-pages{position:relative;flex:1;min-height:0;width:100%;overflow:hidden;touch-action:none;overscroll-behavior:none;contain:layout paint}
-.hm-pages-track{display:flex;width:100%;height:100%;will-change:transform;transition:transform .28s cubic-bezier(.22,.76,.24,1);backface-visibility:hidden}
-.hm-pages.is-swiping .hm-pages-track{transition:none}
-.hm-page{position:relative;flex:0 0 100%;width:100%;height:100%;min-height:0;overflow:hidden;contain:layout paint}
+.hm-main{position:relative;z-index:1;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0;touch-action:none}
+.hm-pages{position:relative;flex:1;min-height:0;width:100%;overflow:hidden;touch-action:none;overscroll-behavior:none;isolation:isolate}
+.hm-page{position:absolute;inset:0;width:100%;height:100%;min-height:0;overflow:hidden;will-change:transform;transition:transform .28s cubic-bezier(.22,.76,.24,1);backface-visibility:hidden;transform-style:flat}
+.hm-pages.is-swiping .hm-page{transition:none}
 .hm-page.is-transient{background:rgba(255,255,255,.035)}
 .hm-launcher-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:repeat(6,minmax(0,1fr));column-gap:8px;row-gap:8px;width:100%;height:100%;padding:16px 18px 8px;box-sizing:border-box;overflow:hidden}
 .hm-grid-cell{position:relative;z-index:0;border-radius:19px;pointer-events:none;transition:background .14s ease,box-shadow .14s ease}
