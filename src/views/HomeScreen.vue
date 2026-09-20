@@ -17,6 +17,7 @@ import {
   addHomeAppToFolder,
   addHomeWidgetToGrid,
   createHomeFolder,
+  collapseHomeLayoutPageIntoPrevious,
   applyHomeThemePreset,
   getHomeAppDefinition,
   getWidgetGridSizes,
@@ -66,7 +67,7 @@ const musicTones: [string, string] = ['#8f9cde', '#b9c4ef']
 
 const editMode = ref(false)
 const editMenuOpen = ref(false)
-const activeSheet = ref<'widgets' | 'pages' | 'apps' | 'widget' | 'theme' | 'layout-backup' | null>(null)
+const activeSheet = ref<'widgets' | 'pages' | 'apps' | 'widget' | 'theme' | 'layout-backup' | 'diagnostics' | null>(null)
 const editingWidgetKey = ref<HomeWidgetKey | ''>('')
 const photoInput = ref<HTMLInputElement | null>(null)
 const layoutImportInput = ref<HTMLInputElement | null>(null)
@@ -323,7 +324,7 @@ async function loadHomeState() {
   )
   appearance.value = savedAppearance
   void repairRenderedEmptyPages()
-  window.setTimeout(() => { void repairCurrentBlankPage() }, 220)
+  window.setTimeout(() => { void repairCurrentBlankPage() }, 380)
 
   const latest = [...conversations]
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
@@ -445,11 +446,11 @@ async function repairRenderedEmptyPages() {
 }
 
 
-async function repairCurrentBlankPage() {
-  if (repairingRenderedPages || editMode.value || draggingId.value || dragPreviewAppearance.value) return
+async function repairCurrentBlankPage(force = false) {
+  if (repairingRenderedPages || editMode.value || draggingId.value) return
   await nextTick()
   const index = currentPage.value
-  if (appearance.value.homeLayoutPages.length <= 1 || index < 0 || index >= appearance.value.homeLayoutPages.length) return
+  if (appearance.value.homeLayoutPages.length <= 1 || index <= 0 || index >= appearance.value.homeLayoutPages.length) return
   const viewport = pageViewport.value
   const pageElement = viewport?.querySelector<HTMLElement>(`.hm-page[data-launcher-page="${index}"]:not(.is-transient)`)
   if (!pageElement) return
@@ -461,13 +462,20 @@ async function repairCurrentBlankPage() {
     const intersectsPage = rect.right > pageRect.left + 1 && rect.left < pageRect.right - 1 && rect.bottom > pageRect.top + 1 && rect.top < pageRect.bottom - 1
     return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0.05 && rect.width > 1 && rect.height > 1 && intersectsPage
   })
-  if (hasVisibleItem) return
+  if (hasVisibleItem && !force) return
 
   repairingRenderedPages = true
   try {
-    appearance.value = await saveHomeAppearance(worldId.value, removeHomeLayoutPages(appearance.value, [index]))
-    transientBlankPage.value = false
-    clampCurrentPageToPersistedLayout()
+    const page = appearance.value.homeLayoutPages[index]
+    const repaired = page?.items.length
+      ? collapseHomeLayoutPageIntoPrevious(appearance.value, index)
+      : removeHomeLayoutPages(appearance.value, [index])
+
+    if (JSON.stringify(repaired.homeLayoutPages) !== JSON.stringify(appearance.value.homeLayoutPages)) {
+      appearance.value = await saveHomeAppearance(worldId.value, repaired)
+      transientBlankPage.value = false
+      clampCurrentPageToPersistedLayout()
+    }
   } finally {
     repairingRenderedPages = false
   }
@@ -1193,6 +1201,19 @@ function pageSlideStyle(pageIndex: number) {
   }
 }
 
+function pageRenderKey(page: HomeLayoutPage, pageIndex: number) {
+  const signature = page.items.map(item => `${item.id}@${item.x},${item.y},${item.w},${item.h}`).join('|')
+  return `${pageIndex}:${signature || 'empty'}`
+}
+
+function pageDiagnosticLine(page: HomeLayoutPage, pageIndex: number) {
+  const items = page.items.map(item => {
+    if (item.type === 'folder') return `folder:${item.name}[${item.appKeys.join(',')}] @${item.x},${item.y}`
+    return `${item.type}:${item.key} @${item.x},${item.y} ${item.w}x${item.h}`
+  })
+  return `第 ${pageIndex + 1} 页 · ${items.length} 项${items.length ? ` · ${items.join(' / ')}` : ' · 空'}`
+}
+
 function finishEditing() {
   void finishHomePointer(undefined, false)
   cancelPageSwipe()
@@ -1213,7 +1234,7 @@ watch(() => actualPages.value.length, length => {
 
 watch(currentPage, () => {
   if (editMode.value || draggingId.value) return
-  window.setTimeout(() => { void repairCurrentBlankPage() }, 180)
+  window.setTimeout(() => { void repairCurrentBlankPage() }, 380)
 })
 
 onMounted(async () => {
@@ -1225,6 +1246,7 @@ onMounted(async () => {
     musicState.value = [...rows].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0]
   })
   minuteTimer = window.setInterval(() => { now.value = new Date() }, 30_000)
+  window.setTimeout(() => { void repairCurrentBlankPage() }, 520)
 
   window.addEventListener('pointermove', handlePointerMove, { capture: true, passive: false })
   window.addEventListener('pointerup', handlePointerUp, true)
@@ -1272,13 +1294,16 @@ onUnmounted(() => {
             <button type="button" @click="activeSheet = 'layout-backup'; editMenuOpen = false; layoutBackupMessage = ''">
               <span>⇩</span><b>布局备份</b>
             </button>
+            <button type="button" @click="activeSheet = 'diagnostics'; editMenuOpen = false">
+              <span>⌁</span><b>布局诊断</b>
+            </button>
           </div>
         </div>
 
         <div ref="pageViewport" class="hm-pages" :class="{ 'is-swiping': pageSwiping }" @pointerdown.stop="startPagePointer">
             <section
               v-for="(page, pageIndex) in launcherPages"
-              :key="pageIndex"
+              :key="pageRenderKey(page, pageIndex)"
               class="hm-page"
               :class="{ 'is-transient': pageIndex >= actualPages.length }"
               :style="pageSlideStyle(pageIndex)"
@@ -1517,8 +1542,8 @@ onUnmounted(() => {
         <section class="hm-sheet">
           <header>
             <div>
-              <small>{{ activeSheet === 'widgets' ? '小组件库' : activeSheet === 'widget' ? '编辑小组件' : activeSheet === 'theme' ? '自定义' : activeSheet === 'layout-backup' ? '布局备份' : activeSheet === 'pages' ? '主屏幕页面' : '桌面 App' }}</small>
-              <h2>{{ activeSheet === 'widgets' ? '添加到当前主屏幕' : activeSheet === 'widget' ? (editingWidgetDefinition?.label || '小组件') : activeSheet === 'theme' ? '桌面外观' : activeSheet === 'layout-backup' ? '保存或恢复桌面' : activeSheet === 'pages' ? '选择页面' : '选择显示位置' }}</h2>
+              <small>{{ activeSheet === 'widgets' ? '小组件库' : activeSheet === 'widget' ? '编辑小组件' : activeSheet === 'theme' ? '自定义' : activeSheet === 'layout-backup' ? '布局备份' : activeSheet === 'diagnostics' ? 'HomeLayout Inspector' : activeSheet === 'pages' ? '主屏幕页面' : '桌面 App' }}</small>
+              <h2>{{ activeSheet === 'widgets' ? '添加到当前主屏幕' : activeSheet === 'widget' ? (editingWidgetDefinition?.label || '小组件') : activeSheet === 'theme' ? '桌面外观' : activeSheet === 'layout-backup' ? '保存或恢复桌面' : activeSheet === 'diagnostics' ? '布局诊断' : activeSheet === 'pages' ? '选择页面' : '选择显示位置' }}</h2>
             </div>
             <button type="button" aria-label="关闭" @click="activeSheet = null">×</button>
           </header>
@@ -1588,6 +1613,15 @@ onUnmounted(() => {
             <button class="sheet-action secondary" type="button" @click="requestLayoutImport">导入桌面布局 JSON</button>
             <p class="sheet-note">导入前会先通过 HomeLayout Zod Schema 校验；失败不会写入 IndexedDB。</p>
             <p v-if="layoutBackupMessage" class="backup-message">{{ layoutBackupMessage }}</p>
+          </div>
+
+          <div v-else-if="activeSheet === 'diagnostics'" class="layout-diagnostics">
+            <p class="sheet-note">这里显示 IndexedDB 归一化后真正存在的页面内容。若屏幕空白但此处显示项目，就说明不是“空页”，而是项目被错误留在页面或渲染异常。</p>
+            <div v-for="(page, index) in appearance.homeLayoutPages" :key="`diag-${index}`" class="diagnostic-page">
+              <b>{{ pageDiagnosticLine(page, index) }}</b>
+              <button v-if="index === currentPage && index > 0" type="button" class="sheet-action secondary" @click="repairCurrentBlankPage(true)">修复当前幽灵页（保留项目）</button>
+            </div>
+            <p class="sheet-note">当前页：{{ currentPage + 1 }} / {{ actualPages.length }} · revision {{ appearance.homeLayoutRevision }}</p>
           </div>
 
           <div v-else-if="activeSheet === 'pages'" class="page-overview">
@@ -1683,7 +1717,8 @@ onUnmounted(() => {
 .page-editor-head,.page-app-row{display:grid;grid-template-columns:1fr 58px 58px;align-items:center;gap:8px}.page-editor-head{padding:3px 5px 8px;color:#8c9aa5;font-size:9px;text-align:center}.page-editor-head span:first-child{text-align:left}.page-app-row{min-height:58px;border-top:1px solid #e9eef1}.page-app-name{display:flex;align-items:center;gap:9px;min-width:0}.page-app-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.place-toggle{justify-self:center;width:32px;height:32px;border:0;border-radius:50%;background:#e8edf1;color:#7a8b97;font-size:15px}.place-toggle.on{background:#dff3ea;color:#159a63;font-weight:800}.place-toggle:disabled{opacity:.32}.sheet-note{margin:12px 4px 0;color:#8d9ba6;font-size:9px;line-height:1.55}
 .page-overview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.page-thumbnail{min-width:0;border:0;background:transparent;padding:0;color:#435c6e;display:grid;gap:8px;text-align:left}.page-mini-grid{aspect-ratio:4/6;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(6,1fr);gap:3px;padding:8px;border-radius:18px;background:linear-gradient(165deg,#edf7fd,#dcecf8);box-shadow:inset 0 0 0 1px rgba(76,106,128,.09),0 8px 18px rgba(35,56,70,.08)}.page-thumbnail.active .page-mini-grid{outline:3px solid rgba(62,158,120,.3);outline-offset:2px}.page-mini-item{display:block;border-radius:4px;background:linear-gradient(145deg,#9dbfe0,#d7e8f5)}.page-mini-item.type-widget{border-radius:6px;background:linear-gradient(145deg,#d9e9f4,#f7fbfd)}.page-thumbnail-meta{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:0 2px}.page-thumbnail-meta b{font-size:11px}.page-thumbnail-meta small{font-size:9px;color:#8a9aa6}.page-thumbnail em{position:absolute;opacity:0;pointer-events:none}
 
-.widget-calendar{padding:10px 12px;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px}.calendar-badge{width:44px;height:48px;border-radius:14px;background:rgba(255,255,255,.76);display:grid;place-items:center;align-content:center;box-shadow:inset 0 0 0 1px rgba(72,92,108,.08)}.calendar-badge small{font-size:9px;color:#ef625f}.calendar-badge strong{font-size:22px;line-height:1;color:#263c4e}.calendar-copy{align-content:center}.widget-photo{padding:0}.photo-widget-image{width:100%;height:100%;object-fit:cover;display:block}.photo-widget-empty{width:100%;height:100%;display:grid;place-items:center;align-content:center;gap:4px;color:#708798;background:linear-gradient(145deg,rgba(255,255,255,.55),rgba(219,235,247,.46))}.photo-widget-empty span{font-size:26px}.photo-widget-empty b{font-size:12px}.photo-widget-empty small{font-size:9px}.widget-editor,.theme-editor,.layout-backup-editor{max-height:430px;overflow:auto;padding:16px 16px 26px}.widget-editor-block+ .widget-editor-block{margin-top:18px}.widget-editor-block h3{margin:0 0 10px;font-size:13px;color:#40596c}.widget-size-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.widget-size-options button{min-width:0;padding:10px 8px 9px;border:1px solid #e0e8ee;border-radius:17px;background:#fff;color:#52697a;display:grid;gap:7px;justify-items:center}.widget-size-options button.active{border-color:#3baa7d;box-shadow:0 0 0 2px rgba(59,170,125,.12)}.widget-size-options button span{display:block;width:48px;max-height:45px;border-radius:10px;background:linear-gradient(145deg,#d7e8f4,#f8fbfd);box-shadow:inset 0 0 0 1px rgba(75,105,125,.08)}.widget-size-options button b{font-size:10px}.sheet-action{width:100%;min-height:45px;border:0;border-radius:15px;background:#dff2e9;color:#16855c;font-weight:700}.sheet-action.secondary{margin-top:9px;background:#e9eef2;color:#546b7c}.theme-editor{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.theme-choice{min-width:0;border:0;background:transparent;display:grid;justify-items:center;gap:8px;color:#617788}.theme-choice b{font-size:10px}.theme-preview{width:58px;height:58px;border-radius:17px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.55),0 8px 18px rgba(34,55,69,.12);background:linear-gradient(145deg,#88bce5,#eef7fd)}.preset-dark .theme-preview{background:linear-gradient(145deg,#27333d,#70808c)}.preset-clear .theme-preview{background:linear-gradient(145deg,rgba(255,255,255,.25),rgba(182,221,244,.3));backdrop-filter:blur(10px)}.preset-tinted .theme-preview{background:linear-gradient(145deg,#ceb4c7,#907f9d)}.theme-choice.active .theme-preview{outline:3px solid rgba(49,157,115,.28);outline-offset:2px}.theme-editor .sheet-note{grid-column:1/-1}.backup-message{margin:12px 4px 0;padding:10px 12px;border-radius:12px;background:#eef7f2;color:#3e6f59;font-size:10px}.hm-hidden-input{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}.theme-dark{color:#edf4f8}.theme-dark .hm-wall{filter:brightness(.58) saturate(.82)}.theme-dark .hm-name{color:#f4f7fa;text-shadow:0 1px 7px rgba(0,0,0,.38)}.theme-dark .hm-widget.style-solid{background:rgba(38,49,58,.86);color:#edf4f8}.theme-dark .hm-dock-holder :deep(.dock-bar){background:rgba(35,45,53,.58)}.theme-clear .hm-widget{background:rgba(255,255,255,.18)!important;backdrop-filter:blur(10px) saturate(1.08)!important;-webkit-backdrop-filter:blur(10px) saturate(1.08)!important}.theme-tinted .hm-widget{background:rgba(224,204,220,.58)!important}.theme-tinted .hm-app-shell :deep(.app-icon){filter:saturate(.72) sepia(.14) hue-rotate(285deg)}
+.widget-calendar{padding:10px 12px;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px}.calendar-badge{width:44px;height:48px;border-radius:14px;background:rgba(255,255,255,.76);display:grid;place-items:center;align-content:center;box-shadow:inset 0 0 0 1px rgba(72,92,108,.08)}.calendar-badge small{font-size:9px;color:#ef625f}.calendar-badge strong{font-size:22px;line-height:1;color:#263c4e}.calendar-copy{align-content:center}.widget-photo{padding:0}.photo-widget-image{width:100%;height:100%;object-fit:cover;display:block}.photo-widget-empty{width:100%;height:100%;display:grid;place-items:center;align-content:center;gap:4px;color:#708798;background:linear-gradient(145deg,rgba(255,255,255,.55),rgba(219,235,247,.46))}.photo-widget-empty span{font-size:26px}.photo-widget-empty b{font-size:12px}.photo-widget-empty small{font-size:9px}.widget-editor,.theme-editor,.layout-backup-editor,.layout-diagnostics{max-height:430px;overflow:auto;padding:16px 16px 26px}.widget-editor-block+ .widget-editor-block{margin-top:18px}.widget-editor-block h3{margin:0 0 10px;font-size:13px;color:#40596c}.widget-size-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.widget-size-options button{min-width:0;padding:10px 8px 9px;border:1px solid #e0e8ee;border-radius:17px;background:#fff;color:#52697a;display:grid;gap:7px;justify-items:center}.widget-size-options button.active{border-color:#3baa7d;box-shadow:0 0 0 2px rgba(59,170,125,.12)}.widget-size-options button span{display:block;width:48px;max-height:45px;border-radius:10px;background:linear-gradient(145deg,#d7e8f4,#f8fbfd);box-shadow:inset 0 0 0 1px rgba(75,105,125,.08)}.widget-size-options button b{font-size:10px}.sheet-action{width:100%;min-height:45px;border:0;border-radius:15px;background:#dff2e9;color:#16855c;font-weight:700}.sheet-action.secondary{margin-top:9px;background:#e9eef2;color:#546b7c}.theme-editor{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.theme-choice{min-width:0;border:0;background:transparent;display:grid;justify-items:center;gap:8px;color:#617788}.theme-choice b{font-size:10px}.theme-preview{width:58px;height:58px;border-radius:17px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.55),0 8px 18px rgba(34,55,69,.12);background:linear-gradient(145deg,#88bce5,#eef7fd)}.preset-dark .theme-preview{background:linear-gradient(145deg,#27333d,#70808c)}.preset-clear .theme-preview{background:linear-gradient(145deg,rgba(255,255,255,.25),rgba(182,221,244,.3));backdrop-filter:blur(10px)}.preset-tinted .theme-preview{background:linear-gradient(145deg,#ceb4c7,#907f9d)}.theme-choice.active .theme-preview{outline:3px solid rgba(49,157,115,.28);outline-offset:2px}.theme-editor .sheet-note{grid-column:1/-1}.backup-message{margin:12px 4px 0;padding:10px 12px;border-radius:12px;background:#eef7f2;color:#3e6f59;font-size:10px}.hm-hidden-input{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}.theme-dark{color:#edf4f8}.theme-dark .hm-wall{filter:brightness(.58) saturate(.82)}.theme-dark .hm-name{color:#f4f7fa;text-shadow:0 1px 7px rgba(0,0,0,.38)}.theme-dark .hm-widget.style-solid{background:rgba(38,49,58,.86);color:#edf4f8}.theme-dark .hm-dock-holder :deep(.dock-bar){background:rgba(35,45,53,.58)}.theme-clear .hm-widget{background:rgba(255,255,255,.18)!important;backdrop-filter:blur(10px) saturate(1.08)!important;-webkit-backdrop-filter:blur(10px) saturate(1.08)!important}.theme-tinted .hm-widget{background:rgba(224,204,220,.58)!important}.theme-tinted .hm-app-shell :deep(.app-icon){filter:saturate(.72) sepia(.14) hue-rotate(285deg)}
+.diagnostic-page{padding:11px 0;border-bottom:1px solid #e7edf1;color:#40596c}.diagnostic-page b{display:block;font-size:10px;line-height:1.55;word-break:break-all}
 @keyframes home-jiggle{from{transform:rotate(-.65deg) translateY(0)}to{transform:rotate(.65deg) translateY(.4px)}}
 @media(max-width:360px){.hm-launcher-grid{padding-left:14px;padding-right:14px;column-gap:5px}.hm-dock-holder{padding-left:17px;padding-right:17px}.hm-name{font-size:10px}.hm-edit-menu{width:205px}}
 </style>

@@ -35,7 +35,7 @@ export interface HomeWidgetSettings {
 export const HOME_GRID_COLUMNS = 4
 export const HOME_GRID_ROWS = 6
 export const MAX_HOME_PAGES = 8
-export const HOME_LAYOUT_REVISION = 9
+export const HOME_LAYOUT_REVISION = 10
 
 export interface HomeAppDefinition {
   key: HomeAppKey
@@ -984,6 +984,52 @@ export function removeHomeLayoutPages(
     homeWidgetKeys,
     homePageKeys: deriveLegacyPageKeys(pages),
     homeLayoutPages: pages
+  })
+}
+
+
+/**
+ * 修复“数据认为页面非空，但当前页面视觉上完全空白”的幽灵页。
+ * 不丢弃任何 App / Widget / Folder：只有当目标页里的全部项目都能被放回前面的
+ * 已存在页面时，才真正移除该页；否则保持原布局不变。
+ */
+export function collapseHomeLayoutPageIntoPrevious(
+  value: HomeAppearancePreferences,
+  pageIndex: number
+): HomeAppearancePreferences {
+  const normalized = normalizeHomeAppearance(value)
+  if (!Number.isInteger(pageIndex) || pageIndex <= 0 || pageIndex >= normalized.homeLayoutPages.length) return normalized
+
+  const source = normalized.homeLayoutPages[pageIndex]
+  if (!source?.items.length) return removeHomeLayoutPages(normalized, [pageIndex])
+
+  const before = normalized.homeLayoutPages.slice(0, pageIndex).map(page => ({
+    items: page.items.map(item => ({ ...item, ...(item.type === 'folder' ? { appKeys: [...item.appKeys] } : {}) })) as HomeLayoutItem[]
+  }))
+  const after = normalized.homeLayoutPages.slice(pageIndex + 1).map(page => ({
+    items: page.items.map(item => ({ ...item, ...(item.type === 'folder' ? { appKeys: [...item.appKeys] } : {}) })) as HomeLayoutItem[]
+  }))
+
+  const moving = sortItemsByVisualOrder(source.items).map(item =>
+    ({ ...item, ...(item.type === 'folder' ? { appKeys: [...item.appKeys] } : {}) }) as HomeLayoutItem
+  )
+
+  // 优先放到紧邻的上一页，再向更前面的页面寻找空间；不自动新建页面。
+  for (const item of moving) {
+    let placed = false
+    for (let target = before.length - 1; target >= 0; target -= 1) {
+      const fit = findFirstFit(before[target].items, item.w, item.h)
+      if (!fit) continue
+      before[target].items.push({ ...item, x: fit.x, y: fit.y } as HomeLayoutItem)
+      placed = true
+      break
+    }
+    if (!placed) return normalized
+  }
+
+  return normalizeHomeAppearance({
+    ...normalized,
+    homeLayoutPages: compactLayoutPages([...before, ...after])
   })
 }
 

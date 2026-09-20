@@ -1,5 +1,15 @@
 # Changelog
 
+## V0.5.0-alpha.5.1.19
+
+- Launcher Grid V10：不再继续盲删“空数组页”，增加幽灵页诊断与安全回收。
+- 当前页视觉完全空白但数据仍含项目时，优先把项目安全搬回前面的已有页面；只有全部项目可保留时才删除该页。
+- 页面 DOM key 改为由页内容签名驱动，避免页压缩/重排后复用旧页面 DOM。
+- 新增 HomeLayout Inspector：显示每页真实 App / Widget / Folder、坐标与尺寸，并提供“修复当前幽灵页（保留项目）”。
+- HomeLayout revision 升至 10；启动与翻页稳定后再次执行视觉空页审计。
+- 新增幽灵页安全折叠回归测试；静态为 41 个测试文件 / 342 个测试声明。
+- IndexedDB 仍为 V18，Backup 仍为 V12，不清站点数据。
+
 ## V0.5.0-alpha.5.1.18
 
 - Launcher Page Compositor V2：移除分页轨道上的 flex + `contain: paint` 组合，改为每页独立绝对定位并按当前页做 `translate3d`。

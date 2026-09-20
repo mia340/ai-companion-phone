@@ -7,6 +7,7 @@ import {
   HOME_GRID_ROWS,
   addHomeAppToFolder,
   createHomeFolder,
+  collapseHomeLayoutPageIntoPrevious,
   normalizeHomeAppearance,
   moveHomeAppPlacement,
   moveHomeAppToGrid,
@@ -373,6 +374,25 @@ describe('知间桌面入口与布局', () => {
     const reordered = reorderHomeFolderApps(current, 'folder:profile-music-memory', 'memory', 'profile')
     const folder = reordered.homeLayoutPages[0].items.find(item => item.type === 'folder')
     expect(folder?.type === 'folder' ? folder.appKeys : []).toEqual(['memory', 'profile', 'music'])
+  })
+
+  it('幽灵页修复会把非空页面的项目安全搬回前页，再删除页面', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [
+        { items: [{ id: 'app:music', type: 'app', key: 'music', x: 0, y: 0, w: 1, h: 1 }] },
+        { items: [{ id: 'app:profile', type: 'app', key: 'profile', x: 0, y: 0, w: 1, h: 1 }] }
+      ],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+
+    const repaired = collapseHomeLayoutPageIntoPrevious(current, 1)
+    expect(repaired.homeLayoutPages).toHaveLength(1)
+    expect(repaired.homeLayoutPages[0].items.map(item => item.type === 'app' ? item.key : item.id)).toEqual(expect.arrayContaining(['music', 'profile']))
   })
 
 })
