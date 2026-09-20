@@ -682,3 +682,11 @@ Windows 首轮 `npm run verify` 显示 41 个测试文件 / 329 个测试均先�
 3. HomeLayout Revision 8 在 load 时压缩历史空页并回写；
 4. UI 在非编辑/非拖拽状态下检查稳定页面是否真正渲染 Launcher item，无可见项目则触发持久自愈；
 5. 显式删除 ghost page 时同步重算 App/Widget 清单，防止 normalize 将幽灵项目再次补回。
+
+
+## 2026-09-20 · alpha.5.1.16 Folder V1 / Ghost Page GC
+
+- 针对用户真机复现的“第二页幽灵空页”，增加稳定页 UI 过滤与 current-page DOM GC，Revision 升至 9。
+- HomeLayout Item 新增 folder 类型；两个 App 拖叠创建文件夹，后续成员可追加。
+- 文件夹可移动、重命名、打开；成员移出后不足 2 个时自动解散。
+- HomeLayout backup/schema 与 AppCustomization 非索引 JSON 同步兼容 folder，无需 IndexedDB 迁移。

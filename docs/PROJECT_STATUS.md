@@ -1,16 +1,27 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.15**
+当前版本：**V0.5.0-alpha.5.1.16**
 
 ```text
-App：0.5.0-alpha.5.1.15
+App：0.5.0-alpha.5.1.16
 IndexedDB：V18
 Backup：V12
-测试定义：41 files / 334 it-test declarations
+测试定义：41 files / 338 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+
+## 0. 本轮 alpha.5.1.16 重点
+
+- **稳定页二次兜底**：Launcher UI 本身不再渲染 `items.length === 0` 的稳定页；进入某页后如果 DOM 中确实没有任何 Launcher Item，会立即回收该页并夹紧当前页索引，专项处理“第二页幽灵空页”。
+- **HomeLayout Revision 9**：旧布局重新归一化并回写，继续清理历史空页/脏页。
+- **iPhone 式 App 文件夹 V1**：任意两个 App 可通过拖叠形成文件夹；其他 App 继续拖到文件夹上即可加入。
+- 文件夹作为 1×1 Grid Item 可随其他 App/Widget 一起移动；点击打开玻璃质感文件夹面板。
+- 编辑文件夹时可重命名、把 App 移出；只剩 1 个 App 时文件夹自动解散回普通图标。
+- App 文件夹成员仍计入 `homeAppKeys`，HomeLayout/布局备份继续保持本地优先；IndexedDB V18 / Backup V12 不变。
+- 测试定义：41 文件 / 338 声明（最终以 Windows `npm run verify` 输出为准）。
 
 ## 0. 本轮 alpha.5.1.15 重点
 
@@ -54,7 +65,7 @@ Backup：V12
 
 主屏重新按真实手机组织：
 
-- 四列 App 网格；默认显示音乐、海龟汤、我的资料、记忆、数据备份；
+- 四列 4×6 Launcher Grid；App、Widget、Folder 共用同一布局；默认显示音乐、海龟汤、我的资料、记忆、数据备份；
 - 四格 Dock；默认显示知间、新建角色、世界、设置；
 - 可选小组件：今天、最近的人、世界状态、一起听、照片、日历；
 - 长按空白处进入编辑态，可添加小组件、自定义、编辑墙纸和编辑桌面；

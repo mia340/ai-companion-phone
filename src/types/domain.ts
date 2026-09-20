@@ -13,8 +13,12 @@ export interface AppCustomization {
   homeAppKeys?: string[]
   /** Legacy launcher page order, kept for backward compatibility. */
   homePageKeys?: string[][]
-  /** Launcher Grid V5: non-indexed 4×6 page layout. */
-  homeLayoutPages?: Array<{ items: Array<{ id: string; type: 'app' | 'widget'; key: string; x: number; y: number; w: number; h: number }> }>
+  /** Launcher Grid V9: non-indexed 4×6 page layout, including iPhone-style App folders. */
+  homeLayoutPages?: Array<{ items: Array<
+    | { id: string; type: 'app'; key: string; x: number; y: number; w: number; h: number }
+    | { id: string; type: 'widget'; key: string; x: number; y: number; w: number; h: number }
+    | { id: string; type: 'folder'; key: string; name: string; appKeys: string[]; x: number; y: number; w: number; h: number }
+  > }>
   dockAppKeys?: string[]
   homeWidgetKeys?: string[]
   widgetStyle?: 'clear' | 'frosted' | 'solid'

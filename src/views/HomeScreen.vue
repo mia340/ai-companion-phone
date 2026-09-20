@@ -14,7 +14,9 @@ import {
   HOME_GRID_ROWS,
   MAX_HOME_PAGES,
   WIDGET_CATALOG,
+  addHomeAppToFolder,
   addHomeWidgetToGrid,
+  createHomeFolder,
   applyHomeThemePreset,
   getHomeAppDefinition,
   getWidgetGridSizes,
@@ -23,6 +25,8 @@ import {
   moveHomeAppPlacement,
   moveHomeLayoutItemToGrid,
   resizeHomeWidgetInGrid,
+  removeHomeAppFromFolder,
+  renameHomeFolder,
   removeHomeLayoutPages,
   resolveDockApps,
   saveHomeAppearance,
@@ -30,6 +34,7 @@ import {
   type HomeAppDefinition,
   type HomeAppKey,
   type HomeAppearancePreferences,
+  type HomeLayoutFolderItem,
   type HomeLayoutItem,
   type HomeLayoutPage,
   type HomePlacement,
@@ -63,6 +68,7 @@ const editingWidgetKey = ref<HomeWidgetKey | ''>('')
 const photoInput = ref<HTMLInputElement | null>(null)
 const layoutImportInput = ref<HTMLInputElement | null>(null)
 const layoutBackupMessage = ref('')
+const openFolderId = ref('')
 const pageViewport = ref<HTMLElement | null>(null)
 const pageSwipeOffset = ref(0)
 const pageSwiping = ref(false)
@@ -72,7 +78,8 @@ const transientBlankPage = ref(false)
 const draggingId = ref('')
 const dropTargetKey = ref<HomeAppKey | ''>('')
 const dropTargetItemId = ref('')
-const dropTargetKind = ref<HomePlacement | ''>('')
+const dropTargetFolderId = ref('')
+const dropTargetKind = ref<HomePlacement | 'folder' | ''>('')
 const dropTargetPage = ref(-1)
 const dropTargetX = ref(-1)
 const dropTargetY = ref(-1)
@@ -88,8 +95,8 @@ let suppressAppClickUntil = 0
 
 type LauncherPointerState = {
   pointerId: number
-  itemType: 'app' | 'widget'
-  key: HomeAppKey | HomeWidgetKey
+  itemType: 'app' | 'widget' | 'folder'
+  key: string
   kind: HomePlacement
   startX: number
   startY: number
@@ -113,19 +120,22 @@ let longPressStartX = 0
 let longPressStartY = 0
 
 const renderedAppearance = computed(() => draggingId.value && dragPreviewAppearance.value ? dragPreviewAppearance.value : appearance.value)
-const actualPages = computed(() => renderedAppearance.value.homeLayoutPages)
+const actualPages = computed<HomeLayoutPage[]>(() => {
+  const nonEmpty = renderedAppearance.value.homeLayoutPages.filter(page => page.items.length > 0)
+  return nonEmpty.length ? nonEmpty : [{ items: [] }]
+})
 const launcherPages = computed<HomeLayoutPage[]>(() => {
   // 临时空白页只服务于“正在编辑并拖拽到最后一页右边缘”的那一瞬间。
-  // 一旦拖拽结束 / 取消 / 退出编辑，空白页必须立刻消失，绝不能成为稳定桌面页。
+  // 稳定页在 UI 层也再次过滤空页，避免历史脏数据继续显示分页圆点。
   const canExposeTransientPage = transientBlankPage.value
     && editMode.value
     && Boolean(draggingId.value)
     && !dragPreviewAppearance.value
-    && renderedAppearance.value.homeLayoutPages.length < MAX_HOME_PAGES
+    && actualPages.value.length < MAX_HOME_PAGES
 
   return canExposeTransientPage
-    ? [...renderedAppearance.value.homeLayoutPages, { items: [] }]
-    : renderedAppearance.value.homeLayoutPages
+    ? [...actualPages.value, { items: [] }]
+    : actualPages.value
 })
 const clampCurrentPageToPersistedLayout = () => {
   const pageCount = Math.max(1, actualPages.value.length)
@@ -166,6 +176,13 @@ const editingWidgetSizes = computed(() => editingWidgetKey.value ? getWidgetGrid
 const editingWidgetLayout = computed(() => editingWidgetKey.value ? appearance.value.homeLayoutPages
   .flatMap(page => page.items)
   .find(item => item.type === 'widget' && item.key === editingWidgetKey.value) : undefined)
+
+const openFolder = computed<HomeLayoutFolderItem | undefined>(() => {
+  if (!openFolderId.value) return undefined
+  return appearance.value.homeLayoutPages
+    .flatMap(page => page.items)
+    .find((item): item is HomeLayoutFolderItem => item.type === 'folder' && item.id === openFolderId.value)
+})
 
 const homeIconSize = computed(() => Math.round(60 * appearance.value.iconScale))
 const dockIconSize = computed(() => Math.round(54 * appearance.value.iconScale))
@@ -302,6 +319,7 @@ async function loadHomeState() {
   )
   appearance.value = savedAppearance
   void repairRenderedEmptyPages()
+  window.setTimeout(() => { void repairCurrentBlankPage() }, 220)
 
   const latest = [...conversations]
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
@@ -348,6 +366,40 @@ function openWidget(key: HomeWidgetKey) {
   if (key === 'music') void router.push('/app/音乐')
 }
 
+
+function openFolderItem(folder: HomeLayoutFolderItem) {
+  if (performance.now() < suppressAppClickUntil) return
+  openFolderId.value = folder.id
+  editMenuOpen.value = false
+  activeSheet.value = null
+}
+
+async function moveAppOutOfFolder(appKey: HomeAppKey) {
+  const folder = openFolder.value
+  if (!folder) return
+  await persistAppearance(removeHomeAppFromFolder(appearance.value, folder.id, appKey, currentPage.value))
+  if (!appearance.value.homeLayoutPages.some(page => page.items.some(item => item.type === 'folder' && item.id === folder.id))) {
+    openFolderId.value = ''
+  }
+}
+
+async function updateFolderName(name: string) {
+  const folder = openFolder.value
+  if (!folder) return
+  await persistAppearance(renameHomeFolder(appearance.value, folder.id, name))
+}
+
+function handleFolderNameChange(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  if (input) void updateFolderName(input.value)
+}
+
+function openFolderApp(key: HomeAppKey) {
+  if (editMode.value) return
+  openFolderId.value = ''
+  openAppKey(key)
+}
+
 async function persistAppearance(next: HomeAppearancePreferences) {
   appearance.value = await saveHomeAppearance(worldId.value, next)
 }
@@ -381,6 +433,35 @@ async function repairRenderedEmptyPages() {
       worldId.value,
       removeHomeLayoutPages(appearance.value, emptyIndexes)
     )
+    transientBlankPage.value = false
+    clampCurrentPageToPersistedLayout()
+  } finally {
+    repairingRenderedPages = false
+  }
+}
+
+
+async function repairCurrentBlankPage() {
+  if (repairingRenderedPages || editMode.value || draggingId.value || dragPreviewAppearance.value) return
+  await nextTick()
+  const index = currentPage.value
+  if (appearance.value.homeLayoutPages.length <= 1 || index < 0 || index >= appearance.value.homeLayoutPages.length) return
+  const viewport = pageViewport.value
+  const pageElement = viewport?.querySelector<HTMLElement>(`.hm-page[data-launcher-page="${index}"]:not(.is-transient)`)
+  if (!pageElement) return
+  const renderedItems = Array.from(pageElement.querySelectorAll<HTMLElement>('[data-launcher-item]'))
+  const pageRect = pageElement.getBoundingClientRect()
+  const hasVisibleItem = renderedItems.some(element => {
+    const style = window.getComputedStyle(element)
+    const rect = element.getBoundingClientRect()
+    const intersectsPage = rect.right > pageRect.left + 1 && rect.left < pageRect.right - 1 && rect.bottom > pageRect.top + 1 && rect.top < pageRect.bottom - 1
+    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0.05 && rect.width > 1 && rect.height > 1 && intersectsPage
+  })
+  if (hasVisibleItem) return
+
+  repairingRenderedPages = true
+  try {
+    appearance.value = await saveHomeAppearance(worldId.value, removeHomeLayoutPages(appearance.value, [index]))
     transientBlankPage.value = false
     clampCurrentPageToPersistedLayout()
   } finally {
@@ -567,6 +648,7 @@ function clearDropTarget() {
   dropTargetKind.value = ''
   dropTargetKey.value = ''
   dropTargetItemId.value = ''
+  dropTargetFolderId.value = ''
   dropTargetPage.value = -1
   dropTargetX.value = -1
   dropTargetY.value = -1
@@ -630,11 +712,11 @@ function beginBlankLongPress(event: PointerEvent) {
 
 function beginLauncherItemPointer(event: PointerEvent, item: HTMLElement) {
   const rawKey = item.dataset.launcherKey || item.dataset.launcherItem
-  const itemType = (item.dataset.launcherType || 'app') as 'app' | 'widget'
+  const itemType = (item.dataset.launcherType || 'app') as 'app' | 'widget' | 'folder'
   const kind = item.dataset.launcherKind as HomePlacement | undefined
-  if (!rawKey || (itemType !== 'app' && itemType !== 'widget') || (kind !== 'home' && kind !== 'dock')) return
-  if (itemType === 'widget' && kind !== 'home') return
-  const key = rawKey as HomeAppKey | HomeWidgetKey
+  if (!rawKey || (itemType !== 'app' && itemType !== 'widget' && itemType !== 'folder') || (kind !== 'home' && kind !== 'dock')) return
+  if ((itemType === 'widget' || itemType === 'folder') && kind !== 'home') return
+  const key = rawKey
   cancelHomeLongPress()
   launcherPointer = {
     pointerId: event.pointerId,
@@ -746,6 +828,24 @@ function updateDropTarget(event: PointerEvent) {
     return
   }
 
+  const homeTarget = hit?.closest<HTMLElement>('[data-launcher-kind="home"][data-launcher-item]')
+  if (launcherPointer.itemType === 'app' && homeTarget) {
+    const targetId = homeTarget.dataset.launcherItem || ''
+    const targetType = homeTarget.dataset.launcherType
+    const selfId = `app:${launcherPointer.key}`
+    if (targetId && targetId !== selfId && (targetType === 'app' || targetType === 'folder')) {
+      dropTargetKind.value = 'folder'
+      dropTargetKey.value = targetType === 'app' ? (homeTarget.dataset.launcherKey as HomeAppKey || '') : ''
+      dropTargetFolderId.value = targetType === 'folder' ? targetId : ''
+      dropTargetItemId.value = targetId
+      dropTargetPage.value = Number(homeTarget.closest<HTMLElement>('[data-launcher-page]')?.dataset.launcherPage ?? -1)
+      dropTargetX.value = -1
+      dropTargetY.value = -1
+      setDragPreview(undefined)
+      return
+    }
+  }
+
   const grid = hit?.closest<HTMLElement>('[data-launcher-grid]')
   if (!grid) {
     clearDropTarget()
@@ -764,7 +864,8 @@ function updateDropTarget(event: PointerEvent) {
   const x = Math.max(0, Math.min(HOME_GRID_COLUMNS - 1, Math.floor(relativeX / (rect.width / HOME_GRID_COLUMNS))))
   const y = Math.max(0, Math.min(HOME_GRID_ROWS - 1, Math.floor(relativeY / (rect.height / HOME_GRID_ROWS))))
   const occupant = itemAtCell(pageAt(pageIndex), x, y)
-  const selfId = `${launcherPointer.itemType}:${launcherPointer.key}`
+  const selfId = launcherPointer.itemType === 'folder' ? launcherPointer.key : `${launcherPointer.itemType}:${launcherPointer.key}`
+
   if (occupant?.id === selfId && launcherPointer.kind === 'home') {
     // 预览已经把占位符流动到当前格时，不要下一帧又撤销预览造成来回闪动。
     if (dragPreviewAppearance.value && dropTargetKind.value === 'home' && dropTargetPage.value === pageIndex && dropTargetX.value === x && dropTargetY.value === y) return
@@ -785,7 +886,9 @@ function updateDropTarget(event: PointerEvent) {
       appearance.value,
       launcherPointer.itemType === 'app'
         ? { type: 'app', key: launcherPointer.key as HomeAppKey }
-        : { type: 'widget', key: launcherPointer.key as HomeWidgetKey },
+        : launcherPointer.itemType === 'widget'
+          ? { type: 'widget', key: launcherPointer.key as HomeWidgetKey }
+          : { type: 'folder', id: launcherPointer.key },
       pageIndex,
       x,
       y
@@ -823,15 +926,29 @@ function handlePointerMove(event: PointerEvent) {
 async function finishHomePointer(event?: PointerEvent, commit = true) {
   const pointer = launcherPointer
   if (!pointer) return
+  const shouldOpenFolder = Boolean(
+    commit && event && pointer.itemType === 'folder' && pointer.active && !dropTargetKind.value &&
+    Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY) < 8
+  )
 
   try {
     if (pointer.active && commit) {
-      if (dropTargetKind.value === 'home' && dropTargetPage.value >= 0 && dropTargetX.value >= 0 && dropTargetY.value >= 0) {
+      if (dropTargetKind.value === 'folder' && pointer.itemType === 'app') {
+        const next = dropTargetFolderId.value
+          ? addHomeAppToFolder(appearance.value, pointer.key as HomeAppKey, dropTargetFolderId.value)
+          : dropTargetKey.value
+            ? createHomeFolder(appearance.value, pointer.key as HomeAppKey, dropTargetKey.value)
+            : appearance.value
+        await persistAppearance(next)
+        suppressAppClickUntil = performance.now() + 320
+      } else if (dropTargetKind.value === 'home' && dropTargetPage.value >= 0 && dropTargetX.value >= 0 && dropTargetY.value >= 0) {
         await persistAppearance(dragPreviewAppearance.value ?? moveHomeLayoutItemToGrid(
           appearance.value,
           pointer.itemType === 'app'
             ? { type: 'app', key: pointer.key as HomeAppKey }
-            : { type: 'widget', key: pointer.key as HomeWidgetKey },
+            : pointer.itemType === 'widget'
+              ? { type: 'widget', key: pointer.key as HomeWidgetKey }
+              : { type: 'folder', id: pointer.key },
           dropTargetPage.value,
           dropTargetX.value,
           dropTargetY.value
@@ -851,6 +968,7 @@ async function finishHomePointer(event?: PointerEvent, commit = true) {
     // 即便 IndexedDB 写入或布局校验异常，也必须销毁拖拽预览和临时页。
     // 否则 dragPreviewAppearance 会继续盖住真实 appearance，表现成“第二页永远删不掉”。
     resetLauncherPointer()
+    if (shouldOpenFolder) openFolderId.value = pointer.key
     if (event) event.preventDefault()
   }
 }
@@ -956,6 +1074,7 @@ function finishEditing() {
   editMenuOpen.value = false
   activeSheet.value = null
   editingWidgetKey.value = ''
+  openFolderId.value = ''
 }
 
 function openAppearance(section: 'customize' | 'wallpaper') {
@@ -964,6 +1083,11 @@ function openAppearance(section: 'customize' | 'wallpaper') {
 
 watch(() => actualPages.value.length, length => {
   if (currentPage.value >= length) currentPage.value = Math.max(0, length - 1)
+})
+
+watch(currentPage, () => {
+  if (editMode.value || draggingId.value) return
+  window.setTimeout(() => { void repairCurrentBlankPage() }, 180)
 })
 
 onMounted(async () => {
@@ -1130,11 +1254,39 @@ onUnmounted(() => {
                   </article>
 
                   <div
+                    v-else-if="item.type === 'folder'"
+                    class="hm-folder-shell"
+                    :class="{
+                      'is-dragging': draggingId === `folder:${item.id}`,
+                      'is-drop-target': dropTargetKind === 'folder' && dropTargetItemId === item.id
+                    }"
+                    :style="layoutStyle(item)"
+                    :data-launcher-item="item.id"
+                    :data-launcher-key="item.id"
+                    data-launcher-type="folder"
+                    data-launcher-kind="home"
+                  >
+                    <button class="hm-folder" type="button" @click="openFolderItem(item)">
+                      <span class="hm-folder-tile">
+                        <span v-for="key in item.appKeys.slice(0, 4)" :key="key" class="hm-folder-mini">
+                          <AppIcon
+                            :icon="appIconFor(key)"
+                            :custom-image="appCustomImageFor(key)"
+                            :tones="appToneFor(key)"
+                            :size="20"
+                          />
+                        </span>
+                      </span>
+                      <span v-if="appearance.showAppLabels" class="hm-name">{{ item.name }}</span>
+                    </button>
+                  </div>
+
+                  <div
                     v-else
                     class="hm-app-shell"
                     :class="{
                       'is-dragging': draggingId === `app:${item.key}`,
-                      'is-drop-target': dropTargetKind === 'home' && dropTargetItemId === item.id
+                      'is-drop-target': (dropTargetKind === 'home' || dropTargetKind === 'folder') && dropTargetItemId === item.id
                     }"
                     :style="layoutStyle(item)"
                     :data-launcher-item="item.id"
@@ -1190,6 +1342,43 @@ onUnmounted(() => {
             @remove="removeDockApp"
           />
         </div>
+      </div>
+
+      <div v-if="openFolder" class="hm-folder-backdrop" @click.self="openFolderId = ''">
+        <section class="hm-folder-panel">
+          <header class="hm-folder-header">
+            <input
+              v-if="editMode"
+              :value="openFolder.name"
+              maxlength="24"
+              aria-label="文件夹名称"
+              @change="handleFolderNameChange"
+            />
+            <h2 v-else>{{ openFolder.name }}</h2>
+            <button type="button" aria-label="关闭文件夹" @click="openFolderId = ''">×</button>
+          </header>
+          <div class="hm-folder-grid">
+            <div v-for="key in openFolder.appKeys" :key="key" class="hm-folder-app">
+              <button type="button" class="hm-folder-app-main" @click="openFolderApp(key)">
+                <AppIcon
+                  :icon="appIconFor(key)"
+                  :custom-image="appCustomImageFor(key)"
+                  :tones="appToneFor(key)"
+                  :size="58"
+                />
+                <span>{{ appLabel(key) }}</span>
+              </button>
+              <button
+                v-if="editMode"
+                type="button"
+                class="hm-folder-app-remove"
+                :aria-label="`移出${appLabel(key)}`"
+                @click.stop="moveAppOutOfFolder(key)"
+              >−</button>
+            </div>
+          </div>
+          <p v-if="editMode" class="hm-folder-hint">把其他 App 拖到文件夹上可继续加入；移出后只剩 1 个 App 时会自动解散。</p>
+        </section>
       </div>
 
       <div v-if="activeSheet" class="hm-sheet-backdrop" @click.self="activeSheet = null">
@@ -1350,6 +1539,9 @@ onUnmounted(() => {
 .widget-music{display:flex;align-items:center;gap:11px;padding:11px 14px}.music-art{display:grid;place-items:center;width:58px;height:58px;flex:0 0 auto}.music-art :deep(.app-icon){transform:scale(.82)}.music-copy{display:grid;gap:3px;min-width:0;flex:1}.music-copy b{font-size:14px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hm-app-shell{position:relative;z-index:3;display:grid;place-items:center;min-width:0;min-height:0;transition:transform .16s ease,opacity .16s ease,filter .16s ease}.hm-app-shell.is-dragging{opacity:.18;filter:saturate(.7)}.hm-app-shell.is-drop-target{transform:scale(.92)}
 .hm-app{display:flex;min-width:0;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:0;border:0;background:transparent;cursor:pointer;color:inherit}.hm-tile-wrap{position:relative;display:grid;place-items:center}.hm-badge{position:absolute;z-index:3;right:-6px;top:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:11px;background:#ff4b57;color:#fff;font-size:10px;line-height:20px;text-align:center;font-weight:760;border:1.5px solid rgba(255,255,255,.92)}.hm-name{max-width:72px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#2e4659;white-space:nowrap;text-shadow:0 1px 8px rgba(255,255,255,.7)}
+.hm-folder-shell{position:relative;z-index:3;display:grid;place-items:center;min-width:0;min-height:0;transition:transform .18s ease,opacity .16s ease,filter .16s ease}.hm-folder-shell.is-dragging{opacity:.18;filter:saturate(.7)}.hm-folder-shell.is-drop-target{transform:scale(.9)}
+.hm-folder{display:flex;min-width:0;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:0;border:0;background:transparent;color:inherit;cursor:pointer}.hm-folder-tile{width:60px;height:60px;padding:7px;border-radius:18px;display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:4px;place-items:center;background:rgba(236,244,250,.64);box-shadow:inset 0 0 0 1px rgba(255,255,255,.62),0 8px 18px rgba(42,74,98,.13);backdrop-filter:blur(18px) saturate(1.1);-webkit-backdrop-filter:blur(18px) saturate(1.1)}.hm-folder-mini{display:grid;place-items:center;width:22px;height:22px;overflow:hidden;border-radius:7px}.hm-folder-mini :deep(.app-icon){box-shadow:none!important}
+.hm-folder-backdrop{position:absolute;z-index:120;inset:0;display:grid;place-items:center;padding:90px 30px 120px;background:rgba(31,47,60,.18);backdrop-filter:blur(18px) saturate(1.04);-webkit-backdrop-filter:blur(18px) saturate(1.04)}.hm-folder-panel{width:min(340px,92%);max-height:520px;padding:18px;border:1px solid rgba(255,255,255,.66);border-radius:32px;background:rgba(244,249,252,.76);box-shadow:0 28px 70px rgba(29,48,62,.24),inset 0 1px 0 rgba(255,255,255,.72);backdrop-filter:blur(28px) saturate(1.12);-webkit-backdrop-filter:blur(28px) saturate(1.12);overflow:auto}.hm-folder-header{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;margin-bottom:18px}.hm-folder-header h2{margin:0;text-align:center;font-size:18px;color:#2d4659}.hm-folder-header input{min-width:0;border:0;border-radius:14px;padding:9px 12px;background:rgba(255,255,255,.72);font:inherit;font-weight:700;color:#2d4659;text-align:center;outline:none}.hm-folder-header button{width:34px;height:34px;border:0;border-radius:50%;background:rgba(111,132,148,.14);font-size:20px;color:#536b7d}.hm-folder-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 10px}.hm-folder-app{position:relative;display:grid;place-items:center}.hm-folder-app-main{display:grid;justify-items:center;gap:7px;min-width:0;border:0;background:transparent;color:#30485b}.hm-folder-app-main span{max-width:88px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hm-folder-app-remove{position:absolute;left:4px;top:-4px;width:22px;height:22px;border:1px solid rgba(255,255,255,.7);border-radius:50%;background:rgba(113,122,130,.9);color:#fff;font-size:18px;line-height:18px}.hm-folder-hint{margin:18px 4px 2px;text-align:center;font-size:9px;line-height:1.6;color:#708698}
 .hm-drag-ghost{position:fixed!important;z-index:9999!important;margin:0!important;pointer-events:none!important;opacity:.94!important;transform:scale(1.06)!important;transform-origin:center!important;filter:drop-shadow(0 16px 18px rgba(32,50,65,.22));transition:none!important}.hm-drag-ghost .hm-app,.hm-drag-ghost .dock-app{animation:none!important}.launcher-source-dragging{opacity:.18!important}
 .hm-page-dots{display:flex;flex:0 0 auto;justify-content:center;gap:7px;padding:7px 0 9px}.hm-page-dots button{width:6px;height:6px;padding:0;border:0;border-radius:50%;background:rgba(63,81,95,.28)}.hm-page-dots button.active{background:rgba(42,62,78,.72)}
 .hm-dock-holder{flex:0 0 auto;padding:0 21px 10px}

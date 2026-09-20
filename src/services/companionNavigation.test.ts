@@ -5,11 +5,14 @@ import {
   HOME_APPS,
   HOME_GRID_COLUMNS,
   HOME_GRID_ROWS,
+  addHomeAppToFolder,
+  createHomeFolder,
   normalizeHomeAppearance,
   moveHomeAppPlacement,
   moveHomeAppToGrid,
   moveHomeWidgetToGrid,
   resizeHomeWidgetInGrid,
+  removeHomeAppFromFolder,
   removeHomeLayoutPages,
   paginateHomeAppKeys
 } from './appCustomizationService'
@@ -242,6 +245,60 @@ describe('知间桌面入口与布局', () => {
 
     const resized = resizeHomeWidgetInGrid(moved, 'companion', 2, 2)
     expect(resized.homeLayoutPages[0].items.find(item => item.id === 'widget:companion')).toMatchObject({ w: 2, h: 2 })
+  })
+
+
+
+  it('两个 App 可以组成文件夹，并继续加入第三个 App', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile', 'memory'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [{ items: [
+        { id: 'app:music', type: 'app', key: 'music', x: 0, y: 0, w: 1, h: 1 },
+        { id: 'app:profile', type: 'app', key: 'profile', x: 1, y: 0, w: 1, h: 1 },
+        { id: 'app:memory', type: 'app', key: 'memory', x: 2, y: 0, w: 1, h: 1 }
+      ] }],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+
+    const grouped = createHomeFolder(current, 'music', 'profile')
+    const folder = grouped.homeLayoutPages[0].items.find(item => item.type === 'folder')
+    expect(folder).toBeTruthy()
+    expect(folder?.type === 'folder' ? folder.appKeys : []).toEqual(['profile', 'music'])
+    expect(grouped.homeAppKeys).toEqual(expect.arrayContaining(['music', 'profile', 'memory']))
+
+    const withThird = folder?.type === 'folder'
+      ? addHomeAppToFolder(grouped, 'memory', folder.id)
+      : grouped
+    const updated = withThird.homeLayoutPages[0].items.find(item => item.type === 'folder')
+    expect(updated?.type === 'folder' ? updated.appKeys : []).toEqual(['profile', 'music', 'memory'])
+    expect(withThird.homeLayoutPages[0].items.filter(item => item.type === 'app')).toHaveLength(0)
+  })
+
+  it('文件夹只剩一个 App 时自动解散回普通图标', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [{ items: [
+        { id: 'folder:profile-music', type: 'folder', key: 'profile-music', name: '文件夹', appKeys: ['profile', 'music'], x: 0, y: 0, w: 1, h: 1 }
+      ] }],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+
+    const folder = current.homeLayoutPages[0].items.find(item => item.type === 'folder')
+    expect(folder?.type).toBe('folder')
+    const next = folder?.type === 'folder'
+      ? removeHomeAppFromFolder(current, folder.id, 'music', 0)
+      : current
+    expect(next.homeLayoutPages[0].items.some(item => item.type === 'folder')).toBe(false)
+    expect(next.homeLayoutPages[0].items.some(item => item.type === 'app' && item.key === 'profile')).toBe(true)
+    expect(next.homeLayoutPages[0].items.some(item => item.type === 'app' && item.key === 'music')).toBe(true)
   })
 
   it('保留旧分页迁移函数，兼容历史备份', () => {

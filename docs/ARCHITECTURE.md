@@ -705,3 +705,10 @@ Launcher Grid V6 已将 App/Widget 统一为二维布局 Item，并推进 Charac
 ### Launcher Grid V7 · Insert/Reflow
 
 桌面拖拽语义由“碰撞交换”改为“插入序列 + 网格重新装箱”。App 和 Widget 都是 `HomeLayoutItem`；Widget 的 `w/h` 直接参与 first-fit pack。拖拽期间仅生成 `dragPreviewAppearance`，不写数据库；pointerup 后再原子持久化。目标页溢出的尾部 Item 向下一页级联，而来源页不会从下一页反向抽取内容，因此自由分页意图可以保留。
+
+
+## V0.5.0-alpha.5.1.16 · Launcher Folder / Stable Page GC
+
+HomeLayout Revision 9 在 `app | widget` 之外新增 `folder` Grid Item。Folder 仍占 1×1 槽位，但内部持有 `appKeys[]`；App 是否属于桌面由 direct app 与 folder member 共同推导，避免文件夹成员从 `homeAppKeys` 丢失。两个 App 拖叠时创建 folder，后续 App 可继续加入；移出后仅剩一个成员时自动退化为普通 App Item。
+
+稳定页面现在有三层回收：Domain normalize 删除空 page；Launcher computed 不渲染稳定空 page；当前页 DOM 若确实没有 Launcher Item，则执行持久自愈。临时新页仍只在活动拖拽时存在，不进入 canonical HomeLayout。

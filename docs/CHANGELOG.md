@@ -1,5 +1,15 @@
 # Changelog
 
+## V0.5.0-alpha.5.1.16
+
+- 修复第二页幽灵空页：稳定 Launcher 页在 UI 层再次过滤空 items，切换到真正空白页时会触发当前页 DOM 回收兜底。
+- HomeLayout Revision 提升到 9，历史布局重新归一化并回写。
+- 新增 iPhone 式 App 文件夹 V1：两个 App 拖叠创建文件夹，继续拖入可追加成员。
+- 文件夹进入统一 4×6 Grid，可移动、重命名、打开；成员可移出，只剩 1 个 App 时自动解散。
+- HomeLayout Schema / 独立布局备份同步兼容 folder item；IndexedDB V18 / Backup V12 不变。
+- 新增文件夹创建/追加/自动解散回归测试；静态为 41 个测试文件 / 338 个测试声明。
+
+
 ## V0.5.0-alpha.5.1.15
 
 - 修复第二页幽灵空页：过期 drag preview 不再覆盖真实 HomeLayout。

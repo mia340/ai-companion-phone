@@ -35,7 +35,7 @@ export interface HomeWidgetSettings {
 export const HOME_GRID_COLUMNS = 4
 export const HOME_GRID_ROWS = 6
 export const MAX_HOME_PAGES = 8
-export const HOME_LAYOUT_REVISION = 8
+export const HOME_LAYOUT_REVISION = 9
 
 export interface HomeAppDefinition {
   key: HomeAppKey
@@ -82,7 +82,19 @@ export interface HomeLayoutWidgetItem {
   h: number
 }
 
-export type HomeLayoutItem = HomeLayoutAppItem | HomeLayoutWidgetItem
+export interface HomeLayoutFolderItem {
+  id: string
+  type: 'folder'
+  key: string
+  name: string
+  appKeys: HomeAppKey[]
+  x: number
+  y: number
+  w: 1
+  h: 1
+}
+
+export type HomeLayoutItem = HomeLayoutAppItem | HomeLayoutWidgetItem | HomeLayoutFolderItem
 
 export interface HomeLayoutPage {
   items: HomeLayoutItem[]
@@ -234,6 +246,14 @@ const homeLayoutItemSchema = z.discriminatedUnion('type', [
   homeLayoutBaseItemSchema.extend({
     type: z.literal('widget'),
     key: z.string().refine(value => VALID_WIDGET_KEYS.has(value as HomeWidgetKey), '未知 Widget key')
+  }),
+  homeLayoutBaseItemSchema.extend({
+    type: z.literal('folder'),
+    key: z.string().min(1),
+    name: z.string().min(1).max(24),
+    appKeys: z.array(z.string().refine(value => VALID_APP_KEYS.has(value as HomeAppKey), '未知文件夹 App key')).min(2),
+    w: z.literal(1),
+    h: z.literal(1)
   })
 ])
 
@@ -253,7 +273,7 @@ const homeLayoutPageSchema = z.object({ items: z.array(homeLayoutItemSchema) }).
   }
 })
 
-/** Launcher Grid V6 的正式持久化 Schema。 */
+/** Launcher Grid V9 的正式持久化 Schema（App / Widget / Folder）。 */
 export const homeLayoutPagesSchema = z.array(homeLayoutPageSchema).min(1).max(MAX_HOME_PAGES)
 
 export function assertHomeLayoutPages(value: unknown): asserts value is HomeLayoutPage[] {
@@ -264,7 +284,7 @@ export function assertHomeLayoutPages(value: unknown): asserts value is HomeLayo
 /** 所有能出现在主屏幕或 Dock 中、也允许玩家替换图标的 App。 */
 export const CUSTOMIZABLE_APPS: HomeAppDefinition[] = [...APP_CATALOG]
 
-function layoutId(type: 'app' | 'widget', key: string) {
+function layoutId(type: 'app' | 'widget' | 'folder', key: string) {
   return `${type}:${key}`
 }
 
@@ -310,6 +330,29 @@ function createAppItem(key: HomeAppKey, x: number, y: number): HomeLayoutAppItem
 function createWidgetItem(key: HomeWidgetKey, x: number, y: number, size?: { w: number; h: number }): HomeLayoutWidgetItem {
   const { w, h } = size ?? getWidgetGridSize(key)
   return { id: layoutId('widget', key), type: 'widget', key, x, y, w, h }
+}
+
+function createFolderItem(appKeys: readonly HomeAppKey[], x: number, y: number, name = '文件夹'): HomeLayoutFolderItem {
+  const unique = [...new Set(appKeys)].filter(key => VALID_APP_KEYS.has(key))
+  const key = unique.slice().sort().join('-') || 'apps'
+  return { id: layoutId('folder', key), type: 'folder', key, name, appKeys: unique, x, y, w: 1, h: 1 }
+}
+
+
+function collectPageAppKeys(pages: readonly HomeLayoutPage[]) {
+  const keys: HomeAppKey[] = []
+  const seen = new Set<HomeAppKey>()
+  for (const page of pages) {
+    for (const item of page.items) {
+      const itemKeys = item.type === 'app' ? [item.key] : item.type === 'folder' ? item.appKeys : []
+      for (const key of itemKeys) {
+        if (seen.has(key)) continue
+        seen.add(key)
+        keys.push(key)
+      }
+    }
+  }
+  return keys
 }
 
 function ensurePage(pages: HomeLayoutPage[], index: number) {
@@ -398,7 +441,7 @@ function normalizeLayoutPages(
         const row = rawItem as Record<string, unknown>
         const type = row.type
         const rawKey = row.key
-        if (type !== 'app' && type !== 'widget') continue
+        if (type !== 'app' && type !== 'widget' && type !== 'folder') continue
         if (typeof rawKey !== 'string') continue
 
         if (type === 'app') {
@@ -415,6 +458,30 @@ function normalizeLayoutPages(
           }
           page.items.push(item)
           seenApps.add(key)
+          continue
+        }
+
+        if (type === 'folder') {
+          const memberKeys = Array.isArray(row.appKeys)
+            ? [...new Set(row.appKeys.filter((value): value is string => typeof value === 'string'))]
+              .map(value => value as HomeAppKey)
+              .filter(key => VALID_APP_KEYS.has(key) && allowedApps.has(key) && !seenApps.has(key))
+            : []
+          if (!memberKeys.length) continue
+          const x = normalizeGridCoordinate(row.x, HOME_GRID_COLUMNS - 1)
+          const y = normalizeGridCoordinate(row.y, HOME_GRID_ROWS - 1)
+          const name = typeof row.name === 'string' && row.name.trim() ? row.name.trim().slice(0, 24) : '文件夹'
+          const item: HomeLayoutItem = memberKeys.length >= 2
+            ? { ...createFolderItem(memberKeys, x, y, name), id: typeof row.id === 'string' && row.id ? row.id : createFolderItem(memberKeys, x, y, name).id }
+            : createAppItem(memberKeys[0], x, y)
+          if (!canPlace(page.items, item.x, item.y, item.w, item.h)) {
+            const fit = findFirstFit(page.items, 1, 1)
+            if (!fit) continue
+            item.x = fit.x
+            item.y = fit.y
+          }
+          page.items.push(item)
+          memberKeys.forEach(key => seenApps.add(key))
           continue
         }
 
@@ -461,10 +528,9 @@ function normalizeGridCoordinate(value: unknown, max: number) {
 }
 
 function deriveLegacyPageKeys(pages: readonly HomeLayoutPage[]) {
-  return pages.map(page => page.items
-    .filter((item): item is HomeLayoutAppItem => item.type === 'app')
-    .sort((a, b) => a.y - b.y || a.x - b.x)
-    .map(item => item.key))
+  return pages.map(page => sortItemsByVisualOrder(page.items).flatMap(item =>
+    item.type === 'app' ? [item.key] : item.type === 'folder' ? item.appKeys : []
+  ))
 }
 
 /**
@@ -485,8 +551,10 @@ export function moveHomeAppToGrid(
 export type HomeLayoutMovableRef =
   | { type: 'app'; key: HomeAppKey }
   | { type: 'widget'; key: HomeWidgetKey }
+  | { type: 'folder'; id: string }
 
 function itemMatchesRef(item: HomeLayoutItem, ref: HomeLayoutMovableRef) {
+  if (ref.type === 'folder') return item.type === 'folder' && item.id === ref.id
   return item.type === ref.type && item.key === ref.key
 }
 
@@ -571,7 +639,9 @@ export function moveHomeLayoutItemToGrid(
     ? { ...sourceItem }
     : ref.type === 'app'
       ? createAppItem(ref.key, 0, 0)
-      : createWidgetItem(ref.key, 0, 0)
+      : ref.type === 'widget'
+        ? createWidgetItem(ref.key, 0, 0)
+        : (() => { throw new Error('找不到要移动的文件夹') })()
 
   const targetPageIndex = ensurePage(pages, destinationPageIndex)
   const targetX = normalizeGridCoordinate(x, HOME_GRID_COLUMNS - 1)
@@ -608,9 +678,7 @@ export function moveHomeLayoutItemToGrid(
   }
 
   const compacted = compactLayoutPages(pages)
-  const homeAppKeys = layoutItemsFromAppearance(compacted, 'app')
-    .filter((item): item is HomeLayoutAppItem => item.type === 'app')
-    .map(item => item.key)
+  const homeAppKeys = collectPageAppKeys(compacted)
   const homeWidgetKeys = layoutItemsFromAppearance(compacted, 'widget')
     .filter((item): item is HomeLayoutWidgetItem => item.type === 'widget')
     .map(item => item.key)
@@ -635,6 +703,194 @@ export function moveHomeWidgetToGrid(
   return moveHomeLayoutItemToGrid(value, { type: 'widget', key }, destinationPageIndex, x, y)
 }
 
+
+export function createHomeFolder(
+  value: HomeAppearancePreferences,
+  sourceKey: HomeAppKey,
+  targetKey: HomeAppKey,
+  name = '文件夹'
+): HomeAppearancePreferences {
+  if (sourceKey === targetKey) return normalizeHomeAppearance(value)
+  const normalized = normalizeHomeAppearance(value)
+  const pages = normalized.homeLayoutPages.map(page => ({ items: page.items.map(item => ({ ...item, ...(item.type === 'folder' ? { appKeys: [...item.appKeys] } : {}) })) as HomeLayoutItem[] }))
+  const dock = [...normalized.dockAppKeys]
+
+  let sourcePageIndex = -1
+  let targetPageIndex = -1
+  let sourceItem: HomeLayoutAppItem | undefined
+  let targetItem: HomeLayoutAppItem | undefined
+
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+    const page = pages[pageIndex]
+    const sourceIndex = page.items.findIndex(item => item.type === 'app' && item.key === sourceKey)
+    if (sourceIndex >= 0) {
+      const [item] = page.items.splice(sourceIndex, 1)
+      if (item?.type === 'app') {
+        sourcePageIndex = pageIndex
+        sourceItem = item
+      }
+    }
+  }
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+    const page = pages[pageIndex]
+    const targetIndex = page.items.findIndex(item => item.type === 'app' && item.key === targetKey)
+    if (targetIndex >= 0) {
+      const [item] = page.items.splice(targetIndex, 1)
+      if (item?.type === 'app') {
+        targetPageIndex = pageIndex
+        targetItem = item
+      }
+      break
+    }
+  }
+  const sourceDockIndex = dock.indexOf(sourceKey)
+  if (!sourceItem && sourceDockIndex >= 0) sourceItem = createAppItem(sourceKey, 0, 0)
+  if (!sourceItem || !targetItem || targetPageIndex < 0) return normalized
+
+  if (sourceDockIndex >= 0) dock.splice(sourceDockIndex, 1)
+  const targetDockIndex = dock.indexOf(targetKey)
+  if (targetDockIndex >= 0) dock.splice(targetDockIndex, 1)
+
+  if (sourcePageIndex >= 0 && sourcePageIndex !== targetPageIndex) {
+    const packed = packFlowItems(sortItemsByVisualOrder(pages[sourcePageIndex].items))
+    if (packed.overflow.length) return normalized
+    pages[sourcePageIndex].items = packed.items
+  }
+
+  const targetSequence = sortItemsByVisualOrder(pages[targetPageIndex].items)
+  const insertionIndex = Math.min(
+    targetSequence.length,
+    targetSequence.findIndex(item => visualOrderValue(item) >= visualOrderValue(targetItem)) >= 0
+      ? targetSequence.findIndex(item => visualOrderValue(item) >= visualOrderValue(targetItem))
+      : targetSequence.length
+  )
+  const folder = createFolderItem([targetKey, sourceKey], targetItem.x, targetItem.y, name)
+  targetSequence.splice(insertionIndex, 0, folder)
+  const packedTarget = packFlowItems(targetSequence)
+  if (packedTarget.overflow.length) return normalized
+  pages[targetPageIndex].items = packedTarget.items
+
+  const compacted = compactLayoutPages(pages)
+  return normalizeHomeAppearance({
+    ...normalized,
+    homeAppKeys: collectPageAppKeys(compacted),
+    homePageKeys: deriveLegacyPageKeys(compacted),
+    homeLayoutPages: compacted,
+    dockAppKeys: dock
+  })
+}
+
+export function addHomeAppToFolder(
+  value: HomeAppearancePreferences,
+  appKey: HomeAppKey,
+  folderId: string
+): HomeAppearancePreferences {
+  const normalized = normalizeHomeAppearance(value)
+  const pages = normalized.homeLayoutPages.map(page => ({ items: page.items.map(item => ({ ...item, ...(item.type === 'folder' ? { appKeys: [...item.appKeys] } : {}) })) as HomeLayoutItem[] }))
+  const dock = [...normalized.dockAppKeys]
+  let sourcePageIndex = -1
+  let sourceItem: HomeLayoutAppItem | undefined
+  let folder: HomeLayoutFolderItem | undefined
+
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+    const page = pages[pageIndex]
+    const folderItem = page.items.find(item => item.type === 'folder' && item.id === folderId)
+    if (folderItem?.type === 'folder') folder = folderItem
+    const appIndex = page.items.findIndex(item => item.type === 'app' && item.key === appKey)
+    if (appIndex >= 0) {
+      const [item] = page.items.splice(appIndex, 1)
+      if (item?.type === 'app') {
+        sourcePageIndex = pageIndex
+        sourceItem = item
+      }
+    }
+  }
+  if (!folder || folder.appKeys.includes(appKey)) return normalized
+  const dockIndex = dock.indexOf(appKey)
+  if (!sourceItem && dockIndex < 0) return normalized
+  if (dockIndex >= 0) dock.splice(dockIndex, 1)
+  folder.appKeys = [...folder.appKeys, appKey]
+
+  if (sourcePageIndex >= 0) {
+    const packed = packFlowItems(sortItemsByVisualOrder(pages[sourcePageIndex].items))
+    if (packed.overflow.length) return normalized
+    pages[sourcePageIndex].items = packed.items
+  }
+
+  const compacted = compactLayoutPages(pages)
+  return normalizeHomeAppearance({
+    ...normalized,
+    homeAppKeys: collectPageAppKeys(compacted),
+    homePageKeys: deriveLegacyPageKeys(compacted),
+    homeLayoutPages: compacted,
+    dockAppKeys: dock
+  })
+}
+
+export function removeHomeAppFromFolder(
+  value: HomeAppearancePreferences,
+  folderId: string,
+  appKey: HomeAppKey,
+  destinationPageIndex = 0
+): HomeAppearancePreferences {
+  const normalized = normalizeHomeAppearance(value)
+  const pages = normalized.homeLayoutPages.map(page => ({ items: page.items.map(item => ({ ...item, ...(item.type === 'folder' ? { appKeys: [...item.appKeys] } : {}) })) as HomeLayoutItem[] }))
+  let folderPageIndex = -1
+  let folderIndex = -1
+  let folder: HomeLayoutFolderItem | undefined
+
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+    const index = pages[pageIndex].items.findIndex(item => item.type === 'folder' && item.id === folderId)
+    if (index < 0) continue
+    const item = pages[pageIndex].items[index]
+    if (item?.type !== 'folder' || !item.appKeys.includes(appKey)) return normalized
+    folderPageIndex = pageIndex
+    folderIndex = index
+    folder = item
+    break
+  }
+  if (!folder || folderPageIndex < 0 || folderIndex < 0) return normalized
+
+  folder.appKeys = folder.appKeys.filter(key => key !== appKey)
+  if (folder.appKeys.length === 1) {
+    const remaining = folder.appKeys[0]
+    pages[folderPageIndex].items.splice(folderIndex, 1, createAppItem(remaining, folder.x, folder.y))
+  } else if (folder.appKeys.length === 0) {
+    pages[folderPageIndex].items.splice(folderIndex, 1)
+  }
+
+  const targetPageIndex = ensurePage(pages, Math.max(0, destinationPageIndex))
+  let actualTargetPage = targetPageIndex
+  let fit = findFirstFit(pages[targetPageIndex].items, 1, 1)
+  if (!fit) {
+    actualTargetPage = folderPageIndex
+    fit = findFirstFit(pages[folderPageIndex]?.items ?? [], 1, 1)
+  }
+  if (!fit) return normalized
+  pages[actualTargetPage].items.push(createAppItem(appKey, fit.x, fit.y))
+
+  const compacted = compactLayoutPages(pages)
+  return normalizeHomeAppearance({
+    ...normalized,
+    homeAppKeys: collectPageAppKeys(compacted),
+    homePageKeys: deriveLegacyPageKeys(compacted),
+    homeLayoutPages: compacted
+  })
+}
+
+export function renameHomeFolder(
+  value: HomeAppearancePreferences,
+  folderId: string,
+  name: string
+): HomeAppearancePreferences {
+  const normalized = normalizeHomeAppearance(value)
+  const nextName = name.trim().slice(0, 24) || '文件夹'
+  const pages = normalized.homeLayoutPages.map(page => ({
+    items: page.items.map(item => item.type === 'folder' && item.id === folderId ? { ...item, name: nextName } : { ...item })
+  }))
+  return normalizeHomeAppearance({ ...normalized, homeLayoutPages: pages })
+}
+
 export function removeHomeLayoutPages(
   value: HomeAppearancePreferences,
   pageIndexes: readonly number[]
@@ -648,9 +904,7 @@ export function removeHomeLayoutPages(
       .filter((_, index) => !removed.has(index))
       .map(page => ({ items: page.items.map(item => ({ ...item })) }))
   )
-  const homeAppKeys = pages.flatMap(page => page.items
-    .filter((item): item is HomeLayoutAppItem => item.type === 'app')
-    .map(item => item.key))
+  const homeAppKeys = collectPageAppKeys(pages)
   const homeWidgetKeys = pages.flatMap(page => page.items
     .filter((item): item is HomeLayoutWidgetItem => item.type === 'widget')
     .map(item => item.key))
@@ -779,7 +1033,7 @@ export function moveHomeAppPlacement(
   const compacted = compactLayoutPages(pages)
   return normalizeHomeAppearance({
     ...normalized,
-    homeAppKeys: compacted.flatMap(page => page.items.filter((item): item is HomeLayoutAppItem => item.type === 'app').map(item => item.key)),
+    homeAppKeys: collectPageAppKeys(compacted),
     homePageKeys: deriveLegacyPageKeys(compacted),
     homeLayoutPages: compacted,
     dockAppKeys: dock
@@ -891,7 +1145,7 @@ export async function loadHomeAppearance(worldId: string): Promise<HomeAppearanc
     homeLayoutRevision: row?.homeLayoutRevision
   })
 
-  // Launcher V8 自愈：历史版本可能把临时空页/旧 revision 留在 IndexedDB。
+  // Launcher V9 自愈：历史版本可能把临时空页/旧 revision 留在 IndexedDB。
   // 读取时已经会归一化；这里把归一化结果回写一次，避免下一次启动继续携带幽灵页。
   if (row) {
     const storedPages = Array.isArray(row.homeLayoutPages) ? row.homeLayoutPages : []
@@ -948,9 +1202,7 @@ export function normalizeHomeAppearance(value: HomeAppearanceInput): HomeAppeara
   // 无论来自旧数据、迁移结果还是当前写入，都必须经过最终空页压缩。
   // 这样中间空页、尾部空页和历史临时页都不可能进入稳定 HomeLayout。
   const homeLayoutPages = compactLayoutPages(migratedPages)
-  const homeAppKeys = homeLayoutPages.flatMap(page => page.items
-    .filter((item): item is HomeLayoutAppItem => item.type === 'app')
-    .map(item => item.key))
+  const homeAppKeys = collectPageAppKeys(homeLayoutPages)
   const resolvedWidgetKeys = homeLayoutPages.flatMap(page => page.items
     .filter((item): item is HomeLayoutWidgetItem => item.type === 'widget')
     .map(item => item.key))
