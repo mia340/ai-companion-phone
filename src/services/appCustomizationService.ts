@@ -35,7 +35,7 @@ export interface HomeWidgetSettings {
 export const HOME_GRID_COLUMNS = 4
 export const HOME_GRID_ROWS = 6
 export const MAX_HOME_PAGES = 8
-export const HOME_LAYOUT_REVISION = 10
+export const HOME_LAYOUT_REVISION = 11
 
 export interface HomeAppDefinition {
   key: HomeAppKey
@@ -273,7 +273,7 @@ const homeLayoutPageSchema = z.object({ items: z.array(homeLayoutItemSchema) }).
   }
 })
 
-/** Launcher Grid V9 的正式持久化 Schema（App / Widget / Folder）。 */
+/** Launcher Grid V11 的正式持久化 Schema（App / Widget / Folder）。 */
 export const homeLayoutPagesSchema = z.array(homeLayoutPageSchema).min(1).max(MAX_HOME_PAGES)
 
 export function assertHomeLayoutPages(value: unknown): asserts value is HomeLayoutPage[] {

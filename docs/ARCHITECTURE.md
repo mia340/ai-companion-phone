@@ -716,3 +716,10 @@ HomeLayout Revision 9 在 `app | widget` 之外新增 `folder` Grid Item。Folde
 ## V0.5.0-alpha.5.1.17 · Folder Runtime V2
 
 Launcher 的 Folder 不再是单向容器。文件夹成员拖拽使用 `originFolderId` 标记来源，在 UI 层复用全局 Pointer 生命周期，在 Service 层通过 `moveHomeFolderAppToGrid()` / `moveHomeFolderAppToDock()` 完成先抽离、再进入统一 Grid/Dock Runtime 的原子转换。文件夹面板内可用 `reorderHomeFolderApps()` 进行插入排序；离开面板后 Overlay 收起，指针继续命中真实主屏。
+
+
+## V0.5.0-alpha.5.1.21 · Launcher Ghost Page State Machine / Inspector V3
+
+Launcher 不再把“DOM 有盒子”当成“用户看得见”。App 使用真实 icon、Folder 使用 tile、Widget 使用自身背景作为绘制证据。当前页连续两次没有真实绘制证据时：先尝试 `collapseHomeLayoutPageIntoPrevious()` 无损折叠与 reflow；仍失败则把原始 page JSON 写入本机恢复槽，再从 Launcher 归属中回收该页。Underlying App/Character/Chat 数据不删除。
+
+WorldBook Debug Trace 继续向可解释 Context Compiler 演进：逐条 decision 记录 activation kind、match score、recursion depth、estimated tokens、priority/insertion order/position/probability。Prompt Debug 的 Context Inspector 同时把 `promptSections` 映射为字符数与近似 token，便于答辩说明“某轮上下文为何膨胀、哪一类资源占预算”。

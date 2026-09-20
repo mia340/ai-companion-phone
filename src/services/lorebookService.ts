@@ -46,6 +46,14 @@ export interface LorebookEngineDebugDecision {
   title: string
   status: LorebookDecisionStatus
   reason: string
+  activationKind?: LorebookActivationKind
+  matchScore?: number
+  recursionDepth?: number
+  estimatedTokens?: number
+  priority?: number
+  insertionOrder?: number
+  position?: number | string
+  probability?: number
 }
 
 export interface LorebookEngineDebug {
@@ -791,22 +799,35 @@ export async function buildLorebookPrompt(options: {
   const explicitBudgets = [...books.values()].map(book => book.tokenBudget || 0).filter(value => value > 0)
   const estimatedUsedTokens = activated.reduce((sum, item) => sum + item.estimatedTokens, 0)
   const routingById = new Map(routingDecisions.map(item => [item.id, item]))
+  const activatedDecisionById = new Map(activated.map(item => [item.id, item]))
+  const deferredDecisionById = new Map(deferred.map(item => [item.id, item]))
   const engineDecisions: LorebookEngineDebugDecision[] = entries
     .filter(item => item.enabled)
     .map(item => {
       const routing = routingById.get(item.id)
+      const candidate = activatedDecisionById.get(item.id) || deferredDecisionById.get(item.id)
+      const common = {
+        id: item.id,
+        title: item.title,
+        activationKind: candidate?.activationKind,
+        matchScore: candidate?.matchScore,
+        recursionDepth: candidate?.recursionDepth,
+        estimatedTokens: candidate?.estimatedTokens,
+        priority: item.priority,
+        insertionOrder: item.insertionOrder,
+        position: item.position,
+        probability: item.useProbability === false ? undefined : item.probability
+      }
       if (routing) {
         return {
-          id: item.id,
-          title: item.title,
+          ...common,
           status: routing.status === 'focused' ? 'focused' : routing.status === 'activated' ? 'activated' : 'deferred',
           reason: routing.reason
         }
       }
       const mode = initialLorebookEntryMode(item)
       return {
-        id: item.id,
-        title: item.title,
+        ...common,
         status: 'not-triggered',
         reason: mode === 'keyword'
           ? '本轮扫描范围内未命中主关键词 / 辅助关键词，未进入候选。'

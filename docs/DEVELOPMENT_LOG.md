@@ -1,3 +1,9 @@
+## 2026-09-20 · V0.5.0-alpha.5.1.21
+
+- 对“第二页长期空白但圆点存在”做全链路复查：默认分页、legacy migration、normalize、drag preview、transient page、page dots 和 page compositor 均无固定 2 页规则。
+- 将幽灵页处理改为可恢复的强制自愈：真实 icon/tile 绘制检测 → 无损折叠/reflow → 连续两次空白确认 → 保存本地恢复槽 → 回收页面。
+- WorldBook Inspector 与 Context Inspector 继续深化，使上下文编译可解释性从“有没有”推进到“为何激活、分数/预算/位置、占用多少”。
+
 ## 2026-09-20 · V0.5.0-alpha.5.1.20
 
 本轮集中处理两个真机反馈：音乐 Widget 点击/播放与长期残留的第二页幽灵页。Launcher 的短按不再依赖浏览器 click 派发；音乐组件新增直接播放/暂停控制。幽灵页修复增加真实命中检测，并在前页空位被 Widget 切碎时使用流式打包安全搬回项目。

@@ -1,5 +1,14 @@
 # Changelog
 
+## V0.5.0-alpha.5.1.21
+
+- Launcher Grid V12：对持续残留的第二页执行完整状态审计；确认默认分页最少页数仍为 1，没有固定两页常量。
+- 视觉空白页检测改为采样真实 icon/tile，而不是透明 shell；连续两次确认空白后，先尝试无损 reflow，再把原始 page JSON 写入本地恢复槽并强制回收 Launcher 页。
+- HomeLayout revision 升至 11，并新增“默认布局不会硬编码第二页 / 强制移除幽灵页不影响其他页”回归测试。
+- WorldBook Activation Inspector V3 增加 activation kind、match score、recursion depth、estimated tokens、priority/order/position/probability。
+- Context Inspector V2 增加各 Context 来源字符数与近似 token。
+- IndexedDB V18 / Backup V12 不变。
+
 ## V0.5.0-alpha.5.1.20
 
 - Launcher 普通短按改由 Pointer Runtime 直接执行，修复 Widget/App 点击被 pointerup 吞掉的问题。

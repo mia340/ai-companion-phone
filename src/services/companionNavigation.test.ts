@@ -422,4 +422,36 @@ describe('知间桌面入口与布局', () => {
     ]))
   })
 
+  it('默认桌面和归一化都不会硬编码第二页', () => {
+    const normalized = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile'],
+      homeWidgetKeys: [],
+      dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+    expect(normalized.homeLayoutPages).toHaveLength(1)
+    expect(normalized.homePageKeys).toHaveLength(1)
+  })
+
+  it('强制移除幽灵页只移除桌面布局归属，不影响其他页项目', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['music', 'profile'],
+      homeWidgetKeys: [],
+      homeLayoutPages: [
+        { items: [{ id: 'app:music', type: 'app', key: 'music', x: 0, y: 0, w: 1, h: 1 }] },
+        { items: [{ id: 'app:profile', type: 'app', key: 'profile', x: 0, y: 0, w: 1, h: 1 }] }
+      ],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+    const repaired = removeHomeLayoutPages(current, [1])
+    expect(repaired.homeLayoutPages).toHaveLength(1)
+    expect(repaired.homeLayoutPages[0].items.map(item => item.id)).toEqual(['app:music'])
+    expect(repaired.homeAppKeys).toEqual(['music'])
+  })
+
 })

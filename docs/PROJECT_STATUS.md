@@ -1,18 +1,29 @@
 # AI Companion Phone · 当前项目状态
 
-更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.20**
+更新于：**2026-09-20**  
+当前版本：**V0.5.0-alpha.5.1.21**
 
 ```text
-App：0.5.0-alpha.5.1.20
-Launcher：Grid V11（Pointer Tap + Music Widget Player + Ghost Page Reflow Repair）
+App：0.5.0-alpha.5.1.21
+Launcher：Grid V12（Ghost Page Quarantine + Recovery Snapshot + Inspector V3）
 IndexedDB：V18
 Backup：V12
-测试定义：41 files / 343 it-test declarations
+测试定义：41 files / 345 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
+
+
+## 0. 本轮 alpha.5.1.21 重点
+
+- **幽灵第二页最终兜底**：完整审计默认页、legacy page、normalize、transient page、page dots、compositor 后确认没有任何“固定两页”规则；对视觉空白但数据非空的页面采用“两次确认 → 安全折叠 → 本地恢复槽 → 强制回收”的状态机。
+- **不再用透明 shell 证明“页面可见”**：App 改采样真实 `.app-icon`，Folder 采样 `.hm-folder-tile`，Widget 采样自身背景，避免透明布局盒误判成已绘制项目。
+- **幽灵页恢复保险**：强制回收前把完整 page JSON 保存到本机 `companion-home-ghost-page:<worldId>` 恢复槽；只移除 Launcher 归属，不删除角色、聊天、音乐或其他业务数据。
+- **HomeLayout revision 11**：启动会再次归一化历史布局；默认页和 normalize 新增回归测试，明确没有硬编码第二页。
+- **WorldBook Activation Inspector V3**：逐条判定新增 activation kind、match score、递归层、估算 token、priority/order/position/probability。
+- **Context Inspector V2**：基于本轮 promptSections 显示各 Context 来源的字符数与近似 token，而不是只显示条目数。
+- 测试定义：41 文件 / 345 声明（最终以 Windows `npm run verify` 输出为准）。
 
 ## 0. 本轮 alpha.5.1.20 重点
 

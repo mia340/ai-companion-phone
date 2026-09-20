@@ -709,7 +709,20 @@ export interface PromptDebugTrace {
     delayBlocked: string[]
     groupDropped: string[]
     depthInjections: Array<{ title: string; depth: number; role: 'system' | 'user' | 'assistant' }>
-    decisions?: Array<{ id: string; title: string; status: 'focused' | 'activated' | 'deferred' | 'not-triggered'; reason: string }>
+    decisions?: Array<{
+      id: string
+      title: string
+      status: 'focused' | 'activated' | 'deferred' | 'not-triggered'
+      reason: string
+      activationKind?: 'focus' | 'constant' | 'keyword' | 'sticky' | 'recursive' | 'session'
+      matchScore?: number
+      recursionDepth?: number
+      estimatedTokens?: number
+      priority?: number
+      insertionOrder?: number
+      position?: number | string
+      probability?: number
+    }>
   }
   /** Diagnostics from the API response; no raw headers, key, gateway text, or response body. */
   apiResponseDiagnostics?: {

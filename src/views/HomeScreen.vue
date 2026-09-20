@@ -126,6 +126,8 @@ let minuteTimer: number | undefined
 let repairingRenderedPages = false
 let longPressStartX = 0
 let longPressStartY = 0
+const blankPageRepairStrikes = new Map<string, number>()
+const GHOST_PAGE_RECOVERY_PREFIX = 'companion-home-ghost-page:'
 
 const renderedAppearance = computed(() => draggingId.value && dragPreviewAppearance.value ? dragPreviewAppearance.value : appearance.value)
 const actualPages = computed<HomeLayoutPage[]>(() => {
@@ -471,26 +473,11 @@ async function persistAppearance(next: HomeAppearancePreferences) {
 
 async function repairRenderedEmptyPages() {
   if (repairingRenderedPages || editMode.value || draggingId.value || dragPreviewAppearance.value) return
-  await nextTick()
-  const viewport = pageViewport.value
-  if (!viewport) return
-
-  const pageElements = Array.from(viewport.querySelectorAll<HTMLElement>('.hm-page:not(.is-transient)'))
+  // 稳定 HomeLayout 理论上不会含 items=[] 的页；这里仅清理历史脏数据。
+  // 不再根据“离屏页面的 DOM 盒子”判断可见性，否则横向分页时会把正常离屏页误判。
   const emptyIndexes = appearance.value.homeLayoutPages
-    .map((page, index) => {
-      if (page.items.length === 0) return index
-      const pageElement = pageElements[index]
-      if (!pageElement) return -1
-      const renderedItems = Array.from(pageElement.querySelectorAll<HTMLElement>('[data-launcher-item]'))
-      const hasVisibleItem = renderedItems.some(element => {
-        const style = window.getComputedStyle(element)
-        const rect = element.getBoundingClientRect()
-        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0.01 && rect.width > 1 && rect.height > 1
-      })
-      return hasVisibleItem ? -1 : index
-    })
+    .map((page, index) => page.items.length === 0 ? index : -1)
     .filter(index => index >= 0)
-
   if (!emptyIndexes.length) return
   repairingRenderedPages = true
   try {
@@ -506,18 +493,28 @@ async function repairRenderedEmptyPages() {
 }
 
 
+function launcherItemVisualProofTarget(element: HTMLElement) {
+  if (element.classList.contains('hm-app-shell')) {
+    return element.querySelector<HTMLElement>('.app-icon') || element.querySelector<HTMLElement>('.hm-tile-wrap') || element
+  }
+  if (element.classList.contains('hm-folder-shell')) {
+    return element.querySelector<HTMLElement>('.hm-folder-tile') || element
+  }
+  return element
+}
+
 function launcherItemIsActuallyPainted(element: HTMLElement, pageElement: HTMLElement) {
-  const style = window.getComputedStyle(element)
-  const rect = element.getBoundingClientRect()
+  const proof = launcherItemVisualProofTarget(element)
+  const style = window.getComputedStyle(proof)
+  const rect = proof.getBoundingClientRect()
   const pageRect = pageElement.getBoundingClientRect()
   const intersectsPage = rect.right > pageRect.left + 1 && rect.left < pageRect.right - 1 && rect.bottom > pageRect.top + 1 && rect.top < pageRect.bottom - 1
   if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) <= 0.05 || rect.width <= 1 || rect.height <= 1 || !intersectsPage) return false
 
-  // getBoundingClientRect 只能证明“有布局盒子”，不能证明 Chromium 真的把它画在最上层。
-  // 对当前页采样命中点：如果元素/其子元素在中心和四个内缩点都无法被 elementFromPoint 命中，
-  // 就把它视为合成层幽灵，而不是一个真正可见的桌面项目。
-  const insetX = Math.min(12, rect.width * 0.2)
-  const insetY = Math.min(12, rect.height * 0.2)
+  // 透明 shell 本身能被 elementFromPoint 命中，但不代表图标真的画出来。
+  // App / Folder 改为采样实际 icon/tile；Widget 自己有可见背景，因此直接采样 Widget。
+  const insetX = Math.min(10, rect.width * 0.2)
+  const insetY = Math.min(10, rect.height * 0.2)
   const samples = [
     [rect.left + rect.width / 2, rect.top + rect.height / 2],
     [rect.left + insetX, rect.top + insetY],
@@ -528,8 +525,38 @@ function launcherItemIsActuallyPainted(element: HTMLElement, pageElement: HTMLEl
   return samples.some(([x, y]) => {
     if (x < pageRect.left || x > pageRect.right || y < pageRect.top || y > pageRect.bottom) return false
     const top = document.elementFromPoint(x, y)
-    return Boolean(top && (top === element || element.contains(top)))
+    return Boolean(top && (top === proof || proof.contains(top)))
   })
+}
+
+function ghostPageSignature(page: HomeLayoutPage, index: number) {
+  return `${index}:${page.items.map(item => `${item.id}@${item.x},${item.y},${item.w},${item.h}`).join('|')}`
+}
+
+function backupGhostPageForRecovery(page: HomeLayoutPage, index: number) {
+  try {
+    localStorage.setItem(`${GHOST_PAGE_RECOVERY_PREFIX}${worldId.value}`, JSON.stringify({
+      version: 1,
+      appVersion: '0.5.0-alpha.5.1.21',
+      capturedAt: new Date().toISOString(),
+      pageIndex: index,
+      page
+    }))
+  } catch {
+    // Recovery 是额外保险；浏览器禁用 localStorage 时不阻断 Launcher 自愈。
+  }
+}
+
+async function forceQuarantineBlankPage(index: number) {
+  const page = appearance.value.homeLayoutPages[index]
+  if (!page || index <= 0) return false
+  backupGhostPageForRecovery(page, index)
+  const next = removeHomeLayoutPages(appearance.value, [index])
+  if (JSON.stringify(next.homeLayoutPages) === JSON.stringify(appearance.value.homeLayoutPages)) return false
+  appearance.value = await saveHomeAppearance(worldId.value, next)
+  transientBlankPage.value = false
+  clampCurrentPageToPersistedLayout()
+  return true
 }
 
 async function repairCurrentBlankPage(force = false) {
@@ -542,24 +569,43 @@ async function repairCurrentBlankPage(force = false) {
   if (!pageElement) return
   const renderedItems = Array.from(pageElement.querySelectorAll<HTMLElement>('[data-launcher-item]'))
   const hasVisibleItem = renderedItems.some(element => launcherItemIsActuallyPainted(element, pageElement))
-  if (hasVisibleItem && !force) return
+  const page = appearance.value.homeLayoutPages[index]
+  const signature = ghostPageSignature(page, index)
+  if (hasVisibleItem && !force) {
+    blankPageRepairStrikes.delete(signature)
+    return
+  }
 
   repairingRenderedPages = true
   try {
-    const page = appearance.value.homeLayoutPages[index]
     const repaired = page?.items.length
       ? collapseHomeLayoutPageIntoPrevious(appearance.value, index)
       : removeHomeLayoutPages(appearance.value, [index])
 
     if (JSON.stringify(repaired.homeLayoutPages) !== JSON.stringify(appearance.value.homeLayoutPages)) {
       appearance.value = await saveHomeAppearance(worldId.value, repaired)
+      blankPageRepairStrikes.delete(signature)
       transientBlankPage.value = false
       clampCurrentPageToPersistedLayout()
+      return
     }
+
+    // 到这里说明：页面视觉上是空白，但“安全搬回前页”仍无法完成。
+    // 连续两次确认后，把这页从 Launcher 隐藏/回收；原始 page JSON 会先写入本地恢复槽，
+    // 所以不会因为 UI 自愈而不可逆丢失 underlying App/Widget 配置。
+    const strikes = force ? 2 : (blankPageRepairStrikes.get(signature) || 0) + 1
+    blankPageRepairStrikes.set(signature, strikes)
+    if (strikes >= 2) {
+      await forceQuarantineBlankPage(index)
+      blankPageRepairStrikes.delete(signature)
+      return
+    }
+    window.setTimeout(() => { void repairCurrentBlankPage() }, 420)
   } finally {
     repairingRenderedPages = false
   }
 }
+
 
 async function removeHomeApp(key: HomeAppKey) {
   await persistAppearance({
@@ -1720,6 +1766,7 @@ onUnmounted(() => {
               <button v-if="index === currentPage && index > 0" type="button" class="sheet-action secondary" @click="repairCurrentBlankPage(true)">修复当前幽灵页（保留项目）</button>
             </div>
             <p class="sheet-note">当前页：{{ currentPage + 1 }} / {{ actualPages.length }} · revision {{ appearance.homeLayoutRevision }}</p>
+            <p class="sheet-note">幽灵页修复失败时会先把原始 page JSON 保存到本机恢复槽，再从 Launcher 回收，不会删除角色、聊天或 App 数据。</p>
           </div>
 
           <div v-else-if="activeSheet === 'pages'" class="page-overview">
