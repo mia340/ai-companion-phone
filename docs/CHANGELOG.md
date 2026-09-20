@@ -1,5 +1,12 @@
 # Changelog
 
+## V0.5.0-alpha.5.1.20
+
+- Launcher 普通短按改由 Pointer Runtime 直接执行，修复 Widget/App 点击被 pointerup 吞掉的问题。
+- “一起听”组件恢复明确播放/暂停按钮：有可播放 MusicState 时直接控制音频；无音源时进入音乐 App。
+- 幽灵页修复升级：当前页通过 elementFromPoint 验证真实绘制，不能只看 DOM 布局盒。
+- 幽灵页合并在空位碎片化时允许安全 reflow 前页，确保总空间足够时页面可以真正回收且不丢项目。
+
 ## V0.5.0-alpha.5.1.19
 
 - Launcher Grid V10：不再继续盲删“空数组页”，增加幽灵页诊断与安全回收。

@@ -1015,21 +1015,55 @@ export function collapseHomeLayoutPageIntoPrevious(
   )
 
   // 优先放到紧邻的上一页，再向更前面的页面寻找空间；不自动新建页面。
+  let directPlacementSucceeded = true
+  const directBefore = before.map(page => ({
+    items: page.items.map(item => ({ ...item, ...(item.type === 'folder' ? { appKeys: [...item.appKeys] } : {}) })) as HomeLayoutItem[]
+  }))
   for (const item of moving) {
     let placed = false
-    for (let target = before.length - 1; target >= 0; target -= 1) {
-      const fit = findFirstFit(before[target].items, item.w, item.h)
+    for (let target = directBefore.length - 1; target >= 0; target -= 1) {
+      const fit = findFirstFit(directBefore[target].items, item.w, item.h)
       if (!fit) continue
-      before[target].items.push({ ...item, x: fit.x, y: fit.y } as HomeLayoutItem)
+      directBefore[target].items.push({ ...item, x: fit.x, y: fit.y } as HomeLayoutItem)
       placed = true
       break
     }
-    if (!placed) return normalized
+    if (!placed) {
+      directPlacementSucceeded = false
+      break
+    }
   }
+
+  if (directPlacementSucceeded) {
+    return normalizeHomeAppearance({
+      ...normalized,
+      homeLayoutPages: compactLayoutPages([...directBefore, ...after])
+    })
+  }
+
+  // 如果总空间足够，但现有坐标把空位切得太碎（例如 4×1 / 4×2 Widget 无法直接塞入），
+  // 幽灵页会一直保留。这里仅在“修复视觉空白页”这条显式修复路径里，允许把前面页面
+  // 与幽灵页项目按视觉顺序重新打包；仍然不创建新页，也绝不丢项目。
+  let remaining = [
+    ...before.flatMap(page => sortItemsByVisualOrder(page.items)),
+    ...moving
+  ].map(item => ({ ...item, ...(item.type === 'folder' ? { appKeys: [...item.appKeys] } : {}) }) as HomeLayoutItem)
+
+  const repackedBefore: HomeLayoutPage[] = []
+  for (let target = 0; target < before.length; target += 1) {
+    const packed = packFlowItems(remaining)
+    repackedBefore.push({ items: packed.items })
+    remaining = packed.overflow
+    if (!remaining.length) {
+      // 保留原本已有的前置页面数量没有意义；尾部空页交给 compactLayoutPages 回收。
+      break
+    }
+  }
+  if (remaining.length) return normalized
 
   return normalizeHomeAppearance({
     ...normalized,
-    homeLayoutPages: compactLayoutPages([...before, ...after])
+    homeLayoutPages: compactLayoutPages([...repackedBefore, ...after])
   })
 }
 

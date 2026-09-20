@@ -395,4 +395,31 @@ describe('知间桌面入口与布局', () => {
     expect(repaired.homeLayoutPages[0].items.map(item => item.type === 'app' ? item.key : item.id)).toEqual(expect.arrayContaining(['music', 'profile']))
   })
 
+  it('幽灵页修复在空位碎片化时会先安全重排前页再回收页面', () => {
+    const current = normalizeHomeAppearance({
+      homeAppKeys: ['profile', 'memory', 'backup'],
+      homeWidgetKeys: ['music'],
+      homeLayoutPages: [
+        { items: [
+          { id: 'app:profile', type: 'app', key: 'profile', x: 0, y: 0, w: 1, h: 1 },
+          { id: 'app:memory', type: 'app', key: 'memory', x: 0, y: 2, w: 1, h: 1 },
+          { id: 'app:backup', type: 'app', key: 'backup', x: 0, y: 4, w: 1, h: 1 }
+        ] },
+        { items: [
+          { id: 'widget:music', type: 'widget', key: 'music', x: 0, y: 0, w: 4, h: 2 }
+        ] }
+      ],
+      dockAppKeys: ['banxin'],
+      iconScale: 1,
+      showAppLabels: true,
+      widgetStyle: 'frosted'
+    })
+
+    const repaired = collapseHomeLayoutPageIntoPrevious(current, 1)
+    expect(repaired.homeLayoutPages).toHaveLength(1)
+    expect(repaired.homeLayoutPages[0].items.map(item => item.id)).toEqual(expect.arrayContaining([
+      'app:profile', 'app:memory', 'app:backup', 'widget:music'
+    ]))
+  })
+
 })

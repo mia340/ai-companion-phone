@@ -59,6 +59,9 @@ const latestCharacterName = ref('')
 const latestCharacterAvatar = ref('🌍')
 const latestConversationId = ref('')
 const musicState = ref<MusicState>()
+const musicAudio = ref<HTMLAudioElement | null>(null)
+const musicPlaybackActive = ref(false)
+const musicPlaybackError = ref('')
 const customIcons = ref<Record<string, string>>({})
 const appearance = ref<HomeAppearancePreferences>(structuredClone(DEFAULT_HOME_APPEARANCE))
 const dragPreviewAppearance = ref<HomeAppearancePreferences>()
@@ -368,7 +371,64 @@ function openWidget(key: HomeWidgetKey) {
     void router.push('/world')
     return
   }
-  if (key === 'music') void router.push('/app/音乐')
+  if (key === 'music') {
+    void router.push('/app/音乐')
+    return
+  }
+}
+
+async function persistLatestMusicState(patch: Partial<Pick<MusicState, 'isPlaying' | 'currentTime'>>) {
+  const current = musicState.value
+  if (!current) return
+  const next: MusicState = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString()
+  }
+  musicState.value = next
+  await db.musicStates.put(next)
+}
+
+async function toggleMusicPlayback(event?: Event) {
+  event?.stopPropagation()
+  if (editMode.value) return
+  const state = musicState.value
+  const audio = musicAudio.value
+  musicPlaybackError.value = ''
+
+  // 还没有可直接播放的音频时，播放键就是“去音乐里选一首”的明确入口。
+  if (!state?.audioUrl || !audio) {
+    openWidget('music')
+    return
+  }
+
+  try {
+    if (audio.getAttribute('src') !== state.audioUrl) {
+      audio.src = state.audioUrl
+      audio.volume = Math.max(0, Math.min(1, Number(state.volume ?? 1)))
+      if (Number.isFinite(state.currentTime) && state.currentTime > 0) audio.currentTime = state.currentTime
+    }
+
+    if (musicPlaybackActive.value && !audio.paused) {
+      audio.pause()
+      musicPlaybackActive.value = false
+      await persistLatestMusicState({ isPlaying: false, currentTime: audio.currentTime || 0 })
+      return
+    }
+
+    await audio.play()
+    musicPlaybackActive.value = true
+    await persistLatestMusicState({ isPlaying: true, currentTime: audio.currentTime || state.currentTime || 0 })
+  } catch {
+    musicPlaybackActive.value = false
+    musicPlaybackError.value = '这首歌暂时不能直接播放，点组件进入音乐页。'
+    await persistLatestMusicState({ isPlaying: false })
+  }
+}
+
+function handleMusicAudioEnded() {
+  musicPlaybackActive.value = false
+  void persistLatestMusicState({ isPlaying: false, currentTime: 0 })
 }
 
 
@@ -446,6 +506,32 @@ async function repairRenderedEmptyPages() {
 }
 
 
+function launcherItemIsActuallyPainted(element: HTMLElement, pageElement: HTMLElement) {
+  const style = window.getComputedStyle(element)
+  const rect = element.getBoundingClientRect()
+  const pageRect = pageElement.getBoundingClientRect()
+  const intersectsPage = rect.right > pageRect.left + 1 && rect.left < pageRect.right - 1 && rect.bottom > pageRect.top + 1 && rect.top < pageRect.bottom - 1
+  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) <= 0.05 || rect.width <= 1 || rect.height <= 1 || !intersectsPage) return false
+
+  // getBoundingClientRect 只能证明“有布局盒子”，不能证明 Chromium 真的把它画在最上层。
+  // 对当前页采样命中点：如果元素/其子元素在中心和四个内缩点都无法被 elementFromPoint 命中，
+  // 就把它视为合成层幽灵，而不是一个真正可见的桌面项目。
+  const insetX = Math.min(12, rect.width * 0.2)
+  const insetY = Math.min(12, rect.height * 0.2)
+  const samples = [
+    [rect.left + rect.width / 2, rect.top + rect.height / 2],
+    [rect.left + insetX, rect.top + insetY],
+    [rect.right - insetX, rect.top + insetY],
+    [rect.left + insetX, rect.bottom - insetY],
+    [rect.right - insetX, rect.bottom - insetY]
+  ]
+  return samples.some(([x, y]) => {
+    if (x < pageRect.left || x > pageRect.right || y < pageRect.top || y > pageRect.bottom) return false
+    const top = document.elementFromPoint(x, y)
+    return Boolean(top && (top === element || element.contains(top)))
+  })
+}
+
 async function repairCurrentBlankPage(force = false) {
   if (repairingRenderedPages || editMode.value || draggingId.value) return
   await nextTick()
@@ -455,13 +541,7 @@ async function repairCurrentBlankPage(force = false) {
   const pageElement = viewport?.querySelector<HTMLElement>(`.hm-page[data-launcher-page="${index}"]:not(.is-transient)`)
   if (!pageElement) return
   const renderedItems = Array.from(pageElement.querySelectorAll<HTMLElement>('[data-launcher-item]'))
-  const pageRect = pageElement.getBoundingClientRect()
-  const hasVisibleItem = renderedItems.some(element => {
-    const style = window.getComputedStyle(element)
-    const rect = element.getBoundingClientRect()
-    const intersectsPage = rect.right > pageRect.left + 1 && rect.left < pageRect.right - 1 && rect.bottom > pageRect.top + 1 && rect.top < pageRect.bottom - 1
-    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0.05 && rect.width > 1 && rect.height > 1 && intersectsPage
-  })
+  const hasVisibleItem = renderedItems.some(element => launcherItemIsActuallyPainted(element, pageElement))
   if (hasVisibleItem && !force) return
 
   repairingRenderedPages = true
@@ -1024,13 +1104,21 @@ function handlePointerMove(event: PointerEvent) {
 async function finishHomePointer(event?: PointerEvent, commit = true) {
   const pointer = launcherPointer
   if (!pointer) return
+  const tapDistance = event ? Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY) : Number.POSITIVE_INFINITY
+  const shouldActivateTap = Boolean(commit && event && !pointer.active && tapDistance < 8)
   const shouldOpenFolder = Boolean(
-    commit && event && pointer.itemType === 'folder' && pointer.active && !dropTargetKind.value &&
-    Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY) < 8
+    commit && event && pointer.itemType === 'folder' && pointer.active && !dropTargetKind.value && tapDistance < 8
   )
 
   try {
-    if (pointer.active && commit) {
+    if (shouldActivateTap) {
+      // Launcher 自己捕获 pointerup 后，不再依赖浏览器是否继续派发 click。
+      // 这样 App / Widget 的普通短按在鼠标、触屏和 PWA 下都走同一条确定路径。
+      if (pointer.itemType === 'app') openAppKey(pointer.key as HomeAppKey)
+      else if (pointer.itemType === 'widget') openWidget(pointer.key as HomeWidgetKey)
+      else if (pointer.itemType === 'folder') openFolderId.value = pointer.key
+      suppressAppClickUntil = performance.now() + 320
+    } else if (pointer.active && commit) {
       if (dropTargetKind.value === 'folder-order' && pointer.itemType === 'app' && pointer.originFolderId && dropTargetKey.value) {
         await persistAppearance(reorderHomeFolderApps(
           appearance.value,
@@ -1259,6 +1347,7 @@ onUnmounted(() => {
   cancelPageSwipe()
   socialBadgeSubscription?.unsubscribe()
   musicStateSubscription?.unsubscribe()
+  musicAudio.value?.pause()
   if (minuteTimer !== undefined) window.clearInterval(minuteTimer)
   window.removeEventListener('pointermove', handlePointerMove, true)
   window.removeEventListener('pointerup', handlePointerUp, true)
@@ -1271,6 +1360,7 @@ onUnmounted(() => {
   <PhoneFrame status-tone="dark" lock-scroll>
     <section class="hm-root" :class="[{ 'is-editing': editMode }, `theme-${appearance.themePreset}`]">
       <div class="hm-wall" :style="wallpaperStyle"></div>
+      <audio ref="musicAudio" class="hm-music-audio" preload="metadata" @ended="handleMusicAudioEnded"></audio>
 
       <div class="hm-main">
         <div v-if="editMode" class="hm-edit-toolbar">
@@ -1378,10 +1468,18 @@ onUnmounted(() => {
                         <AppIcon icon="music" :size="58" :tones="musicTones" />
                       </div>
                       <div class="music-copy">
-                        <small>{{ musicState?.isPlaying ? '正在播放' : '一起听' }}</small>
+                        <small>{{ musicPlaybackActive ? '正在播放' : '一起听' }}</small>
                         <b>{{ musicState?.title || '把声音留在这个世界里' }}</b>
-                        <span>{{ musicState?.artist || '轻点打开音乐陪伴' }}</span>
+                        <span>{{ musicPlaybackError || musicState?.artist || '点组件进入音乐，播放键可直接控制' }}</span>
                       </div>
+                      <button
+                        v-if="!editMode"
+                        class="music-widget-play"
+                        type="button"
+                        :aria-label="musicPlaybackActive ? '暂停音乐' : '播放音乐'"
+                        @pointerdown.stop
+                        @click.stop="toggleMusicPlayback"
+                      >{{ musicPlaybackActive ? 'Ⅱ' : '▶' }}</button>
                     </template>
 
                     <template v-else-if="item.key === 'calendar'">
@@ -1699,6 +1797,9 @@ onUnmounted(() => {
 .hm-widget.style-frosted{background:rgba(247,251,254,.6);backdrop-filter:blur(24px) saturate(1.12);-webkit-backdrop-filter:blur(24px) saturate(1.12)}
 .hm-widget.style-clear{background:rgba(255,255,255,.22);backdrop-filter:blur(7px) saturate(1.08);-webkit-backdrop-filter:blur(7px) saturate(1.08)}
 .hm-widget.style-solid{background:#f8fbfd}
+.hm-music-audio{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}
+.music-widget-play{position:absolute;right:16px;top:50%;transform:translateY(-50%);width:42px;height:42px;border:0;border-radius:50%;background:rgba(255,255,255,.82);color:#7087ce;display:grid;place-items:center;font-size:16px;box-shadow:0 6px 16px rgba(60,82,110,.1);cursor:pointer}.music-widget-play:active{transform:translateY(-50%) scale(.94)}
+.widget-music .music-copy{padding-right:54px}
 .widget-greeting{position:absolute;left:18px;bottom:38px;font-size:27px;line-height:1;font-weight:760;letter-spacing:-.04em}.widget-date{position:absolute;left:18px;top:17px;color:#6d8292;font-size:11px}.widget-caption{position:absolute;left:18px;bottom:16px;color:#6f8494;font-size:10px}.widget-clock{position:absolute;right:17px;top:14px;font-size:27px;font-weight:620;letter-spacing:-.04em;color:#4c6679}
 .widget-companion,.widget-world{padding:12px 13px;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px}.widget-companion.size-2x2,.widget-world.size-2x2{grid-template-columns:1fr;align-content:space-between;justify-items:start}.widget-copy{display:grid;gap:2px;min-width:0}.widget-copy small,.music-copy small{color:#8396a5;font-size:9px}.widget-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.widget-copy span,.music-copy span{color:#7b8e9d;font-size:9px}.world-orb{display:grid;place-items:center;width:44px;height:44px;border-radius:15px;background:linear-gradient(145deg,#87b8dc,#c4def0);color:white;font-size:27px;box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}
 .widget-music{display:flex;align-items:center;gap:11px;padding:11px 14px}.music-art{display:grid;place-items:center;width:58px;height:58px;flex:0 0 auto}.music-art :deep(.app-icon){transform:scale(.82)}.music-copy{display:grid;gap:3px;min-width:0;flex:1}.music-copy b{font-size:14px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

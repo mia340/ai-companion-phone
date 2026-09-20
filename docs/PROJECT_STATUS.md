@@ -1,25 +1,26 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-18**  
-当前版本：**V0.5.0-alpha.5.1.19**
+当前版本：**V0.5.0-alpha.5.1.20**
 
 ```text
-App：0.5.0-alpha.5.1.19
+App：0.5.0-alpha.5.1.20
+Launcher：Grid V11（Pointer Tap + Music Widget Player + Ghost Page Reflow Repair）
 IndexedDB：V18
 Backup：V12
-测试定义：41 files / 342 it-test declarations
+测试定义：41 files / 343 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
 
-## 0. 本轮 alpha.5.1.17 重点
+## 0. 本轮 alpha.5.1.20 重点
 
-- Folder Runtime V2：文件夹内 App 支持长按拖出到桌面/跨页/Dock，不再只能通过减号移出。
-- 文件夹内部支持拖动插入排序；拖出后仍复用 Launcher Grid 的 insert + reflow / 边缘翻页。
-- 文件夹仅剩 1 个 App 时继续自动解散；拖回原文件夹视为取消，避免解散/重建闪动。
-- 新增 `moveHomeFolderAppToGrid()` / `moveHomeFolderAppToDock()` / `reorderHomeFolderApps()` 及回归测试。
-- 测试定义：41 文件 / 341 声明（最终以 Windows `npm run verify` 输出为准）。
+- Launcher Pointer Tap：普通短按不再依赖浏览器 click，App / Widget 点击由 Runtime 直接激活。
+- “一起听”Widget：主体进入音乐 App；独立播放/暂停按钮可控制已有 MusicState 音频。
+- 幽灵页修复增加真实绘制命中检测，并在前页空位碎片化时执行安全 reflow 后回收页面。
+- 新增碎片化空位下幽灵页折叠回归测试。
+- 测试定义：41 文件 / 343 声明（最终以 Windows `npm run verify` 输出为准）。
 
 ## 0. 本轮 alpha.5.1.15 重点
 
