@@ -1,18 +1,26 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-20**  
-当前版本：**V0.5.0-alpha.5.1.27**
+当前版本：**V0.5.0-alpha.5.2.0**
 
 ```text
-App：0.5.0-alpha.5.1.27
+App：0.5.0-alpha.5.2.0
 Launcher：Grid V13（Layout Inspector V4 + Dock/Home 去重 + DOM 绘制诊断）
 IndexedDB：V18
 Backup：V12
-测试定义：43 files / 366 it-test declarations
+测试定义：44 files / 373 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
+
+## 0. 本轮 alpha.5.2.0 重点
+
+- **ChatRoom Generation Runtime 拆分第一阶段**：把流式回复 placeholder 的创建、增量 patch、140ms 持久化节流、flush、discard、用户停止后的真实输出保留，从 `ChatRoom.vue` 下沉到 `runtime/generation/streamingReplyRuntime.ts`。
+- Vue View 只保留消息列表投影、滚动和最终 reply shaping；流式消息生命周期不再由页面自己维护 persistence timer。
+- 新增 `streamingReplyRuntime.test.ts` 7 条直接测试：首 chunk 建立单一 placeholder、抑制预览、debounce、flush、discard、cancel 保留真实输出、空 placeholder 清理。
+- Provider 失败仍真实上抛；没有本地角色 fallback；IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+- 测试矩阵：44 文件 / 373 tests；最终以 Windows 两次 `npm run verify` 为准。
 
 ## 0. 本轮 alpha.5.1.27 重点
 

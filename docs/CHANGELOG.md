@@ -1,5 +1,12 @@
 # Changelog
 
+## V0.5.0-alpha.5.2.0
+
+- ChatRoom Generation Runtime 拆分第一阶段：新增 `runtime/generation/streamingReplyRuntime.ts`，统一管理流式 assistant placeholder 的 create / patch / debounce persistence / flush / discard / interrupted-preserve 生命周期。
+- `ChatRoom.vue` 不再直接持有 stream persistence timer，也不再自己实现 placeholder CRUD；页面通过 hooks 只同步 Vue 消息列表、streaming id 与滚动。
+- 保持现有 `generationOrchestrator.ts` 的冻结 Generation Context、真实 Provider 错误、Vision fallback 语义不变，不引入任何本地角色化 fallback。
+- 新增 7 条 Streaming Runtime 回归测试；测试矩阵提升到 44 files / 373 tests。IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+
 ## V0.5.0-alpha.5.1.27
 
 - 新增 `lorebookService.test.ts`，直接从公开 `buildLorebookPrompt()` 入口锁定 WorldBook Engine 核心行为，不再只依赖导入解析或语义辅助测试。

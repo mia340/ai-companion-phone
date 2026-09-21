@@ -39,15 +39,18 @@ import {
   persistAlternativeReply,
   persistAssistantContentMessage,
   persistRichAssistantMessage,
-  persistStreamingPlaceholder,
   removeGeneratedMessage
 } from '../runtime/generation/responsePersistenceService'
+import {
+  createStreamingReplyRuntime,
+  createStreamingReplySession,
+  type StreamingReplySession
+} from '../runtime/generation/streamingReplyRuntime'
 import {
   isTokenLimitError,
   ProviderHttpError,
   type ChatRequest,
-  type ChatResponse,
-  type ChatStreamChunk
+  type ChatResponse
 } from '../services/ai/provider'
 import { createProvider } from '../services/ai/providerFactory'
 import { diagnoseApiResponse, diagnoseApiHttpError } from '../services/ai/apiResponseDiagnostics'
@@ -160,7 +163,6 @@ const musicPanelRef = ref<ChatMusicPanelHandle>()
 let abortController: AbortController | undefined
 let manualStopRequested = false
 let noticeTimer: number | undefined
-let streamPersistTimer: number | undefined
 let streamScrollFrame: number | undefined
 let localAudioObjectUrl = ''
 let lastMusicSaveSecond = -1
@@ -948,26 +950,8 @@ async function updateUserMessageState(
 }
 
 
-interface StreamingReplySession {
-  messageId?: string
-  generationId: string
-  rawText: string
-  canonicalText?: string
-  text: string
-  provider: string
-  model: string
-  type: Message['type']
-  conversation: Conversation
-  suppressPreview?: boolean
-  preserveRawOutput?: boolean
-  proactiveSource?: ProactiveSource
-}
-
 function clearStreamTimers() {
-  if (streamPersistTimer !== undefined) {
-    window.clearTimeout(streamPersistTimer)
-    streamPersistTimer = undefined
-  }
+  streamingRuntime.clearPersistenceTimer()
 
   if (streamScrollFrame !== undefined) {
     window.cancelAnimationFrame(streamScrollFrame)
@@ -984,94 +968,26 @@ function scheduleStreamScroll() {
   })
 }
 
-async function ensureStreamingMessage(
-  session: StreamingReplySession
-) {
-  if (session.messageId) return
-
-  const message = await persistStreamingPlaceholder({
-    conversation: session.conversation,
-    senderId: session.conversation.memberIds[0],
-    type: session.type,
-    content: session.text,
-    provider: session.provider,
-    model: session.model,
-    generationId: session.generationId,
-    proactiveSource: session.proactiveSource
-  })
-
-  session.messageId = message.id
-  streamingMessageId.value = message.id
-  messages.value = [...messages.value, message]
-  scheduleStreamScroll()
-}
-
-function scheduleStreamPersistence(
-  session: StreamingReplySession
-) {
-  if (!session.messageId) return
-
-  if (streamPersistTimer !== undefined) {
-    window.clearTimeout(streamPersistTimer)
-  }
-
-  streamPersistTimer = window.setTimeout(() => {
-    streamPersistTimer = undefined
-
-    if (!session.messageId) return
-
-    void patchGeneratedMessage(session.messageId, {
-      content: session.text,
-      provider: session.provider,
-      model: session.model
-    })
-  }, 140)
-}
-
-async function appendStreamChunk(
-  session: StreamingReplySession,
-  chunk: ChatStreamChunk
-) {
-  session.rawText = chunk.text
-  session.text = session.preserveRawOutput ? chunk.text : visibleStreamingText(chunk.text)
-  if (!session.text || session.suppressPreview) return
-
-  await ensureStreamingMessage(session)
-
-  const index = messages.value.findIndex(
-    item => item.id === session.messageId
-  )
-
-  if (index >= 0) {
+const streamingRuntime = createStreamingReplyRuntime({
+  onMessageCreated(message) {
+    messages.value = [...messages.value, message]
+  },
+  onMessagePatched(messageId, patch) {
+    const index = messages.value.findIndex(item => item.id === messageId)
+    if (index < 0) return
     messages.value[index] = {
       ...messages.value[index],
-      content: session.text,
-      provider: session.provider,
-      model: session.model,
-        status: 'pending'
+      ...patch
     }
-  }
-
-  scheduleStreamPersistence(session)
-  scheduleStreamScroll()
-}
-
-async function flushStreamingMessage(
-  session: StreamingReplySession
-) {
-  if (streamPersistTimer !== undefined) {
-    window.clearTimeout(streamPersistTimer)
-    streamPersistTimer = undefined
-  }
-
-  if (!session.messageId) return
-
-  await patchGeneratedMessage(session.messageId, {
-    content: session.text,
-    provider: session.provider,
-    model: session.model
-  })
-}
+  },
+  onMessageRemoved(messageId) {
+    messages.value = messages.value.filter(item => item.id !== messageId)
+  },
+  onStreamingMessageChanged(messageId) {
+    streamingMessageId.value = messageId
+  },
+  onScrollRequested: scheduleStreamScroll
+})
 
 async function finishStreamingMessage(
   session: StreamingReplySession,
@@ -1116,71 +1032,6 @@ async function finishStreamingMessage(
   session.messageId = undefined
   clearStreamTimers()
   await scrollToBottom('auto')
-}
-
-async function discardStreamingMessage(session: StreamingReplySession) {
-  if (streamPersistTimer !== undefined) {
-    window.clearTimeout(streamPersistTimer)
-    streamPersistTimer = undefined
-  }
-  if (session.messageId) {
-    await removeGeneratedMessage(session.messageId)
-    messages.value = messages.value.filter(item => item.id !== session.messageId)
-  }
-  streamingMessageId.value = ''
-  session.messageId = undefined
-  session.text = ''
-  session.rawText = ''
-  clearStreamTimers()
-}
-
-async function preserveInterruptedStream(
-  session: StreamingReplySession,
-  status: 'cancelled' | 'failed',
-  errorText?: string
-) {
-  if (!session.messageId || !session.text.trim()) {
-    if (session.messageId) {
-      await removeGeneratedMessage(session.messageId)
-      messages.value = messages.value.filter(
-        item => item.id !== session.messageId
-      )
-    }
-
-    streamingMessageId.value = ''
-    session.messageId = undefined
-    clearStreamTimers()
-    return false
-  }
-
-  await flushStreamingMessage(session)
-  await patchGeneratedMessage(session.messageId, {
-    content: session.text.trim(),
-    status,
-    errorText,
-    provider: session.provider,
-    model: session.model
-  })
-
-  const index = messages.value.findIndex(
-    item => item.id === session.messageId
-  )
-
-  if (index >= 0) {
-    messages.value[index] = {
-      ...messages.value[index],
-      content: session.text.trim(),
-      status,
-      errorText,
-      provider: session.provider,
-      model: session.model,
-    }
-  }
-
-  streamingMessageId.value = ''
-  session.messageId = undefined
-  clearStreamTimers()
-  return true
 }
 
 function actionMessageType(action: CompanionActionMessage, baseType?: Message['type']): Message['type'] {
@@ -1366,17 +1217,12 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
   const activeCharacter = character.value
   const settings = chatSettings.value
   const generationId = crypto.randomUUID()
-  const streamSession: StreamingReplySession = {
+  const streamSession = createStreamingReplySession({
     generationId,
-    rawText: '',
-    text: '',
-    provider: '',
-    model: '',
-    type: options?.type ?? 'text',
     conversation: activeConversation,
-    suppressPreview: false,
+    type: options?.type,
     proactiveSource: options?.proactiveSource
-  }
+  })
   const useStreaming = settings.streamResponse && !options?.alternativeTargetId
 
   let visualMessage: Message | undefined
@@ -1531,7 +1377,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
         streamSession.model = request.model
         await prepareDebugTrace(activeProvider, request)
       },
-      onDelta: chunk => appendStreamChunk(streamSession, chunk),
+      onDelta: chunk => streamingRuntime.appendChunk(streamSession, chunk),
       onVisionStage: stage => {
         visionStage.value = stage
       },
@@ -1550,7 +1396,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
     if (providerNotice) noticeMessage.value = providerNotice
 
     if (options?.proactivePrompt && /<no_proactive_message\s*\/?\s*>/i.test(response.text)) {
-      await discardStreamingMessage(streamSession)
+      await streamingRuntime.discard(streamSession)
       conversationState.value = await patchConversationState(activeConversation.id, {
         lastProactiveAt: new Date().toISOString()
       })
@@ -2069,7 +1915,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
     }
     if (isAbortError(error)) {
       if (manualStopRequested) {
-        const preserved = await preserveInterruptedStream(
+        const preserved = await streamingRuntime.preserveInterrupted(
           streamSession,
           'cancelled'
         )
@@ -2085,7 +1931,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
           ? '已按你的操作停止生成，已经出现的真实 AI 内容已保留。'
           : '已停止等待回复，可长按消息重新发送。'
       } else {
-        await discardStreamingMessage(streamSession)
+        await streamingRuntime.discard(streamSession)
         await updateUserMessageState(
           options?.sourceMessageId,
           'cancelled',
@@ -2100,7 +1946,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
 
     if (isTokenLimitError(error)) {
       const technical = error.message
-      await discardStreamingMessage(streamSession)
+      await streamingRuntime.discard(streamSession)
       await updateUserMessageState(
         options?.sourceMessageId,
         'failed',
@@ -2127,7 +1973,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       ? error.message
       : '未知错误'
 
-    await discardStreamingMessage(streamSession)
+    await streamingRuntime.discard(streamSession)
 
     await updateUserMessageState(
       options?.sourceMessageId,

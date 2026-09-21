@@ -1,3 +1,10 @@
+
+## V0.5.0-alpha.5.2.0 · ChatRoom Generation Runtime Phase 1
+
+- Extract streamed assistant placeholder lifecycle from `ChatRoom.vue` into `runtime/generation/streamingReplyRuntime.ts`.
+- Preserve real-provider-only semantics, frozen generation context and existing final response shaping.
+- Add 7 runtime regression tests; no database/backup schema migration.
+
 ## V0.5.0-alpha.5.0
 
 Social Runtime V1：持久后台朋友圈、多角色评论串、用户回复角色后继续接话；IndexedDB 升至 V17。详见 `SOCIAL_RUNTIME_V1.md`。
