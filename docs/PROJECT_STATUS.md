@@ -1,18 +1,41 @@
 # AI Companion Phone · 当前项目状态
 
-更新于：**2026-09-20**  
-当前版本：**V0.5.0-alpha.5.2.1**
+更新于：**2026-09-21**  
+当前版本：**V0.5.0-alpha.5.2.4**
 
 ```text
-App：0.5.0-alpha.5.2.1
+App：0.5.0-alpha.5.2.4
 Launcher：Grid V13（Layout Inspector V4 + Dock/Home 去重 + DOM 绘制诊断）
 IndexedDB：V18
 Backup：V12
-测试定义：46 files / 394 it-test declarations
+测试定义：52 files / 440 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
+
+## 0. 本轮 alpha.5.2.4 重点
+
+- **alpha.5.2.3 TypeScript 发布热修**：修复 Windows 首轮 verify 暴露的 TS2352 / TS6133 / TS2739。
+- Community UI compiled candidate 与 canonical `RegexPipelineView` 对齐，保留 `rawText` / `traces`；测试 Persona fixture 补齐真实必需字段。
+- ChatRoom 删除已无调用方的 `renderRoleplayText` import。
+- Runtime 行为、IndexedDB V18、Backup V12、Launcher Grid V13 / HomeLayout revision 12 均不变；测试矩阵仍为 52 文件 / 440 tests。
+
+## 0. 本轮 alpha.5.2.3 重点
+
+- **Prompt Debug Runtime**：Trace 创建、冻结请求快照、Regex/API/自然度完成诊断和 Provider HTTP error patch 不再由 ChatRoom 手写；Debug 失败继续只降级诊断能力。
+- **Assistant Reply Persistence Runtime**：alternative / rich / canonical-display / streaming / actions 五条最终持久化路径收口，View 不再维护 persistence switch。
+- **Generation Lifecycle Runtime**：统一成功/取消/token/general error 的用户消息状态、vision metadata、provider notice、technical state、proactive timestamp 和本地摘要刷新。
+- 用户手动停止仍只保留已经出现的真实 Provider 内容；任何 Provider/Runtime 失败都不会生成本地角色化替代回复。
+- `ChatRoom.vue` 约 3552 行；预期测试矩阵：52 文件 / 440 tests；IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+
+## 0. 本轮 alpha.5.2.2 重点
+
+- **Community UI Repair Runtime**：合同校验、历史状态延续、本地 repair、紧凑状态补全、一次 AI 内容纠偏与失败回退从 `ChatRoom.vue` 下沉到 `communityUiRepairRuntime.ts`。
+- Repair Runtime 结束后重新 parse 最终 canonical assistant 文本，保证 rawContent、status、actions 使用同一版本。
+- **Assistant State Effects Runtime**：Conversation State、资源会话、Lorebook timed state、state history、主观观察记忆、Character mood/activity side effects 统一下沉。
+- 候选回复不再可能顺带修改状态/记忆；Provider 与 Community UI 失败仍不触发本地角色内容 fallback。
+- `ChatRoom.vue` 约 3930 行；测试矩阵：49 文件 / 416 tests；IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
 
 ## 0. 本轮 alpha.5.2.1 重点
 

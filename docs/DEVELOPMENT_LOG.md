@@ -1,3 +1,26 @@
+## 2026-09-21 · V0.5.0-alpha.5.2.4
+
+- Windows 首轮 `npm run verify` 在 alpha.5.2.3 的 `vue-tsc -b` 阶段暴露 3 个纯类型/死 import 回归。
+- `CommunityUiCompiledCandidate` 不再维护与 Regex pipeline 重复的窄接口，直接复用 `RegexPipelineView`，保证 repair 前后 `rawText/traces` 契约不丢失。
+- Community UI test fixture 改为合法 `UserPersona`，ChatRoom 删除未使用 import；业务 Runtime、Provider 策略、数据 Schema 均不变。
+- 版本推进到 alpha.5.2.4，避免覆盖同名 5.2.3 ZIP 造成 Windows 本地缓存/文件名混淆。
+
+## 2026-09-21 · V0.5.0-alpha.5.2.3
+
+- Generation Runtime phase 4 一次性下沉三块：Prompt Debug lifecycle、最终 persistence switch、success/failure bookkeeping。
+- `promptDebugRuntime.ts` 保持 Debug 完全旁路：写库/patch 失败只降级诊断，不阻断真实 Provider 回复。
+- `assistantReplyPersistenceRuntime.ts` 收口 five-mode persistence，并继续复用 `assistantActionPersistenceRuntime.ts`；Streaming 单文本优先 patch 原 placeholder，多动作回到统一 action persistence。
+- `generationLifecycleRuntime.ts` 统一 read/failed/cancelled、vision metadata、provider notice/technical error、proactive timestamp、local summary 和 abort/token/general failure policy；仍禁止本地角色化 fallback。
+- ChatRoom 约 3930 → 3552 行；新增 21 direct Runtime tests，Boundary 4 → 7，预期 52 files / 440 tests；schemas unchanged。
+
+## 2026-09-21 · V0.5.0-alpha.5.2.2
+
+- Generation Runtime phase 3：把 Community UI repair orchestration 与 generation 后状态/记忆 side effects 从 ChatRoom 下沉。
+- 新增 `communityUiRepairRuntime.ts` + 9 tests：carry-forward、本地 repair、regex/XML 紧凑状态补全、general repair、token-limit/fallback、ownership filter。
+- 新增 `assistantStateEffectsRuntime.ts` + 9 tests：resource/Lorebook state、history、主观记忆、Character mood/activity，同步明确 alternative reply side-effect free。
+- Repair 完成后重新解析最终 canonical assistant output，消除 repaired rawContent 与 parsed status/actions 双轨风险。
+- ChatRoom 约 4128 → 3930 行；新增 18 direct Runtime tests + 4 boundary tests；预期回归矩阵 49 files / 416 tests；schemas unchanged。
+
 ## 2026-09-20 · V0.5.0-alpha.5.2.0
 
 ## 2026-09-21 · V0.5.0-alpha.5.2.1

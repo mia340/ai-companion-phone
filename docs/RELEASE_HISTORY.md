@@ -1,3 +1,25 @@
+## V0.5.0-alpha.5.2.4
+
+- TypeScript release hotfix for alpha.5.2.3: repair `UserPersona` test fixture, remove one dead ChatRoom import, and align Community UI compiled candidates with the canonical `RegexPipelineView` contract.
+- Runtime behavior and schemas unchanged. Expected regression matrix remains 52 files / 440 tests.
+
+
+## V0.5.0-alpha.5.2.3
+
+- Generation Runtime phase 4: extract Prompt Debug lifecycle, final reply persistence orchestration and generation success/failure bookkeeping from `ChatRoom.vue`.
+- Add `promptDebugRuntime.ts`, `assistantReplyPersistenceRuntime.ts` and `generationLifecycleRuntime.ts`; keep real-provider-only error semantics and existing data schemas.
+- `ChatRoom.vue` drops to about 3552 lines. Expected regression matrix: 52 files / 440 tests.
+- IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 unchanged.
+
+
+## V0.5.0-alpha.5.2.2
+
+- Generation Runtime phase 3: extract Community UI repair orchestration and assistant state/memory/character side effects from `ChatRoom.vue`.
+- Reparse the final repaired canonical assistant output before finalization so persisted raw content and parsed status/actions remain consistent.
+- Add `communityUiRepairRuntime.ts` + 9 tests and `assistantStateEffectsRuntime.ts` + 9 tests.
+- Expected regression matrix: 49 files / 416 tests; IndexedDB V18 / Backup V12 / Launcher schema unchanged.
+
+
 ## V0.5.0-alpha.5.2.1
 
 - Generation Runtime phase 2: extract final assistant reply normalization/projection/persistence planning and action persistence orchestration from ChatRoom.

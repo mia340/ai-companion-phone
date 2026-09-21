@@ -24,9 +24,7 @@ import { installConversationGreeting, switchConversationToFreeOpening } from '..
 import { rebuildAndPersistConversationState } from '../runtime/conversation/conversationStateReplayService'
 import { buildGenerationContext } from '../runtime/generation/generationContextBuilder'
 import {
-  chatTurnContentText,
   cloneChatRequest,
-  includeVisionCount,
   type GenerationRequestOptions
 } from '../runtime/generation/generationContext'
 import {
@@ -35,34 +33,24 @@ import {
   runGenerationProvider
 } from '../runtime/generation/generationOrchestrator'
 import {
-  patchGeneratedMessage,
-  persistAlternativeReply,
-  persistRichAssistantMessage,
-  removeGeneratedMessage
-} from '../runtime/generation/responsePersistenceService'
-import {
   createStreamingReplyRuntime,
-  createStreamingReplySession,
-  type StreamingReplySession
+  createStreamingReplySession
 } from '../runtime/generation/streamingReplyRuntime'
 import {
-  buildRegexPipelineDebug,
   finalizeAssistantReply,
-  prepareParsedAssistantOutput,
-  type AssistantReplyFinalizationResult
+  prepareParsedAssistantOutput
 } from '../runtime/generation/assistantReplyFinalizationRuntime'
-import {
-  createAssistantActionPersistenceRuntime,
-  type PersistAssistantActionsOptions
-} from '../runtime/generation/assistantActionPersistenceRuntime'
+import { createCommunityUiRepairRuntime } from '../runtime/generation/communityUiRepairRuntime'
+import { createAssistantStateEffectsRuntime } from '../runtime/generation/assistantStateEffectsRuntime'
+import { createAssistantReplyPersistenceRuntime } from '../runtime/generation/assistantReplyPersistenceRuntime'
+import { createPromptDebugRuntime } from '../runtime/generation/promptDebugRuntime'
+import { createGenerationLifecycleRuntime } from '../runtime/generation/generationLifecycleRuntime'
 import {
   isTokenLimitError,
-  ProviderHttpError,
   type ChatRequest,
   type ChatResponse
 } from '../services/ai/provider'
 import { createProvider } from '../services/ai/providerFactory'
-import { diagnoseApiResponse, diagnoseApiHttpError } from '../services/ai/apiResponseDiagnostics'
 import { getModelSettings, getVisionCapability } from '../services/modelSettings'
 import {
   MAX_CHAT_IMAGES,
@@ -84,9 +72,7 @@ import {
   saveMusicState
 } from '../services/chatSettings'
 import {
-  createLocalSummary,
   listConversationMemoryContext,
-  rememberCharacterObservation,
   rememberFromMessageDetailed,
   buildMemoryWriteNotice
 } from '../services/memoryService'
@@ -98,16 +84,15 @@ import { getOrCreateUserProfile } from '../services/userProfile'
 import { getPersonaForChat, listPersonas } from '../services/personaService'
 import { listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml, type RegexExecutionTrace } from '../services/regexRuntime'
 import { compileIncomingMessageRegex, compileWorldInfoRegex } from '../services/regexPipelineService'
-import { buildCommunityUiRepairPrompt, buildCommunityUiStateRepairPrompt, communityUiOutputConforms, detectCommunityUiContract, enforceUserMessageOwnershipInRichHtml, mergeCommunityUiStateRepair, regexProducesRichUi, sanitizeCommunityUiText, tryCarryForwardCommunityUiState, tryRepairCommunityUiLocally } from '../services/communityUiRuntime'
+import { detectCommunityUiContract, regexProducesRichUi, tryRepairCommunityUiLocally } from '../services/communityUiRuntime'
 import { getActivePromptPreset } from '../services/presetRuntime'
 import { buildLorebookPrompt } from '../services/lorebookService'
 import { resolveCharacterRuntimeProfile } from '../services/characterRuntimeProfile'
 import { characterMacroName, detectCharacterCardFamily } from '../services/characterCardCompatibility'
-import { renderCharacterCardPromptText, renderRoleplayText } from '../services/textMacroService'
-import { mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText } from '../services/interactionProtocol'
+import { renderCharacterCardPromptText } from '../services/textMacroService'
+import { parseCompanionOutput, resolvePresenceMode, shapeCompanionActions, visibleStreamingText } from '../services/interactionProtocol'
 import { extractRoleCardUiHints, parseRoleCardUi, resolvePresenceFromRoleCardScene, roleCardUiToConversationPatch } from '../services/roleCardUiService'
-import { analyzePromptSections, buildRuleInfluences, buildTruncationNotes, estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
-import { buildConversationStatePrompt, deriveUserSceneTransition, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
+import { deriveUserSceneTransition, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
 import type {
   Character,
   CharacterMemory,
@@ -116,8 +101,6 @@ import type {
   ConversationState,
   Message,
   MessageReplyReference,
-  PromptDebugTrace,
-  ProactiveSource,
   MusicState,
   UserProfile,
   UserPersona
@@ -282,31 +265,6 @@ const {
 
 function draftStorageKey(conversationId: string) {
   return `ai-companion-draft:${conversationId}`
-}
-
-function isAbortError(error: unknown) {
-  return (
-    error instanceof DOMException &&
-    error.name === 'AbortError'
-  ) || (
-    error instanceof Error &&
-    error.name === 'AbortError'
-  )
-}
-
-function wait(ms: number, signal?: AbortSignal) {
-  return new Promise<void>((resolve, reject) => {
-    const timer = window.setTimeout(resolve, ms)
-
-    signal?.addEventListener(
-      'abort',
-      () => {
-        window.clearTimeout(timer)
-        reject(new DOMException('请求已取消', 'AbortError'))
-      },
-      { once: true }
-    )
-  })
 }
 
 function messagePreview(message: Message, maxLength = 42) {
@@ -909,27 +867,6 @@ async function refreshMemoryList() {
   memories.value = await listConversationMemoryContext(conversation.value.id, character.value?.id || '')
 }
 
-async function updateSummaryIfNeeded() {
-  if (!conversation.value || !conversationState.value || !chatSettings.value) return
-  if (!chatSettings.value.memoryEnabled) return
-
-  const count = messages.value.length
-  const previousCount = conversationState.value.summaryMessageCount
-
-  if (count < 28 || count - previousCount < 12) return
-
-  const summary = createLocalSummary(messages.value)
-  if (!summary) return
-
-  conversationState.value = await patchConversationState(
-    conversation.value.id,
-    {
-      summary,
-      summaryMessageCount: count
-    }
-  )
-}
-
 async function updateUserMessageState(
   messageId: string | undefined,
   status: Message['status'],
@@ -998,106 +935,11 @@ const streamingRuntime = createStreamingReplyRuntime({
   onScrollRequested: scheduleStreamScroll
 })
 
-async function finishStreamingMessage(
-  session: StreamingReplySession,
-  finalization: AssistantReplyFinalizationResult,
-  activeCharacter: Character,
-  settings: ChatSettings
-) {
-  const actions = finalization.projectedActions
-  const output = finalization.parsedOutput
-  if (!actions.length) throw new Error('模型没有返回有效回复。')
-  session.text = actions.map(item => item.content).join('\n\n')
-  const canReuse = Boolean(session.messageId) && actions.length === 1 && actions[0].kind === 'text' && session.type !== 'voice' && session.type !== 'emoji'
-  if (canReuse && session.messageId) {
-    await patchGeneratedMessage(session.messageId, {
-      content: actions[0].content,
-      rawContent: session.canonicalText || session.rawText || undefined,
-      modelOutput: session.rawText || undefined,
-      regexPipelineVersion: 2,
-      regexApplied: finalization.regexApplied,
-      status: 'delivered',
-      provider: session.provider,
-      model: session.model,
-      generationId: session.generationId,
-      errorText: undefined,
-      protocolVersion: output.rawPacket ? 2 : undefined,
-      roleCardUi: finalization.visibleRoleCardUi,
-      proactiveSource: session.proactiveSource
-    })
-  } else {
-    await saveAssistantActions({
-      conversation: session.conversation,
-      character: activeCharacter,
-      settings,
-      actions,
-      provider: session.provider,
-      model: session.model,
-      generationId: session.generationId,
-      type: session.type,
-      replaceMessageId: session.messageId,
-      roleCardUi: finalization.visibleRoleCardUi,
-      proactiveSource: session.proactiveSource,
-      rawContent: session.canonicalText || session.rawText || undefined,
-      modelOutput: session.rawText || undefined,
-      regexApplied: finalization.regexApplied
-    })
-  }
-  messages.value = await db.messages.where('conversationId').equals(session.conversation.id).sortBy('createdAt')
-  streamingMessageId.value = ''
-  session.messageId = undefined
-  clearStreamTimers()
-  await scrollToBottom('auto')
-}
-
-const assistantActionPersistenceRuntime = createAssistantActionPersistenceRuntime()
-
-async function saveAssistantActions(options: PersistAssistantActionsOptions) {
-  await assistantActionPersistenceRuntime.persistActions(options, {
-    onMessagesChanged(nextMessages) {
-      messages.value = nextMessages
-    },
-    onScrollRequested: () => scrollToBottom()
-  })
-}
-
-async function saveRichAssistantMessage(options: {
-  conversation: Conversation
-  senderId: string
-  html: string
-  rawContent: string
-  modelOutput?: string
-  provider: string
-  model: string
-  generationId: string
-  source?: Message['richSource']
-  replaceMessageId?: string
-  proactiveSource?: ProactiveSource
-  regexApplied?: Message['regexApplied']
-}) {
-  const activeConversation = options.conversation
-  if (options.replaceMessageId) {
-    await removeGeneratedMessage(options.replaceMessageId)
-    messages.value = messages.value.filter(item => item.id !== options.replaceMessageId)
-  }
-  await persistRichAssistantMessage({
-    conversation: activeConversation,
-    senderId: options.senderId,
-    html: options.html,
-    rawContent: options.rawContent,
-    modelOutput: options.modelOutput,
-    provider: options.provider,
-    model: options.model,
-    generationId: options.generationId,
-    source: options.source,
-    proactiveSource: options.proactiveSource,
-    regexApplied: options.regexApplied
-  })
-  messages.value = await db.messages.where('conversationId').equals(activeConversation.id).sortBy('createdAt')
-  streamingMessageId.value = ''
-  clearStreamTimers()
-  await scrollToBottom('auto')
-}
+const communityUiRepairRuntime = createCommunityUiRepairRuntime()
+const assistantStateEffectsRuntime = createAssistantStateEffectsRuntime()
+const assistantReplyPersistenceRuntime = createAssistantReplyPersistenceRuntime()
+const promptDebugRuntime = createPromptDebugRuntime()
+const generationLifecycleRuntime = createGenerationLifecycleRuntime()
 
 async function requestAssistantReply(options?: GenerationRequestOptions) {
   if (!conversation.value || !character.value || !chatSettings.value) return
@@ -1147,13 +989,10 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       macroCharacterName,
       regexMacros,
       activeAssistantRegex,
-      activeUserRegex,
-      activeWorldRegex,
       assistantStorageRegex,
       displayAssistantRegex,
       regexExecutionTraces,
       latestUserText,
-      memoryHitDetails,
       lorebook,
       communityUiContract,
       presentationHidesCommunityUi,
@@ -1166,7 +1005,6 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
     const provider = createProvider(generationContext.modelSettings)
     let currentModelSettings = generationContext.modelSettings
     let response: ChatResponse
-    let debugTrace: PromptDebugTrace | undefined
     let providerId = provider.id
     let usedModel = currentModelSettings.model
     let providerNotice = ''
@@ -1195,74 +1033,6 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       noticeMessage.value = '当前模型已标记为不支持图片理解，将根据图片说明继续回应。'
     }
 
-    const prepareDebugTrace = async (activeProvider: { id: string }, request: ChatRequest) => {
-      if (debugTrace || !settings.promptDebugEnabled) return
-      const systemPrompt = chatTurnContentText(request.messages[0]?.content || '')
-      const recentMessages = request.messages.slice(1).map(turn => ({
-        role: turn.role,
-        content: chatTurnContentText(turn.content)
-      }))
-      const promptSections = analyzePromptSections(systemPrompt, recentMessages)
-      const cardRuntime = generationContext.cardRuntime
-      try {
-        debugTrace = await savePromptDebugTrace({
-          conversationId: activeConversation.id,
-          characterId: activeCharacter.id,
-          generationId,
-          sourceMessageId: options?.sourceMessageId,
-          contextCreatedAt: generationContext.contextCreatedAt,
-          provider: activeProvider.id,
-          model: request.model,
-          roleplayMode: settings.roleplayMode,
-          personaName: persona.name,
-          systemPrompt,
-          recentMessages,
-          activatedLorebook: lorebook.activated.map(item => ({
-            id: item.id,
-            title: item.title,
-            reason: item.activationReason
-          })),
-          resourceRouting: lorebook.routingDecisions,
-          estimatedSavedCharacters: lorebook.estimatedSavedCharacters,
-          characterCardRuntime: {
-            family: cardRuntime.family,
-            sourceLabel: cardRuntime.sourceLabel,
-            macroCharacterName: cardRuntime.macroCharacterName,
-            systemPromptMode: cardRuntime.systemPromptMode,
-            postHistoryMode: cardRuntime.postHistoryMode,
-            creatorNotesInPrompt: false,
-            greetingCount: cardRuntime.greetings.length,
-            notes: cardRuntime.notes
-          },
-          lorebookEngine: lorebook.engineDebug,
-          memoryHits: memoryHitDetails.map(item => ({
-            id: item.memory.id,
-            content: item.memory.content,
-            importance: item.memory.importance,
-            layer: item.memory.layer,
-            score: item.score,
-            reason: item.reasons.join('；')
-          })),
-          imageCount: includeVisionCount(request),
-          estimatedCharacters: estimatePromptCharacters(systemPrompt, recentMessages),
-          protocolEnabled: runtimeProfile.useNativeInteractionProtocol,
-          promptSections,
-          truncations: buildTruncationNotes({
-            allMessageCount: generationContext.messages.length,
-            includedMessageCount: recentMessages.length,
-            systemPrompt,
-            sections: promptSections
-          }),
-          ruleInfluences: buildRuleInfluences(systemPrompt)
-        })
-        requestTraceId = debugTrace.id
-      } catch (debugError) {
-        // Prompt 调试是旁路诊断能力，写库失败绝不能中断正常聊天。
-        console.warn('保存 Prompt 调试记录失败：', debugError)
-        debugTrace = undefined
-      }
-    }
-
     const providerRun = await runGenerationProvider({
       context: generationContext,
       provider,
@@ -1271,7 +1041,15 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       onBeforeRequest: async (activeProvider, request) => {
         streamSession.provider = activeProvider.id
         streamSession.model = request.model
-        await prepareDebugTrace(activeProvider, request)
+        if (!requestTraceId) {
+          requestTraceId = await promptDebugRuntime.begin({
+            enabled: settings.promptDebugEnabled,
+            context: generationContext,
+            request,
+            providerId: activeProvider.id,
+            sourceMessageId: options?.sourceMessageId
+          })
+        }
       },
       onDelta: chunk => streamingRuntime.appendChunk(streamSession, chunk),
       onVisionStage: stage => {
@@ -1299,8 +1077,10 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       return
     }
 
-    // 第一版真实 AI 回复永远保留。Regex Pipeline V2 先生成“规范化存储视图”，再生成“显示投影视图”。
     const initialAiResponse = response
+
+    // 第一版真实 AI 回复永远保留。Community UI 的状态延续、本地修复、紧凑 AI 补全与失败降级
+    // 已下沉到 Generation Runtime；ChatRoom 只提供冻结上下文、Provider 与 Regex 编译能力。
     const compileAssistantCandidate = (rawText: string, storageScripts = assistantStorageRegex) => rememberRegexTraces(compileIncomingMessageRegex({
       rawText,
       source: 'assistant-output',
@@ -1310,8 +1090,38 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       macros: regexMacros
     }))
     let assistantRegexView = compileAssistantCandidate(response.text)
-    const initialAssistantCanonicalText = assistantRegexView.canonicalText
-    let assistantCanonicalText = initialAssistantCanonicalText
+    const communityUiRepair = await communityUiRepairRuntime.repair({
+      contract: communityUiContract,
+      initialResponseText: response.text,
+      initialCandidate: assistantRegexView,
+      compileCandidate: text => compileAssistantCandidate(text, []),
+      presentationHidesCommunityUi,
+      persona,
+      macroCharacterName,
+      character: activeCharacter,
+      previousMessages: generationContext.messages,
+      activatedLorebook: lorebook.activated,
+      applyWorldRegex: generationContext.applyWorldRegex,
+      conversationState: generationContext.conversationState,
+      latestUserText,
+      modelSettings: currentModelSettings,
+      signal,
+      providerChat: request => provider.chat(request),
+      createGeneralRepairRequest: () => createRequest(visionUsed),
+      collectTokenUsage
+    })
+    const assistantCanonicalText = communityUiRepair.canonicalText
+    assistantRegexView = communityUiRepair.candidate
+    const regexDisplay = {
+      text: assistantRegexView.displayText,
+      applied: [...assistantRegexView.storageApplied, ...assistantRegexView.displayApplied],
+      rich: assistantRegexView.rich
+    }
+    let richReplyHtml = communityUiRepair.richReplyHtml
+    let communityUiText = communityUiRepair.communityUiText
+    if (communityUiRepair.noticeMessage) noticeMessage.value = communityUiRepair.noticeMessage
+
+    // Repair Runtime 最终决定 canonical 后再解析协议，避免“rawContent 已修复但 status/actions 仍来自旧文本”的双轨状态。
     let parsedOutput = prepareParsedAssistantOutput({
       text: assistantCanonicalText,
       useNativeInteractionProtocol: runtimeProfile.useNativeInteractionProtocol,
@@ -1321,206 +1131,7 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       preserveCardOutput: runtimeProfile.preserveCardOutput,
       communityUiActive: communityUiContract.active
     })
-    let regexDisplay = {
-      text: assistantRegexView.displayText,
-      applied: [...assistantRegexView.storageApplied, ...assistantRegexView.displayApplied],
-      rich: assistantRegexView.rich
-    }
-    let richReplyHtml = !presentationHidesCommunityUi && (regexDisplay.rich || looksLikeRichHtml(regexDisplay.text))
-      ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, macroCharacterName) || '')
-      : ''
-    let communityUiText = !presentationHidesCommunityUi && communityUiContract.active && !richReplyHtml
-      ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, macroCharacterName) || '')
-      : ''
-
-    let communityUiValidationRaw = assistantCanonicalText
-    const refreshAssistantCandidateFromCanonical = (canonicalText: string) => {
-      assistantCanonicalText = canonicalText
-      assistantRegexView = compileAssistantCandidate(canonicalText, [])
-      regexDisplay = {
-        text: assistantRegexView.displayText,
-        applied: [...assistantRegexView.storageApplied, ...assistantRegexView.displayApplied],
-        rich: assistantRegexView.rich
-      }
-      richReplyHtml = !presentationHidesCommunityUi && (regexDisplay.rich || looksLikeRichHtml(regexDisplay.text))
-        ? (renderRoleplayText(normalizeRichHtml(regexDisplay.text), persona.name, macroCharacterName) || '')
-        : ''
-      communityUiText = !presentationHidesCommunityUi && communityUiContract.active && !richReplyHtml
-        ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, macroCharacterName) || '')
-        : ''
-      communityUiValidationRaw = canonicalText
-    }
-    const communityUiConforms = () => communityUiOutputConforms({
-      contract: communityUiContract,
-      rawText: communityUiValidationRaw,
-      renderedText: richReplyHtml || communityUiText || regexDisplay.text,
-      appliedRegex: regexDisplay.applied
-    })
-
-    if (communityUiContract.active && !communityUiConforms() && !signal.aborted) {
-      // Regex/XML 型状态 UI 最常见的失败不是“正文没生成”，而是模型偶尔漏掉状态字段。
-      // 先尝试只复用最近历史里 AI 自己已经生成过的同名字段；当前正文与当前字段始终优先。
-      // 这是 UI 状态延续，不是本地编剧情；合并后的作者结构会写入 rawContent，供后续 Regex/UI 状态连续性使用。
-      const previousCommunityRawOutputs = [...generationContext.messages]
-        .filter(item => item.senderId !== 'user' && !item.recalledAt)
-        .reverse()
-        .map(item => item.rawContent || item.content)
-        .filter((item): item is string => Boolean(item?.trim()))
-        .slice(0, 8)
-      const carriedState = tryCarryForwardCommunityUiState(communityUiContract, assistantCanonicalText, previousCommunityRawOutputs)
-      if (carriedState.repaired) {
-        const carriedView = compileAssistantCandidate(carriedState.text, [])
-        const carriedApplied = [...carriedView.storageApplied, ...carriedView.displayApplied]
-        const carriedRich = !presentationHidesCommunityUi && (carriedView.rich || looksLikeRichHtml(carriedView.displayText))
-          ? (renderRoleplayText(normalizeRichHtml(carriedView.displayText), persona.name, macroCharacterName) || '')
-          : ''
-        const carriedText = !presentationHidesCommunityUi && communityUiContract.active && !carriedRich
-          ? (renderRoleplayText(sanitizeCommunityUiText(carriedView.displayText), persona.name, macroCharacterName) || '')
-          : ''
-        const carriedConforms = communityUiOutputConforms({
-          contract: communityUiContract,
-          rawText: carriedState.text,
-          renderedText: carriedRich || carriedText || carriedView.displayText,
-          appliedRegex: carriedApplied
-        })
-        if (carriedConforms) {
-          refreshAssistantCandidateFromCanonical(carriedState.text)
-          parsedOutput.warnings.push(carriedState.reason)
-        }
-      }
-
-      if (!communityUiConforms()) {
-        const localRepair = tryRepairCommunityUiLocally(communityUiContract, assistantCanonicalText)
-        if (localRepair.repaired) {
-          communityUiValidationRaw = localRepair.text
-          richReplyHtml = renderRoleplayText(normalizeRichHtml(localRepair.text), persona.name, macroCharacterName) || ''
-          communityUiText = ''
-          parsedOutput.warnings.push(localRepair.reason)
-        } else {
-          // Regex/XML UI 只缺作者状态字段时，第二次调用必须是紧凑“状态数据补全”，不能重新跑整套角色 Prompt / 历史并重写剧情。
-          if (communityUiContract.mode === 'regex-html' && communityUiContract.requiredTagNames.length) {
-            const tagNeedles = communityUiContract.requiredTagNames.map(name => name.toLocaleLowerCase())
-            const relevantAuthorRules = lorebook.activated
-              .map(entry => ({
-                content: generationContext.applyWorldRegex(entry.content || ''),
-                score: tagNeedles.reduce((count, tag) => count + ((entry.content || '').toLocaleLowerCase().includes(tag) ? 1 : 0), 0)
-                  + (entry.activationReason.includes('作者每轮') ? 8 : 0)
-              }))
-              .filter(item => item.score > 0)
-              .sort((a, b) => b.score - a.score)
-              .map(item => item.content)
-              .join('\n\n')
-              .slice(0, 6000)
-            const roleContext = [
-              activeCharacter.cardDescription || activeCharacter.persona || activeCharacter.identity || '',
-              activeCharacter.cardPersonality || '',
-              activeCharacter.relationship ? `与用户关系：${activeCharacter.relationship}` : '',
-              persona.description || persona.identity ? `用户 Persona：${persona.description || persona.identity}` : ''
-            ].filter(Boolean).join('\n\n').slice(0, 4000)
-            const compactRepairPrompt = buildCommunityUiStateRepairPrompt({
-              contract: communityUiContract,
-              currentOutput: assistantCanonicalText,
-              authorRules: relevantAuthorRules,
-              roleContext,
-              conversationState: buildConversationStatePrompt(generationContext.conversationState),
-              latestUserText
-            })
-            const uiRepairRequest: ChatRequest = {
-              model: currentModelSettings.model,
-              temperature: Math.min(currentModelSettings.temperature ?? 0.8, 0.25),
-              signal,
-              messages: [{ role: 'system', content: compactRepairPrompt }]
-            }
-            try {
-              const repairResponse = await provider.chat(uiRepairRequest)
-              collectTokenUsage(repairResponse)
-              const mergedRepair = mergeCommunityUiStateRepair(communityUiContract, assistantCanonicalText, repairResponse.text)
-              if (mergedRepair.repaired) {
-                const repairedView = compileAssistantCandidate(mergedRepair.text, [])
-                const repairedApplied = [...repairedView.storageApplied, ...repairedView.displayApplied]
-                const repairedRich = !presentationHidesCommunityUi && (repairedView.rich || looksLikeRichHtml(repairedView.displayText))
-                  ? (renderRoleplayText(normalizeRichHtml(repairedView.displayText), persona.name, macroCharacterName) || '')
-                  : ''
-                const repairedText = !presentationHidesCommunityUi && communityUiContract.active && !repairedRich
-                  ? (renderRoleplayText(sanitizeCommunityUiText(repairedView.displayText), persona.name, macroCharacterName) || '')
-                  : ''
-                const repairedConforms = communityUiOutputConforms({
-                  contract: communityUiContract,
-                  rawText: mergedRepair.text,
-                  renderedText: repairedRich || repairedText || repairedView.displayText,
-                  appliedRegex: repairedApplied
-                })
-                if (repairedConforms) {
-                  refreshAssistantCandidateFromCanonical(mergedRepair.text)
-                  parsedOutput.warnings.push(`Community UI 紧凑状态补全：第二次 AI 仅补 ${mergedRepair.addedTags.length} 个作者状态字段，第一版正文未重写。`)
-                }
-              }
-            } catch (uiRepairError) {
-              if (isAbortError(uiRepairError)) throw uiRepairError
-              if (isTokenLimitError(uiRepairError)) {
-                parsedOutput.warnings.push('社区 UI 状态补全因 Token / 上下文 / 额度限制未完成；第一版真实 AI 回复已保留。')
-                noticeMessage.value = 'AI 已完成第一版回复，但社区 UI 状态补全未完成；正文已保留，未使用本地补写。'
-              } else {
-                parsedOutput.warnings.push(uiRepairError instanceof Error ? `社区 UI 状态补全失败：${uiRepairError.message}` : '社区 UI 状态补全失败。')
-              }
-            }
-          } else {
-            // 非 Regex/XML 合同沿用一次内容纠偏，但不增加额外本地角色内容。
-            const uiRepairRequest = createRequest(visionUsed)
-            uiRepairRequest.temperature = Math.min(uiRepairRequest.temperature ?? 0.8, 0.35)
-            uiRepairRequest.messages = [
-              ...uiRepairRequest.messages,
-              { role: 'system', content: buildCommunityUiRepairPrompt(communityUiContract, response.text) }
-            ]
-            try {
-              const repairResponse = await provider.chat(uiRepairRequest)
-              collectTokenUsage(repairResponse)
-              const repairedAfterAi = tryRepairCommunityUiLocally(communityUiContract, repairResponse.text)
-              if (repairedAfterAi.repaired) {
-                communityUiValidationRaw = repairedAfterAi.text
-                richReplyHtml = renderRoleplayText(normalizeRichHtml(repairedAfterAi.text), persona.name, macroCharacterName) || ''
-                communityUiText = ''
-                parsedOutput.warnings.push(repairedAfterAi.reason.replace('未追加第二次 AI 调用', '使用一次 AI 内容纠偏后由本地编译完成'))
-              }
-            } catch (uiRepairError) {
-              if (isAbortError(uiRepairError)) throw uiRepairError
-              if (isTokenLimitError(uiRepairError)) {
-                parsedOutput.warnings.push('社区 UI 自动纠偏因 Token / 上下文 / 额度限制未完成；第一版真实 AI 回复已保留。')
-              } else {
-                parsedOutput.warnings.push(uiRepairError instanceof Error ? `社区 UI 自动纠偏失败：${uiRepairError.message}` : '社区 UI 自动纠偏失败。')
-              }
-            }
-          }
-        }
-    }
-    }
-
-    if (communityUiContract.active && !communityUiConforms()) {
-      // 格式纠偏没有成功时，恢复第一版真实 AI 的规范化存储视图。UI 可以降级，正文不能被静默丢弃。
-      response = initialAiResponse
-      refreshAssistantCandidateFromCanonical(initialAssistantCanonicalText)
-      parsedOutput = prepareParsedAssistantOutput({
-        text: initialAssistantCanonicalText,
-        useNativeInteractionProtocol: runtimeProfile.useNativeInteractionProtocol,
-        userName: persona.name,
-        personaName: persona.name,
-        macroCharacterName,
-        preserveCardOutput: runtimeProfile.preserveCardOutput,
-        communityUiActive: communityUiContract.active
-      })
-      communityUiText = !presentationHidesCommunityUi && !richReplyHtml
-        ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, macroCharacterName) || '')
-        : ''
-      parsedOutput.warnings.push('社区 UI 未完全匹配原卡格式：已保留第一版真实 AI 回复，未因 UI/Regex 失败丢弃正文。')
-    }
-
-    if (richReplyHtml) {
-      const realUserMessages = generationContext.messages
-        .filter(item => item.senderId === 'user' && !item.recalledAt)
-        .slice(-24)
-        .map(item => item.content)
-      richReplyHtml = enforceUserMessageOwnershipInRichHtml(richReplyHtml, realUserMessages)
-    }
+    parsedOutput.warnings.push(...communityUiRepair.warnings)
 
     // 角色回复内容到这里以后不再做本地语义重写。
     // 应用只校验原卡明确要求的结构；台词、动作、心理、用户事实判断均保留 AI 原始生成结果。
@@ -1544,209 +1155,89 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       useStreaming
     })
     parsedOutput = finalization.parsedOutput
-    const projectedActions = finalization.projectedActions
     const finalVisibleOutput = finalization.finalVisibleOutput
-    const visibleRoleCardUi = finalization.visibleRoleCardUi
-    const assistantRegexApplied: Message['regexApplied'] = finalization.regexApplied
     // Streaming preview may have shown partial raw output, but final persistence must use the canonical Regex storage view.
     streamSession.canonicalText = assistantCanonicalText
 
-    if (debugTrace) {
-      try {
-        const regexPipelineDebug = buildRegexPipelineDebug({
-          traces: regexExecutionTraces,
-          activeScriptIds: [...activeAssistantRegex, ...activeUserRegex, ...activeWorldRegex].map(item => item.id)
-        })
-        await patchPromptDebugTrace(debugTrace.id, {
-          regexPipeline: regexPipelineDebug,
-          provider: providerId,
-          model: usedModel,
-          tokenUsage: { ...cumulativeTokenUsage },
-          apiResponseDiagnostics: diagnoseApiResponse(response),
-          rawOutput: response.text,
-          visibleOutput: finalVisibleOutput,
-          actionSummary: parsedOutput.actionSummary,
-          presenceResolution: parsedOutput.presenceResolution,
-          naturalnessWarnings: [...parsedOutput.warnings, ...naturalnessWarnings(finalVisibleOutput)],
-          naturalnessScore: scoreNaturalness({
-            text: finalVisibleOutput,
-            character: activeCharacter,
-            latestUserText,
-            relationshipNote: generationContext.conversationState?.relationshipNote,
-            imageCount: visualMessage ? getMessageImageUrls(visualMessage).length : 0,
-            recentAssistantMessages: generationContext.messages.filter(item => item.senderId !== 'user')
-          })
-        })
-      } catch (debugError) {
-        // 更新调试记录失败同样只降级调试能力，不影响角色回复与消息入库。
-        console.warn('更新 Prompt 调试记录失败：', debugError)
-      }
-    }
-    const resourceSessionPatch: Partial<ConversationState> = lorebook.resourceSession.exitRequested
-      ? { activeResourceEntryId: undefined, activeResourceTitle: undefined, activeResourceUpdatedAt: new Date().toISOString() }
-      : lorebook.resourceSession.entryId
-        ? {
-          activeResourceEntryId: lorebook.resourceSession.entryId,
-          activeResourceTitle: lorebook.resourceSession.title,
-          activeResourceUpdatedAt: new Date().toISOString()
-        }
-        : {}
-    const lorebookRuntimePatch: Partial<ConversationState> = settings.lorebookEnabled
-      ? { lorebookRuntime: lorebook.nextRuntimeState }
-      : {}
+    await promptDebugRuntime.complete({
+      traceId: requestTraceId,
+      context: generationContext,
+      providerId,
+      model: usedModel,
+      response,
+      tokenUsage: cumulativeTokenUsage,
+      finalVisibleOutput,
+      parsedOutput,
+      visualMessage
+    })
+    const stateEffects = await assistantStateEffectsRuntime.apply({
+      conversationId: activeConversation.id,
+      character: activeCharacter,
+      settings,
+      beforeState: generationContext.conversationState,
+      parsedOutput,
+      resourceSession: lorebook.resourceSession,
+      nextLorebookRuntimeState: lorebook.nextRuntimeState,
+      sourceMessageId: options?.sourceMessageId,
+      alternativeTargetId: options?.alternativeTargetId
+    }, {
+      onMemoryChanged: refreshMemoryList
+    })
+    if (stateEffects.stateChanged && stateEffects.state) conversationState.value = stateEffects.state
+    if (stateEffects.characterChanged) character.value = stateEffects.character
 
-    if (!options?.alternativeTargetId && generationContext.conversationState && (parsedOutput.status || Object.keys(resourceSessionPatch).length || Object.keys(lorebookRuntimePatch).length)) {
-      const beforeState = generationContext.conversationState
-      const statePatch = {
-        ...(parsedOutput.status ? mergeStatusIntoConversationState(beforeState, parsedOutput.status, parsedOutput.presenceResolution) : {}),
-        ...resourceSessionPatch,
-        ...lorebookRuntimePatch,
-        lastActionSummary: parsedOutput.actionSummary
+    await assistantReplyPersistenceRuntime.persist({
+      conversation: activeConversation,
+      character: activeCharacter,
+      settings,
+      finalization,
+      provider: providerId,
+      model: usedModel,
+      generationId,
+      type: options?.type,
+      signal,
+      streamSession,
+      proactiveSource: options?.proactiveSource,
+      alternativeTargetId: options?.alternativeTargetId,
+      richReplyHtml,
+      richSource: regexDisplay.applied.some(name => activeAssistantRegex.some(script => script.name === name && regexProducesRichUi(script)))
+        ? 'regex'
+        : communityUiContract.active
+          ? 'worldbook-ui'
+          : 'card-ui',
+      canonicalText: assistantCanonicalText,
+      modelOutput: initialAiResponse.text,
+      communityUiActive: communityUiContract.active,
+      communityUiText,
+      regexDisplayText: assistantRegexView.displayText
+    }, {
+      onMessagesChanged(nextMessages) {
+        messages.value = nextMessages
+      },
+      onScrollRequested: () => scrollToBottom(),
+      onStreamingMessageChanged(messageId) {
+        streamingMessageId.value = messageId
+      },
+      onClearStreamTimers: clearStreamTimers,
+      onNotice(message) {
+        noticeMessage.value = message
       }
-      const nextState = await patchConversationState(activeConversation.id, statePatch)
-      await recordConversationStateChanges({
-        conversationId: activeConversation.id,
-        characterId: activeCharacter.id,
-        before: beforeState,
-        after: nextState,
-        sourceMessageId: options?.sourceMessageId
-      })
-      conversationState.value = nextState
-      if (parsedOutput.status && settings.memoryEnabled && (parsedOutput.status.relationshipNote || parsedOutput.status.innerThought)) {
-        const observation = [parsedOutput.status.relationshipNote, parsedOutput.status.innerThought]
-          .filter(Boolean)
-          .join('；')
-        await rememberCharacterObservation({
-          conversationId: activeConversation.id,
-          characterId: activeCharacter.id,
-          content: `角色主观感受：${observation}`,
-          sourceMessageId: options?.sourceMessageId,
-          importance: parsedOutput.status.relationshipNote ? 4 : 3
-        })
-        await refreshMemoryList()
-      }
-      if (parsedOutput.status) {
-        const characterPatch: Partial<Character> = { mood: parsedOutput.status.mood || activeCharacter.mood, activity: parsedOutput.status.activity || activeCharacter.activity, updatedAt: new Date().toISOString() }
-        await db.characters.update(activeCharacter.id, characterPatch)
-        character.value = { ...activeCharacter, ...characterPatch }
-      }
-    }
-    switch (finalization.persistenceMode) {
-      case 'alternative': {
-        const target = messages.value.find(item => item.id === options?.alternativeTargetId)
-        if (!target) throw new Error('没有找到需要添加候选回复的消息。')
-        const { patch, activeAlternativeIndex } = await persistAlternativeReply({
-          target,
-          content: finalVisibleOutput,
-          provider: providerId,
-          model: usedModel,
-          generationId
-        })
-        const targetIndex = messages.value.findIndex(item => item.id === target.id)
-        if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], ...patch }
-        noticeMessage.value = `已生成第 ${activeAlternativeIndex + 1} 个候选回复。`
-        break
-      }
-      case 'rich': {
-        await saveRichAssistantMessage({
-          conversation: activeConversation,
-          senderId: activeCharacter.id,
-          html: richReplyHtml,
-          rawContent: assistantCanonicalText,
-          modelOutput: initialAiResponse.text,
-          provider: providerId,
-          model: usedModel,
-          generationId,
-          source: regexDisplay.applied.some(name => activeAssistantRegex.some(script => script.name === name && regexProducesRichUi(script)))
-            ? 'regex'
-            : communityUiContract.active
-              ? 'worldbook-ui'
-              : 'card-ui',
-          replaceMessageId: streamSession.messageId,
-          proactiveSource: options?.proactiveSource,
-          regexApplied: assistantRegexApplied
-        })
-        streamSession.messageId = undefined
-        break
-      }
-      case 'canonical-display': {
-        // markdownOnly / display-only Regex is a transient renderer. Keep canonical source in storage and only project the visible view.
-        const preservedDisplay = communityUiContract.active
-          ? (communityUiText || sanitizeCommunityUiText(assistantRegexView.displayText))
-          : finalVisibleOutput
-        await saveAssistantActions({
-          conversation: activeConversation,
-          character: activeCharacter,
-          settings,
-          actions: [{ kind: 'text', content: assistantCanonicalText }],
-          provider: providerId,
-          model: usedModel,
-          generationId,
-          type: options?.type,
-          signal,
-          replaceMessageId: streamSession.messageId,
-          roleCardUi: visibleRoleCardUi,
-          proactiveSource: options?.proactiveSource,
-          rawContent: assistantCanonicalText,
-          modelOutput: initialAiResponse.text,
-          displayContent: preservedDisplay !== assistantCanonicalText ? preservedDisplay : undefined,
-          regexApplied: assistantRegexApplied
-        })
-        streamSession.messageId = undefined
-        break
-      }
-      case 'streaming': {
-        streamSession.provider = providerId
-        streamSession.model = usedModel
-        await finishStreamingMessage(streamSession, finalization, activeCharacter, settings)
-        break
-      }
-      case 'actions': {
-        if (settings.naturalDelay) await wait(240 + Math.min(900, parsedOutput.visibleText.length * 9), signal)
-        await saveAssistantActions({
-          conversation: activeConversation,
-          character: activeCharacter,
-          settings,
-          actions: projectedActions,
-          provider: providerId,
-          model: usedModel,
-          generationId,
-          type: options?.type,
-          signal,
-          roleCardUi: visibleRoleCardUi,
-          proactiveSource: options?.proactiveSource,
-          rawContent: assistantCanonicalText,
-          modelOutput: initialAiResponse.text,
-          regexApplied: assistantRegexApplied
-        })
-        break
-      }
-    }
+    })
 
-    if (options?.proactiveSource) {
-      conversationState.value = await patchConversationState(activeConversation.id, {
-        lastProactiveAt: new Date().toISOString()
-      })
-    }
-
-    await updateUserMessageState(
-      options?.sourceMessageId,
-      'read',
-      {
-        visionUsed: visualMessage ? visionUsed : undefined,
-        visionFallback: visualMessage ? visionFallback : undefined
-      }
-    )
-
-    conversationState.value = await patchConversationState(
-      activeConversation.id,
-      {
-        lastTechnicalError: '',
-        lastProviderNotice: providerNotice
-      }
-    )
-
-    await updateSummaryIfNeeded()
+    conversationState.value = await generationLifecycleRuntime.complete({
+      conversation: activeConversation,
+      settings,
+      currentState: conversationState.value,
+      messages: messages.value,
+      sourceMessageId: options?.sourceMessageId,
+      proactiveSource: options?.proactiveSource,
+      providerNotice,
+      visualMessagePresent: Boolean(visualMessage),
+      visionUsed,
+      visionFallback
+    }, {
+      updateUserMessageState
+    })
 
     if (settings.autoReadAloud && speechPlaybackAvailable.value) {
       const latestAssistant = [...messages.value]
@@ -1756,93 +1247,27 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       speakText(spokenText, latestAssistant?.id ?? '')
     }
   } catch (error) {
-    if (requestTraceId && error instanceof ProviderHttpError) {
-      try {
-        await patchPromptDebugTrace(requestTraceId, { apiResponseDiagnostics: diagnoseApiHttpError(error.status) })
-      } catch { /* 调试失败不能掩盖原始 API 错误 */ }
+    await promptDebugRuntime.recordHttpError(requestTraceId, error)
+    const failure = await generationLifecycleRuntime.fail({
+      error,
+      manualStopRequested,
+      conversation: activeConversation,
+      sourceMessageId: options?.sourceMessageId,
+      visualMessagePresent: Boolean(visualMessage),
+      visionUsed,
+      visionFallback
+    }, {
+      updateUserMessageState,
+      preserveInterrupted: () => streamingRuntime.preserveInterrupted(streamSession, 'cancelled'),
+      discardStream: () => streamingRuntime.discard(streamSession)
+    })
+
+    if (!failure.aborted && !isTokenLimitError(error)) {
+      console.error('获取角色回复失败：', error)
     }
-    if (isAbortError(error)) {
-      if (manualStopRequested) {
-        const preserved = await streamingRuntime.preserveInterrupted(
-          streamSession,
-          'cancelled'
-        )
-        await updateUserMessageState(
-          options?.sourceMessageId,
-          preserved ? 'read' : 'cancelled',
-          {
-            visionUsed: visualMessage ? visionUsed : undefined,
-            visionFallback: visualMessage ? visionFallback : undefined
-          }
-        )
-        noticeMessage.value = preserved
-          ? '已按你的操作停止生成，已经出现的真实 AI 内容已保留。'
-          : '已停止等待回复，可长按消息重新发送。'
-      } else {
-        await streamingRuntime.discard(streamSession)
-        await updateUserMessageState(
-          options?.sourceMessageId,
-          'cancelled',
-          {
-            visionUsed: visualMessage ? visionUsed : undefined,
-            visionFallback: visualMessage ? visionFallback : undefined
-          }
-        )
-      }
-      return
-    }
-
-    if (isTokenLimitError(error)) {
-      const technical = error.message
-      await streamingRuntime.discard(streamSession)
-      await updateUserMessageState(
-        options?.sourceMessageId,
-        'failed',
-        {
-          errorText: technical,
-          visionUsed: visualMessage ? visionUsed : undefined,
-          visionFallback: visualMessage ? visionFallback : undefined
-        }
-      )
-      errorMessage.value = technical
-      noticeMessage.value = '本轮已停止，未保存任何不完整的角色回复。'
-      conversationState.value = await patchConversationState(
-        activeConversation.id,
-        {
-          lastTechnicalError: technical,
-          lastProviderNotice: ''
-        }
-      )
-      return
-    }
-
-    console.error('获取角色回复失败：', error)
-    const technical = error instanceof Error
-      ? error.message
-      : '未知错误'
-
-    await streamingRuntime.discard(streamSession)
-
-    await updateUserMessageState(
-      options?.sourceMessageId,
-      'failed',
-      {
-        errorText: technical,
-        visionUsed: visualMessage ? visionUsed : undefined,
-        visionFallback: visualMessage ? visionFallback : undefined
-      }
-    )
-
-    errorMessage.value = `AI 请求失败：${technical}`
-    noticeMessage.value = '本轮已停止，未保存中断或不完整的角色回复；小手机不会使用本地内容续写。'
-
-    conversationState.value = await patchConversationState(
-      activeConversation.id,
-      {
-        lastTechnicalError: technical,
-        lastProviderNotice: ''
-      }
-    )
+    if (failure.errorMessage) errorMessage.value = failure.errorMessage
+    if (failure.noticeMessage) noticeMessage.value = failure.noticeMessage
+    if (failure.state) conversationState.value = failure.state
   } finally {
     isSending.value = false
     manualStopRequested = false

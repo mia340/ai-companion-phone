@@ -1,5 +1,26 @@
 # Changelog
 
+## V0.5.0-alpha.5.2.4
+
+- alpha.5.2.3 Windows 首轮 verify 暴露 3 个 TypeScript 编译回归，本版本只做发布热修，不改变 Generation Runtime 行为。
+- Community UI repair candidate 统一复用 `RegexPipelineView` 类型，保留 `rawText` / `traces`，避免 repaired candidate 与 ChatRoom Regex 视图类型漂移。
+- 修正 Community UI Runtime 测试中的 `UserPersona` fixture，并删除 ChatRoom 已失效的 `renderRoleplayText` import。
+- 测试矩阵仍为 52 files / 440 tests；IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+
+## V0.5.0-alpha.5.2.3
+
+- Generation Runtime 第四阶段：新增 `promptDebugRuntime.ts`，把 Prompt Trace 创建、冻结上下文快照、Regex Pipeline 完成诊断、API response diagnostics 与 HTTP error patch 从 `ChatRoom.vue` 下沉为真正旁路 Runtime。
+- 新增 `assistantReplyPersistenceRuntime.ts`，统一 alternative / rich / canonical-display / streaming / actions 五条最终落库路径；stream placeholder 复用、Rich 替换、display-only projection 与 natural-delay 首段等待不再由 View 分支编排。
+- 新增 `generationLifecycleRuntime.ts`，统一 generation success/failure bookkeeping：用户消息 read/failed/cancelled、vision 元数据、proactive 时间、技术错误/provider notice、自动摘要，以及手动停止时保留真实流式输出。
+- `ChatRoom.vue` 从约 3930 行降到约 3552 行；新增 21 条 direct Runtime tests，并把 boundary test 从 4 条扩到 7 条。预期测试矩阵：52 files / 440 tests。IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+
+## V0.5.0-alpha.5.2.2
+
+- Generation Runtime 第三阶段：新增 `communityUiRepairRuntime.ts`，统一 Community UI contract 校验、历史状态延续、本地 repair、紧凑 regex/XML 状态补全、一次 AI 内容纠偏、token-limit 降级、第一版真实回复 fallback 与最终用户消息所有权过滤。
+- 新增 `assistantStateEffectsRuntime.ts`，把 Conversation State、active resource、Lorebook timed runtime、state history、主观观察记忆和 Character mood/activity side effects 从 `ChatRoom.vue` 下沉；候选回复明确 side-effect free。
+- Community UI repair 后重新 parse 最终 canonical assistant 文本，修复 repaired rawContent 与 status/actions 可能双轨的问题。
+- `ChatRoom.vue` 从约 4128 行降到约 3930 行；新增 18 条直接 Runtime 测试 + 4 条 Runtime 边界测试，测试矩阵提升到 49 files / 416 tests。IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+
 ## V0.5.0-alpha.5.2.1
 
 - ChatRoom Generation Runtime 拆分第二阶段一次性扩大：新增 `assistantReplyFinalizationRuntime.ts`，统一最终 assistant parse、Regex display projection、宏替换、presence override、native action shaping、visible-output 选择与 persistence mode 决策。
