@@ -1,18 +1,26 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-20**  
-当前版本：**V0.5.0-alpha.5.2.0**
+当前版本：**V0.5.0-alpha.5.2.1**
 
 ```text
-App：0.5.0-alpha.5.2.0
+App：0.5.0-alpha.5.2.1
 Launcher：Grid V13（Layout Inspector V4 + Dock/Home 去重 + DOM 绘制诊断）
 IndexedDB：V18
 Backup：V12
-测试定义：44 files / 373 it-test declarations
+测试定义：46 files / 394 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
+
+## 0. 本轮 alpha.5.2.1 重点
+
+- **Generation Runtime 拆分第二阶段（扩大范围）**：最终 assistant parse / Regex projection / 宏替换 / presence override / native action shaping / visible output / persistence mode 全部收口到 `assistantReplyFinalizationRuntime.ts`。
+- **Action Persistence Runtime**：typing pause、recall、reaction、voice、emoji、image placeholder、普通 text 的节奏、目标解析、元数据分配和落库编排下沉到 `assistantActionPersistenceRuntime.ts`。
+- `ChatRoom.vue` 从 5.2.0 的约 4279 行进一步降到约 4128 行；本轮不改 Provider 调用、Community UI repair、Memory/State 写入协议。
+- Streaming 最终复用消息补齐 Regex applied metadata；Provider 失败继续真实上抛，不增加本地角色 fallback。
+- 新增 21 条 Runtime 回归测试；测试矩阵：46 文件 / 394 tests；最终以 Windows 两次 `npm run verify` 为准。
 
 ## 0. 本轮 alpha.5.2.0 重点
 

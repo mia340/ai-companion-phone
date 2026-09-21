@@ -1,3 +1,10 @@
+## V0.5.0-alpha.5.2.1
+
+- Generation Runtime phase 2: extract final assistant reply normalization/projection/persistence planning and action persistence orchestration from ChatRoom.
+- Added `assistantReplyFinalizationRuntime.ts` + 13 tests and `assistantActionPersistenceRuntime.ts` + 8 tests.
+- Streaming final-message reuse now stores Regex applied metadata consistently.
+- Expected regression matrix: 46 files / 394 tests; schemas unchanged.
+
 
 ## V0.5.0-alpha.5.2.0 · ChatRoom Generation Runtime Phase 1
 

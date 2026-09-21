@@ -1,5 +1,12 @@
 ## 2026-09-20 · V0.5.0-alpha.5.2.0
 
+## 2026-09-21 · V0.5.0-alpha.5.2.1
+
+- Generation Runtime phase 2: extract final assistant reply normalization/projection/persistence planning and action persistence orchestration from ChatRoom.
+- Added `assistantReplyFinalizationRuntime.ts` + 13 tests and `assistantActionPersistenceRuntime.ts` + 8 tests.
+- Streaming final-message reuse now stores Regex applied metadata consistently.
+- Expected regression matrix: 46 files / 394 tests; schemas unchanged.
+
 - 开始拆 `ChatRoom.vue` 的 Generation/Streaming orchestration，第一阶段只下沉可独立验证的流式消息生命周期，不做大爆炸重构。
 - 新 Runtime 负责真实 Provider chunk 对应的 placeholder 建立、增量显示、140ms 入库节流、flush、失败丢弃以及用户主动停止时保留已经出现的真实 AI 文本。
 - View 通过 hooks 更新本地 `messages`、`streamingMessageId` 和滚动，不再直接拥有 persistence timer；最终协议解析、Regex、社区 UI 和 state/memory side effects 暂留后续阶段。

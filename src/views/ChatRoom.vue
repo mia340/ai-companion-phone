@@ -37,7 +37,6 @@ import {
 import {
   patchGeneratedMessage,
   persistAlternativeReply,
-  persistAssistantContentMessage,
   persistRichAssistantMessage,
   removeGeneratedMessage
 } from '../runtime/generation/responsePersistenceService'
@@ -46,6 +45,16 @@ import {
   createStreamingReplySession,
   type StreamingReplySession
 } from '../runtime/generation/streamingReplyRuntime'
+import {
+  buildRegexPipelineDebug,
+  finalizeAssistantReply,
+  prepareParsedAssistantOutput,
+  type AssistantReplyFinalizationResult
+} from '../runtime/generation/assistantReplyFinalizationRuntime'
+import {
+  createAssistantActionPersistenceRuntime,
+  type PersistAssistantActionsOptions
+} from '../runtime/generation/assistantActionPersistenceRuntime'
 import {
   isTokenLimitError,
   ProviderHttpError,
@@ -95,7 +104,7 @@ import { buildLorebookPrompt } from '../services/lorebookService'
 import { resolveCharacterRuntimeProfile } from '../services/characterRuntimeProfile'
 import { characterMacroName, detectCharacterCardFamily } from '../services/characterCardCompatibility'
 import { renderCharacterCardPromptText, renderRoleplayText } from '../services/textMacroService'
-import { estimateVoiceDuration, mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText, type CompanionActionMessage, type ParsedCompanionOutput } from '../services/interactionProtocol'
+import { mergeStatusIntoConversationState, naturalnessWarnings, parseCompanionOutput, resolvePresenceMode, scoreNaturalness, shapeCompanionActions, visibleStreamingText } from '../services/interactionProtocol'
 import { extractRoleCardUiHints, parseRoleCardUi, resolvePresenceFromRoleCardScene, roleCardUiToConversationPatch } from '../services/roleCardUiService'
 import { analyzePromptSections, buildRuleInfluences, buildTruncationNotes, estimatePromptCharacters, patchPromptDebugTrace, savePromptDebugTrace } from '../services/promptDebugService'
 import { buildConversationStatePrompt, deriveUserSceneTransition, deriveUserStatePatch, recordConversationStateChanges } from '../services/stateHistoryService'
@@ -991,26 +1000,32 @@ const streamingRuntime = createStreamingReplyRuntime({
 
 async function finishStreamingMessage(
   session: StreamingReplySession,
-  output: ParsedCompanionOutput,
+  finalization: AssistantReplyFinalizationResult,
   activeCharacter: Character,
-  settings: ChatSettings,
-  renderState?: ConversationState,
-  allowNativeMessageReshaping = true
+  settings: ChatSettings
 ) {
-  const resolvedRenderState = output.status?.presence
-    ? ({ ...(renderState || {}), presence: output.status.presence } as ConversationState)
-    : renderState
-  const actions = allowNativeMessageReshaping
-    ? shapeCompanionActions(output.messages.slice(), activeCharacter, settings, Boolean(output.rawPacket), resolvedRenderState)
-    : output.messages.slice()
+  const actions = finalization.projectedActions
+  const output = finalization.parsedOutput
   if (!actions.length) throw new Error('模型没有返回有效回复。')
   session.text = actions.map(item => item.content).join('\n\n')
   const canReuse = Boolean(session.messageId) && actions.length === 1 && actions[0].kind === 'text' && session.type !== 'voice' && session.type !== 'emoji'
   if (canReuse && session.messageId) {
-    const visibleRoleCardUi = settings.conversationPresentationMode === 'scene-merged' ? output.roleCardUi : undefined
-    await patchGeneratedMessage(session.messageId, { content: actions[0].content, rawContent: session.canonicalText || session.rawText || undefined, modelOutput: session.rawText || undefined, regexPipelineVersion: 2, status: 'delivered', provider: session.provider, model: session.model, generationId: session.generationId, errorText: undefined, protocolVersion: output.rawPacket ? 2 : undefined, roleCardUi: visibleRoleCardUi, proactiveSource: session.proactiveSource })
+    await patchGeneratedMessage(session.messageId, {
+      content: actions[0].content,
+      rawContent: session.canonicalText || session.rawText || undefined,
+      modelOutput: session.rawText || undefined,
+      regexPipelineVersion: 2,
+      regexApplied: finalization.regexApplied,
+      status: 'delivered',
+      provider: session.provider,
+      model: session.model,
+      generationId: session.generationId,
+      errorText: undefined,
+      protocolVersion: output.rawPacket ? 2 : undefined,
+      roleCardUi: finalization.visibleRoleCardUi,
+      proactiveSource: session.proactiveSource
+    })
   } else {
-    const visibleRoleCardUi = settings.conversationPresentationMode === 'scene-merged' ? output.roleCardUi : undefined
     await saveAssistantActions({
       conversation: session.conversation,
       character: activeCharacter,
@@ -1021,10 +1036,11 @@ async function finishStreamingMessage(
       generationId: session.generationId,
       type: session.type,
       replaceMessageId: session.messageId,
-      roleCardUi: visibleRoleCardUi,
+      roleCardUi: finalization.visibleRoleCardUi,
       proactiveSource: session.proactiveSource,
       rawContent: session.canonicalText || session.rawText || undefined,
-      modelOutput: session.rawText || undefined
+      modelOutput: session.rawText || undefined,
+      regexApplied: finalization.regexApplied
     })
   }
   messages.value = await db.messages.where('conversationId').equals(session.conversation.id).sortBy('createdAt')
@@ -1034,137 +1050,17 @@ async function finishStreamingMessage(
   await scrollToBottom('auto')
 }
 
-function actionMessageType(action: CompanionActionMessage, baseType?: Message['type']): Message['type'] {
-  if (action.kind === 'scene_action') return 'action'
-  if (action.kind === 'emoji') return 'emoji'
-  if (action.kind === 'voice') return 'voice'
-  if (action.kind === 'image_placeholder') return 'image'
-  return baseType === 'music' ? 'music' : 'text'
+const assistantActionPersistenceRuntime = createAssistantActionPersistenceRuntime()
+
+async function saveAssistantActions(options: PersistAssistantActionsOptions) {
+  await assistantActionPersistenceRuntime.persistActions(options, {
+    onMessagesChanged(nextMessages) {
+      messages.value = nextMessages
+    },
+    onScrollRequested: () => scrollToBottom()
+  })
 }
-function messagePacingDelay(
-  action: CompanionActionMessage,
-  index: number,
-  settings: ChatSettings,
-  activeCharacter: Character
-) {
-  if (action.kind === 'typing_pause') return action.delayMs ?? 620
-  if (index === 0 || !settings.naturalDelay) return action.delayMs ?? 0
-  const pacing = settings.messagePacing ?? 'natural'
-  if (pacing === 'off') return action.delayMs ?? 0
-  const speedFactor = activeCharacter.replySpeed === 'slow' ? 1.35 : activeCharacter.replySpeed === 'instant' ? .65 : 1
-  const base = pacing === 'quick' ? 260 : pacing === 'slow' ? 760 : 430
-  const perCharacter = action.kind === 'emoji' ? 0 : pacing === 'slow' ? 17 : 11
-  return Math.max(action.delayMs ?? 0, Math.round((base + Math.min(1400, action.content.length * perCharacter)) * speedFactor))
-}
-function resolveActionTarget(
-  conversationId: string,
-  targetMessageId: string | undefined,
-  sender: 'user' | 'assistant'
-) {
-  const conversationMessages = messages.value.filter(item => item.conversationId === conversationId)
-  if (targetMessageId && targetMessageId !== 'latest_user' && targetMessageId !== 'latest_assistant') {
-    return conversationMessages.find(item => item.id === targetMessageId)
-  }
-  const wantUser = targetMessageId === 'latest_user' || sender === 'user'
-  return [...conversationMessages].reverse().find(item => wantUser ? item.senderId === 'user' : item.senderId !== 'user')
-}
-async function saveAssistantActions(options: {
-  conversation: Conversation
-  character: Character
-  settings: ChatSettings
-  actions: CompanionActionMessage[]
-  provider: string
-  model: string
-  generationId: string
-  type?: Message['type']
-  signal?: AbortSignal
-  replaceMessageId?: string
-  roleCardUi?: Message['roleCardUi']
-  proactiveSource?: ProactiveSource
-  rawContent?: string
-  modelOutput?: string
-  displayContent?: string
-  regexApplied?: Message['regexApplied']
-}) {
-  if (!options.actions.length) return
-  const activeConversation = options.conversation
-  const groupId = crypto.randomUUID()
-  let roleCardUiAssigned = false
-  let rawContentAssigned = false
-  let modelOutputAssigned = false
-  let displayContentAssigned = false
-  if (options.replaceMessageId) {
-    await removeGeneratedMessage(options.replaceMessageId)
-    messages.value = messages.value.filter(item => item.id !== options.replaceMessageId)
-  }
 
-  for (let index = 0; index < options.actions.length; index += 1) {
-    if (options.signal?.aborted) throw new DOMException('请求已取消', 'AbortError')
-    const action = options.actions[index]
-    const delay = messagePacingDelay(action, index, options.settings, options.character)
-    if (delay > 0) await wait(delay, options.signal)
-
-    if (action.kind === 'typing_pause') continue
-
-    if (action.kind === 'recall_message') {
-      const target = resolveActionTarget(activeConversation.id, action.targetMessageId, 'assistant')
-      if (target && target.senderId !== 'user' && !target.recalledAt) {
-        const recalledAt = new Date().toISOString()
-        await db.messages.update(target.id, {
-          recalledAt,
-          recalledOriginalContent: target.content,
-          content: '',
-          alternatives: undefined,
-          activeAlternativeIndex: undefined,
-          protocolVersion: 2
-        })
-        const targetIndex = messages.value.findIndex(item => item.id === target.id)
-        if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], recalledAt, recalledOriginalContent: target.content, content: '', alternatives: undefined, activeAlternativeIndex: undefined, protocolVersion: 2 }
-      }
-      continue
-    }
-
-    if (action.kind === 'react_to_message') {
-      const target = resolveActionTarget(activeConversation.id, action.targetMessageId || 'latest_user', 'user')
-      if (target && action.content) {
-        await db.messages.update(target.id, { reactionEmoji: action.content.slice(0, 8), reactionToMessageId: target.id, protocolVersion: 2 })
-        const targetIndex = messages.value.findIndex(item => item.id === target.id)
-        if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], reactionEmoji: action.content.slice(0, 8), reactionToMessageId: target.id, protocolVersion: 2 }
-      }
-      continue
-    }
-
-    const now = new Date(Date.now() + index).toISOString()
-    const type = actionMessageType(action, options.type)
-    const message = await persistAssistantContentMessage({
-      conversation: activeConversation,
-      senderId: activeConversation.memberIds[0],
-      type,
-      content: action.kind === 'image_placeholder' ? '' : action.content,
-      generationId: options.generationId,
-      provider: options.provider,
-      model: options.model,
-      proactiveSource: options.proactiveSource,
-      replyGroupId: groupId,
-      replySequence: index,
-      rawContent: !rawContentAssigned && options.rawContent ? options.rawContent : undefined,
-      modelOutput: !modelOutputAssigned && options.modelOutput ? options.modelOutput : undefined,
-      displayContent: options.actions.length === 1 && !displayContentAssigned && options.displayContent ? options.displayContent : undefined,
-      regexApplied: !rawContentAssigned && options.regexApplied ? options.regexApplied : undefined,
-      roleCardUi: !roleCardUiAssigned && options.roleCardUi ? options.roleCardUi : undefined,
-      voiceDurationSeconds: type === 'voice' ? estimateVoiceDuration(action.content) : undefined,
-      placeholderImagePrompt: action.kind === 'image_placeholder' ? action.content : undefined,
-      protocolVersion: 2,
-      createdAt: now
-    })
-    if (message.roleCardUi) roleCardUiAssigned = true
-    if (message.rawContent) rawContentAssigned = true
-    if (message.modelOutput) modelOutputAssigned = true
-    if (message.displayContent) displayContentAssigned = true
-    messages.value = await db.messages.where('conversationId').equals(activeConversation.id).sortBy('createdAt')
-    await scrollToBottom()
-  }
-}
 async function saveRichAssistantMessage(options: {
   conversation: Conversation
   senderId: string
@@ -1416,39 +1312,15 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
     let assistantRegexView = compileAssistantCandidate(response.text)
     const initialAssistantCanonicalText = assistantRegexView.canonicalText
     let assistantCanonicalText = initialAssistantCanonicalText
-    let parsedOutput = parseCompanionOutput(assistantCanonicalText, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
-    const applyVisibleMacrosToParsedOutput = () => {
-      const replace = (value?: string) => renderRoleplayText(value, persona.name, macroCharacterName)
-      parsedOutput = {
-        ...parsedOutput,
-        visibleText: replace(parsedOutput.visibleText) || '',
-        messages: parsedOutput.messages.map(item => ({ ...item, content: replace(item.content) || '' })),
-        roleCardUi: parsedOutput.roleCardUi ? {
-          ...parsedOutput.roleCardUi,
-          date: replace(parsedOutput.roleCardUi.date),
-          time: replace(parsedOutput.roleCardUi.time),
-          location: replace(parsedOutput.roleCardUi.location),
-          inner: replace(parsedOutput.roleCardUi.inner),
-          surroundings: replace(parsedOutput.roleCardUi.surroundings),
-          todos: parsedOutput.roleCardUi.todos?.map(item => replace(item) || item)
-        } : undefined,
-        status: parsedOutput.status ? {
-          ...parsedOutput.status,
-          mood: replace(parsedOutput.status.mood),
-          activity: replace(parsedOutput.status.activity),
-          location: replace(parsedOutput.status.location),
-          relationshipNote: replace(parsedOutput.status.relationshipNote),
-          innerThought: replace(parsedOutput.status.innerThought),
-          timePeriod: replace(parsedOutput.status.timePeriod),
-          unresolvedTopics: parsedOutput.status.unresolvedTopics?.map(item => replace(item) || item),
-          pendingEvents: parsedOutput.status.pendingEvents?.map(item => replace(item) || item),
-          shortTermGoals: parsedOutput.status.shortTermGoals?.map(item => replace(item) || item),
-          completedEvent: replace(parsedOutput.status.completedEvent)
-        } : undefined
-      }
-      if (runtimeProfile.preserveCardOutput || communityUiContract.active) parsedOutput = { ...parsedOutput, roleCardUi: undefined }
-    }
-    applyVisibleMacrosToParsedOutput()
+    let parsedOutput = prepareParsedAssistantOutput({
+      text: assistantCanonicalText,
+      useNativeInteractionProtocol: runtimeProfile.useNativeInteractionProtocol,
+      userName: persona.name,
+      personaName: persona.name,
+      macroCharacterName,
+      preserveCardOutput: runtimeProfile.preserveCardOutput,
+      communityUiActive: communityUiContract.active
+    })
     let regexDisplay = {
       text: assistantRegexView.displayText,
       applied: [...assistantRegexView.storageApplied, ...assistantRegexView.displayApplied],
@@ -1627,8 +1499,15 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       // 格式纠偏没有成功时，恢复第一版真实 AI 的规范化存储视图。UI 可以降级，正文不能被静默丢弃。
       response = initialAiResponse
       refreshAssistantCandidateFromCanonical(initialAssistantCanonicalText)
-      parsedOutput = parseCompanionOutput(initialAssistantCanonicalText, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
-      applyVisibleMacrosToParsedOutput()
+      parsedOutput = prepareParsedAssistantOutput({
+        text: initialAssistantCanonicalText,
+        useNativeInteractionProtocol: runtimeProfile.useNativeInteractionProtocol,
+        userName: persona.name,
+        personaName: persona.name,
+        macroCharacterName,
+        preserveCardOutput: runtimeProfile.preserveCardOutput,
+        communityUiActive: communityUiContract.active
+      })
       communityUiText = !presentationHidesCommunityUi && !richReplyHtml
         ? (renderRoleplayText(sanitizeCommunityUiText(regexDisplay.text), persona.name, macroCharacterName) || '')
         : ''
@@ -1643,77 +1522,41 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
       richReplyHtml = enforceUserMessageOwnershipInRichHtml(richReplyHtml, realUserMessages)
     }
 
-    if (!communityUiContract.active && !richReplyHtml && regexDisplay.applied.length) {
-      const transformed = parseCompanionOutput(regexDisplay.text, { interpretNativeProtocol: runtimeProfile.useNativeInteractionProtocol, userName: persona.name })
-      parsedOutput = { ...parsedOutput, messages: transformed.messages, visibleText: transformed.visibleText, actionSummary: transformed.actionSummary, status: transformed.status || parsedOutput.status, roleCardUi: transformed.roleCardUi || parsedOutput.roleCardUi, presenceResolution: transformed.presenceResolution?.resolvedPresence ? transformed.presenceResolution : parsedOutput.presenceResolution }
-      applyVisibleMacrosToParsedOutput()
-    }
-    if (!parsedOutput.messages.length && !richReplyHtml && !communityUiText) throw new Error('模型没有返回可显示的角色回复。')
-
     // 角色回复内容到这里以后不再做本地语义重写。
     // 应用只校验原卡明确要求的结构；台词、动作、心理、用户事实判断均保留 AI 原始生成结果。
-
-    if (settings.presenceMode === 'together' || settings.presenceMode === 'remote') {
-      const forcedPresence = settings.presenceMode
-      const inferred = parsedOutput.presenceResolution
-      parsedOutput = {
-        ...parsedOutput,
-        status: { ...(parsedOutput.status || {}), presence: forcedPresence },
-        presenceResolution: {
-          reportedPresence: inferred?.reportedPresence,
-          resolvedPresence: forcedPresence,
-          source: 'manual',
-          conflict: Boolean(inferred?.resolvedPresence && inferred.resolvedPresence !== forcedPresence),
-          uiSurroundings: inferred?.uiSurroundings,
-          reason: `聊天设置手动指定为${forcedPresence === 'together' ? '同场景' : '远程'}，优先于自动场景推断。`
-        }
-      }
-    }
-
-    const renderStateForDisplay = parsedOutput.status?.presence
-      ? ({ ...(generationContext.conversationState || {}), presence: parsedOutput.status.presence } as ConversationState)
-      : generationContext.conversationState
-    const projectedActions = runtimeProfile.allowNativeMessageReshaping
-      ? shapeCompanionActions(parsedOutput.messages.slice(), activeCharacter, settings, Boolean(parsedOutput.rawPacket), renderStateForDisplay)
-      : parsedOutput.messages.slice()
-    const projectedVisibleText = projectedActions
-      .filter(item => !['typing_pause', 'recall_message', 'react_to_message'].includes(item.kind))
-      .map(item => item.kind === 'scene_action' ? `（${item.content}）` : item.content)
-      .filter(Boolean)
-      .join('\n\n')
-    if (settings.conversationPresentationMode !== 'scene-merged' && !projectedVisibleText.trim()) {
-      throw new Error(settings.conversationPresentationMode === 'phone-text'
-        ? '纯手机模式下模型没有返回可显示的角色语句。'
-        : '动作 / 台词分开模式下模型没有返回可显示的角色内容。')
-    }
-    const finalVisibleOutput = richReplyHtml || communityUiText || projectedVisibleText || (settings.conversationPresentationMode === 'scene-merged' ? parsedOutput.visibleText : '')
-    const visibleRoleCardUi = settings.conversationPresentationMode === 'scene-merged' ? parsedOutput.roleCardUi : undefined
-    const assistantRegexApplied: Message['regexApplied'] = {
-      storage: assistantRegexView.storageApplied,
-      display: assistantRegexView.displayApplied
-    }
-    const hasDisplayOnlyProjection = assistantRegexView.displayApplied.length > 0
+    const finalization = finalizeAssistantReply({
+      parsedOutput,
+      regexDisplayText: regexDisplay.text,
+      regexStorageApplied: assistantRegexView.storageApplied,
+      regexDisplayApplied: assistantRegexView.displayApplied,
+      richReplyHtml,
+      communityUiText,
+      communityUiActive: communityUiContract.active,
+      canonicalText: assistantCanonicalText,
+      character: activeCharacter,
+      settings,
+      conversationState: generationContext.conversationState,
+      runtimeProfile,
+      userName: persona.name,
+      personaName: persona.name,
+      macroCharacterName,
+      alternativeTargetId: options?.alternativeTargetId,
+      useStreaming
+    })
+    parsedOutput = finalization.parsedOutput
+    const projectedActions = finalization.projectedActions
+    const finalVisibleOutput = finalization.finalVisibleOutput
+    const visibleRoleCardUi = finalization.visibleRoleCardUi
+    const assistantRegexApplied: Message['regexApplied'] = finalization.regexApplied
     // Streaming preview may have shown partial raw output, but final persistence must use the canonical Regex storage view.
     streamSession.canonicalText = assistantCanonicalText
 
     if (debugTrace) {
       try {
-        const uniqueTraceNames = (predicate: (trace: RegexExecutionTrace) => boolean) => Array.from(new Set(
-          regexExecutionTraces.filter(predicate).map(trace => trace.name)
-        ))
-        const regexPipelineDebug: NonNullable<PromptDebugTrace['regexPipeline']> = {
-          activeScripts: new Set([...activeAssistantRegex, ...activeUserRegex, ...activeWorldRegex].map(item => item.id)).size,
-          storageApplied: uniqueTraceNames(trace => trace.applied && trace.phase === 'storage'),
-          displayApplied: uniqueTraceNames(trace => trace.applied && trace.phase === 'display'),
-          promptApplied: uniqueTraceNames(trace => trace.applied && trace.phase === 'outgoing-prompt' && trace.source !== 'world-info'),
-          worldInfoApplied: uniqueTraceNames(trace => trace.applied && trace.phase === 'outgoing-prompt' && trace.source === 'world-info'),
-          depthSkipped: uniqueTraceNames(trace => !trace.applied && (trace.reason === 'depth' || trace.reason === 'invalid-depth')),
-          unsupported: uniqueTraceNames(trace => !trace.applied && trace.reason === 'unsupported-placement'),
-          notes: [
-            'Regex 按 placement 作用于用户输入 / AI 回复 / 世界书，不再把 promptOnly 作用到整个 System Prompt。',
-            'markdownOnly 只改变显示；promptOnly 只改变发给 AI 的临时视图；两者同时开启时两边改变但聊天存储保持原文。'
-          ]
-        }
+        const regexPipelineDebug = buildRegexPipelineDebug({
+          traces: regexExecutionTraces,
+          activeScriptIds: [...activeAssistantRegex, ...activeUserRegex, ...activeWorldRegex].map(item => item.id)
+        })
         await patchPromptDebugTrace(debugTrace.id, {
           regexPipeline: regexPipelineDebug,
           provider: providerId,
@@ -1788,91 +1631,96 @@ async function requestAssistantReply(options?: GenerationRequestOptions) {
         character.value = { ...activeCharacter, ...characterPatch }
       }
     }
-    if (options?.alternativeTargetId) {
-      const target = messages.value.find(item => item.id === options.alternativeTargetId)
-      if (!target) throw new Error('没有找到需要添加候选回复的消息。')
-      const { patch, activeAlternativeIndex } = await persistAlternativeReply({
-        target,
-        content: finalVisibleOutput,
-        provider: providerId,
-        model: usedModel,
-        generationId
-      })
-      const targetIndex = messages.value.findIndex(item => item.id === target.id)
-      if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], ...patch }
-      noticeMessage.value = `已生成第 ${activeAlternativeIndex + 1} 个候选回复。`
-    } else if (richReplyHtml) {
-      await saveRichAssistantMessage({
-        conversation: activeConversation,
-        senderId: activeCharacter.id,
-        html: richReplyHtml,
-        rawContent: assistantCanonicalText,
-        modelOutput: initialAiResponse.text,
-        provider: providerId,
-        model: usedModel,
-        generationId,
-        source: regexDisplay.applied.some(name => activeAssistantRegex.some(script => script.name === name && regexProducesRichUi(script)))
-          ? 'regex'
-          : communityUiContract.active
-            ? 'worldbook-ui'
-            : 'card-ui',
-        replaceMessageId: streamSession.messageId,
-        proactiveSource: options?.proactiveSource,
-        regexApplied: assistantRegexApplied
-      })
-      streamSession.messageId = undefined
-    } else if (communityUiContract.active || hasDisplayOnlyProjection) {
-      // markdownOnly / display-only Regex is a transient renderer. Keep canonical source in storage and only project the visible view.
-      const preservedDisplay = communityUiContract.active
-        ? (communityUiText || sanitizeCommunityUiText(assistantRegexView.displayText))
-        : finalVisibleOutput
-      await saveAssistantActions({
-        conversation: activeConversation,
-        character: activeCharacter,
-        settings,
-        actions: [{ kind: 'text', content: assistantCanonicalText }],
-        provider: providerId,
-        model: usedModel,
-        generationId,
-        type: options?.type,
-        signal,
-        replaceMessageId: streamSession.messageId,
-        roleCardUi: visibleRoleCardUi,
-        proactiveSource: options?.proactiveSource,
-        rawContent: assistantCanonicalText,
-        modelOutput: initialAiResponse.text,
-        displayContent: preservedDisplay !== assistantCanonicalText ? preservedDisplay : undefined,
-        regexApplied: assistantRegexApplied
-      })
-      streamSession.messageId = undefined
-    } else if (useStreaming) {
-      streamSession.provider = providerId; streamSession.model = usedModel
-      await finishStreamingMessage(
-        streamSession,
-        parsedOutput,
-        activeCharacter,
-        settings,
-        generationContext.conversationState,
-        runtimeProfile.allowNativeMessageReshaping
-      )
-    } else {
-      if (settings.naturalDelay) await wait(240 + Math.min(900, parsedOutput.visibleText.length * 9), signal)
-      await saveAssistantActions({
-        conversation: activeConversation,
-        character: activeCharacter,
-        settings,
-        actions: projectedActions,
-        provider: providerId,
-        model: usedModel,
-        generationId,
-        type: options?.type,
-        signal,
-        roleCardUi: visibleRoleCardUi,
-        proactiveSource: options?.proactiveSource,
-        rawContent: assistantCanonicalText,
-        modelOutput: initialAiResponse.text,
-        regexApplied: assistantRegexApplied
-      })
+    switch (finalization.persistenceMode) {
+      case 'alternative': {
+        const target = messages.value.find(item => item.id === options?.alternativeTargetId)
+        if (!target) throw new Error('没有找到需要添加候选回复的消息。')
+        const { patch, activeAlternativeIndex } = await persistAlternativeReply({
+          target,
+          content: finalVisibleOutput,
+          provider: providerId,
+          model: usedModel,
+          generationId
+        })
+        const targetIndex = messages.value.findIndex(item => item.id === target.id)
+        if (targetIndex >= 0) messages.value[targetIndex] = { ...messages.value[targetIndex], ...patch }
+        noticeMessage.value = `已生成第 ${activeAlternativeIndex + 1} 个候选回复。`
+        break
+      }
+      case 'rich': {
+        await saveRichAssistantMessage({
+          conversation: activeConversation,
+          senderId: activeCharacter.id,
+          html: richReplyHtml,
+          rawContent: assistantCanonicalText,
+          modelOutput: initialAiResponse.text,
+          provider: providerId,
+          model: usedModel,
+          generationId,
+          source: regexDisplay.applied.some(name => activeAssistantRegex.some(script => script.name === name && regexProducesRichUi(script)))
+            ? 'regex'
+            : communityUiContract.active
+              ? 'worldbook-ui'
+              : 'card-ui',
+          replaceMessageId: streamSession.messageId,
+          proactiveSource: options?.proactiveSource,
+          regexApplied: assistantRegexApplied
+        })
+        streamSession.messageId = undefined
+        break
+      }
+      case 'canonical-display': {
+        // markdownOnly / display-only Regex is a transient renderer. Keep canonical source in storage and only project the visible view.
+        const preservedDisplay = communityUiContract.active
+          ? (communityUiText || sanitizeCommunityUiText(assistantRegexView.displayText))
+          : finalVisibleOutput
+        await saveAssistantActions({
+          conversation: activeConversation,
+          character: activeCharacter,
+          settings,
+          actions: [{ kind: 'text', content: assistantCanonicalText }],
+          provider: providerId,
+          model: usedModel,
+          generationId,
+          type: options?.type,
+          signal,
+          replaceMessageId: streamSession.messageId,
+          roleCardUi: visibleRoleCardUi,
+          proactiveSource: options?.proactiveSource,
+          rawContent: assistantCanonicalText,
+          modelOutput: initialAiResponse.text,
+          displayContent: preservedDisplay !== assistantCanonicalText ? preservedDisplay : undefined,
+          regexApplied: assistantRegexApplied
+        })
+        streamSession.messageId = undefined
+        break
+      }
+      case 'streaming': {
+        streamSession.provider = providerId
+        streamSession.model = usedModel
+        await finishStreamingMessage(streamSession, finalization, activeCharacter, settings)
+        break
+      }
+      case 'actions': {
+        if (settings.naturalDelay) await wait(240 + Math.min(900, parsedOutput.visibleText.length * 9), signal)
+        await saveAssistantActions({
+          conversation: activeConversation,
+          character: activeCharacter,
+          settings,
+          actions: projectedActions,
+          provider: providerId,
+          model: usedModel,
+          generationId,
+          type: options?.type,
+          signal,
+          roleCardUi: visibleRoleCardUi,
+          proactiveSource: options?.proactiveSource,
+          rawContent: assistantCanonicalText,
+          modelOutput: initialAiResponse.text,
+          regexApplied: assistantRegexApplied
+        })
+        break
+      }
     }
 
     if (options?.proactiveSource) {

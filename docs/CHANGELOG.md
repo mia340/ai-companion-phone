@@ -1,5 +1,12 @@
 # Changelog
 
+## V0.5.0-alpha.5.2.1
+
+- ChatRoom Generation Runtime 拆分第二阶段一次性扩大：新增 `assistantReplyFinalizationRuntime.ts`，统一最终 assistant parse、Regex display projection、宏替换、presence override、native action shaping、visible-output 选择与 persistence mode 决策。
+- 新增 `assistantActionPersistenceRuntime.ts`，把消息类型映射、节奏延迟、recall/reaction target、stream placeholder 替换、reply-group 元数据分配、image placeholder 与逐 action 落库从 View 下沉到 Runtime。
+- `ChatRoom.vue` 不再自己维护最终输出的多分支决定；Streaming 最终复用消息补齐 `regexApplied` 元数据，和非流式路径一致。
+- 新增 21 条直接 Runtime 测试；测试矩阵提升到 46 files / 394 tests。IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+
 ## V0.5.0-alpha.5.2.0
 
 - ChatRoom Generation Runtime 拆分第一阶段：新增 `runtime/generation/streamingReplyRuntime.ts`，统一管理流式 assistant placeholder 的 create / patch / debounce persistence / flush / discard / interrupted-preserve 生命周期。
