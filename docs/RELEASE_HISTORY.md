@@ -1,3 +1,11 @@
+## V0.5.0-alpha.5.3.0
+
+- Add native “时光 / 共同回忆” V1 with a source-backed timeline over Memory, Moments and selected Conversation State History.
+- Add user-controlled star/hide/custom-title preferences without a new IndexedDB store; source records remain canonical.
+- Add evidence-constrained AI milestone proposals: only supplied evidence IDs are accepted, proposals never auto-write facts, and user confirmation is required to persist the suggested title/star.
+- Add deep links back to exact chat messages and existing Moments posts; add `timeline` launcher app key and icon.
+- Expected regression matrix: 54 files / 453 tests. IndexedDB V18 / Backup V12 / HomeLayout revision 12 unchanged.
+
 ## V0.5.0-alpha.5.2.4
 
 - TypeScript release hotfix for alpha.5.2.3: repair `UserPersona` test fixture, remove one dead ChatRoom import, and align Community UI compiled candidates with the canonical `RegexPipelineView` contract.

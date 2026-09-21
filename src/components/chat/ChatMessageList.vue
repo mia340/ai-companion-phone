@@ -64,6 +64,7 @@ defineExpose({ getElement })
       v-for="(message, index) in props.messages"
       :key="message.id"
       :message="message"
+      :data-message-id="message.id"
       :character="character"
       :user-profile="userProfile"
       :show-time="shouldShowTime(index)"

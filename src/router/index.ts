@@ -38,6 +38,7 @@ const MomentCharacterSocialView = () => import('../views/MomentCharacterSocialVi
 const TurtleSoupView = () => import('../views/TurtleSoupView.vue')
 const TurtleSoupHostView = () => import('../views/TurtleSoupHostView.vue')
 const MusicAppView = () => import('../views/MusicAppView.vue')
+const SharedTimelineView = () => import('../views/SharedTimelineView.vue')
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -177,6 +178,10 @@ export const router = createRouter({
     {
       path: '/app/音乐',
       component: MusicAppView
+    },
+    {
+      path: '/app/时光',
+      component: SharedTimelineView
     },
     {
       path: '/app/:name',

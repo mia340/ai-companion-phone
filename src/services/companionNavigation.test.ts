@@ -30,6 +30,7 @@ describe('知间桌面入口与布局', () => {
       'turtle-soup',
       'profile',
       'memory',
+      'timeline',
       'backup'
     ])
     expect(HOME_APPS.find(item => item.key === 'music')?.route).toBe('/app/音乐')
@@ -50,6 +51,7 @@ describe('知间桌面入口与布局', () => {
       'turtle-soup',
       'profile',
       'memory',
+      'timeline',
       'world',
       'backup',
       'settings',

@@ -706,6 +706,24 @@ async function normalizeLegacySceneActionMessages(
   return { rows: normalized, state: nextState }
 }
 
+async function scrollToLinkedMessage() {
+  const messageId = typeof route.query.message === 'string' ? route.query.message : ''
+  if (!messageId) return
+  await nextTick()
+  const list = messageListRef.value?.getElement()
+  const target = list
+    ? [...list.querySelectorAll<HTMLElement>('[data-message-id]')].find(element => element.dataset.messageId === messageId)
+    : undefined
+  if (!target) return
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  if (typeof target.animate === 'function') {
+    target.animate([
+      { opacity: .58, transform: 'scale(.985)' },
+      { opacity: 1, transform: 'scale(1)' }
+    ], { duration: 900, easing: 'ease-out' })
+  }
+}
+
 async function loadConversation(conversationId: string) {
   const loadEpoch = ++conversationLoadEpoch
   const isCurrentLoad = () => loadEpoch === conversationLoadEpoch && String(route.params.id || '') === conversationId
@@ -825,6 +843,8 @@ async function loadConversation(conversationId: string) {
     await restoreScrollPosition(conversationId)
     if (!isCurrentLoad()) return
     await nextTick()
+    if (!isCurrentLoad()) return
+    await scrollToLinkedMessage()
     if (!isCurrentLoad()) return
 
     const greetingRows = collectCharacterGreetings(characterRow?.firstMessage, characterRow?.alternateGreetings)
@@ -2306,6 +2326,11 @@ function formatMessageTime(value: string) {
     ? { hour: '2-digit', minute: '2-digit', hour12: false }
     : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
 }
+
+watch(
+  () => route.query.message,
+  () => { void scrollToLinkedMessage() }
+)
 
 watch(
   () => route.params.id,

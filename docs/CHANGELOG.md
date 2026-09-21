@@ -1,5 +1,13 @@
 # Changelog
 
+## V0.5.0-alpha.5.3.0
+
+- 新增原生 App「时光 / 共同回忆」V1：从已有 Memory、朋友圈 Moment、Conversation State History 组成证据时间线，支持角色筛选、收藏、隐藏、改标题和跳回原来源。
+- AI 整理严格使用 evidence-id 白名单：最多选择 5 条已有证据，未知 id 直接丢弃；建议默认只展示，不自动修改任何记忆或事实。
+- 新增 Chat `?message=<id>` 原消息深链；朋友圈继续使用 `?moment=<id>`。Launcher 新增 `timeline` App key，已有桌面布局不强制迁移。
+- 用户时光偏好复用 `appCustomizations` 非索引字段；IndexedDB V18 / Backup V12 / HomeLayout revision 12 均不变。
+- 新增 `sharedTimelineService.test.ts` 与 `sharedTimelineProposalService.test.ts` 共 13 条测试；预期矩阵 54 files / 453 tests。
+
 ## V0.5.0-alpha.5.2.4
 
 - alpha.5.2.3 Windows 首轮 verify 暴露 3 个 TypeScript 编译回归，本版本只做发布热修，不改变 Generation Runtime 行为。

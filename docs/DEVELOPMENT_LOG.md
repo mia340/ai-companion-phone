@@ -1,3 +1,11 @@
+## 2026-09-21 · V0.5.0-alpha.5.3.0
+
+- 完成「时光 / 共同回忆」V1：新增 evidence-backed timeline service、原生 View、Launcher 入口与记忆中心快捷入口。
+- 时间线不新建事实表：Memory / Moment / State History 继续是事实源；`appCustomizations.sharedTimelineState` 只保存 starred/hidden/customTitles，避免复制与漂移。
+- AI 整理采用“模型提议、Runtime 验证、用户确认”的边界：输入只给候选证据摘要，输出必须引用现有 id，未知 id 丢弃，建议不自动持久化。
+- ChatMessageList 给消息 root 暴露 `data-message-id`，ChatRoom 支持 query 深链并滚动定位；朋友圈复用原有 moment query。
+- 新增 13 条服务级回归测试；预期完整矩阵 54 files / 453 tests，最终以 Windows 双 `npm run verify` 为准。
+
 ## 2026-09-21 · V0.5.0-alpha.5.2.4
 
 - Windows 首轮 `npm run verify` 在 alpha.5.2.3 的 `vue-tsc -b` 阶段暴露 3 个纯类型/死 import 回归。

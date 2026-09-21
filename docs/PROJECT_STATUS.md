@@ -1,18 +1,27 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-21**  
-当前版本：**V0.5.0-alpha.5.2.4**
+当前版本：**V0.5.0-alpha.5.3.0**
 
 ```text
-App：0.5.0-alpha.5.2.4
+App：0.5.0-alpha.5.3.0
 Launcher：Grid V13（Layout Inspector V4 + Dock/Home 去重 + DOM 绘制诊断）
 IndexedDB：V18
 Backup：V12
-测试定义：52 files / 440 it-test declarations
+测试定义：54 files / 453 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
+
+## 0. 本轮 alpha.5.3.0 重点
+
+- **时光 / 共同回忆 V1**：新增原生 `SharedTimelineView`，把已有记忆、朋友圈动态、关系/事件/目标状态历史整理成可追溯时间线；每张卡保留 source id，并可跳回原消息或原动态。
+- 用户可收藏、隐藏、改标题；这些偏好只写入 `appCustomizations` 的非索引字段，不复制事实正文，因此 IndexedDB 仍为 V18、Backup 仍为 V12，无数据迁移。
+- 新增 AI 证据整理：模型只能从 Runtime 给出的 evidence id 中挑选最多 5 条候选，未知 id 一律丢弃；AI 建议不会自动写入记忆，只有用户点“采用标题并收藏”后才保存标题/收藏偏好。
+- Launcher 新增 `timeline` App key 与“时光”图标；新安装会出现在默认桌面，已有布局不强制迁移，可在桌面编辑器手动添加，同时记忆中心提供固定“时光”入口。
+- Chat 支持 `?message=<id>` 深链，时光卡可以滚动回原消息；朋友圈继续复用既有 `?moment=<id>` 深链。
+- 新增 13 条直接测试，测试矩阵提升到 54 文件 / 453 tests；Generation Runtime 与 Provider 失败策略不变。
 
 ## 0. 本轮 alpha.5.2.4 重点
 

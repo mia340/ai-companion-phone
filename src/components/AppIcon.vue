@@ -79,6 +79,12 @@ const props = withDefaults(defineProps<{
         <path d="M21 18c-5 0-8 3.7-8 8.2 0 2.5 1 4.6 2.7 6.1-1.3 1.5-2 3.4-2 5.5 0 5.4 3.8 8.7 8.9 8.7h3.5v4h12v-4h3.5c5.1 0 8.9-3.3 8.9-8.7 0-2.1-.7-4-2-5.5 1.7-1.5 2.7-3.6 2.7-6.1C50.3 21.7 47 18 42 18c-2.7 0-5 .9-6.5 2.6C34 18.9 31.7 18 29 18h-8Z" fill="rgba(255,255,255,.94)"/>
         <path d="M25 29h14M25 36h14" stroke="var(--icon-a)" stroke-width="3" stroke-linecap="round" opacity=".62"/>
       </g>
+      <g v-else-if="props.icon === 'timeline'">
+        <circle cx="32" cy="32" r="21" fill="rgba(255,255,255,.94)"/>
+        <path d="M32 18v15l9 6" fill="none" stroke="var(--icon-a)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" opacity=".72"/>
+        <circle cx="32" cy="32" r="3.5" fill="var(--icon-a)" opacity=".8"/>
+        <path d="M17 19l-3 6 7-.8" fill="none" stroke="var(--icon-a)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/>
+      </g>
       <g v-else-if="props.icon === 'world'">
         <circle cx="32" cy="32" r="21" fill="rgba(255,255,255,.92)"/>
         <path d="M11 32h42M32 11c7 6.4 10 13.4 10 21s-3 14.6-10 21c-7-6.4-10-13.4-10-21s3-14.6 10-21Z" fill="none" stroke="var(--icon-a)" stroke-width="2.8" opacity=".65"/>

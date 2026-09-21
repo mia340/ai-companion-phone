@@ -13,6 +13,7 @@ export type HomeAppKey =
   | 'turtle-soup'
   | 'profile'
   | 'memory'
+  | 'timeline'
   | 'world'
   | 'backup'
   | 'settings'
@@ -178,6 +179,7 @@ const APP_CATALOG: readonly HomeAppDefinition[] = [
   { key: 'turtle-soup', label: '海龟汤', route: '/app/海龟汤', icon: 'turtle-soup', tone: ['#75bcc4', '#a8d8d3'] },
   { key: 'profile', label: '我的资料', route: '/profile', icon: 'profile', tone: ['#9aa6df', '#c5cdf0'] },
   { key: 'memory', label: '记忆', route: '/memory', icon: 'memory', tone: ['#a8a1dc', '#d0c9ee'] },
+  { key: 'timeline', label: '时光', route: '/app/时光', icon: 'timeline', tone: ['#b98a7d', '#dfb9ad'] },
   { key: 'world', label: '世界', route: '/world', icon: 'world', tone: ['#7eafd6', '#b6d5ea'] },
   { key: 'backup', label: '数据备份', route: '/backup', icon: 'backup', tone: ['#9caebb', '#c8d3dc'] },
   { key: 'settings', label: '设置', route: '/settings', icon: 'settings', tone: ['#a7b4c3', '#d1d9e2'] },
@@ -189,6 +191,7 @@ export const HOME_APPS: HomeAppDefinition[] = pickApps([
   'turtle-soup',
   'profile',
   'memory',
+  'timeline',
   'backup'
 ])
 
