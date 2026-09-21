@@ -67,12 +67,13 @@ function build(overrides?: Partial<{
   memories: CharacterMemory[]
   moments: MomentPost[]
   stateHistory: ConversationStateHistory[]
+  messages: Message[]
 }>) {
   return buildSharedTimelineItems({
     worldId: 'world-1',
     characters: [character],
     conversations: [conversation],
-    messages: [message],
+    messages: overrides?.messages ?? [message],
     memories: overrides?.memories ?? [memory],
     moments: overrides?.moments ?? [],
     stateHistory: overrides?.stateHistory ?? []
@@ -181,6 +182,86 @@ describe('sharedTimelineService', () => {
     expect(result.starredIds).toEqual(['memory:1'])
     expect(result.hiddenIds).toEqual(['moment:1'])
     expect(result.customTitles).toEqual({ 'memory:1': '一次旅行' })
+    expect(result.eventGroups).toEqual([])
+  })
+
+  it('人工事件偏好只保存证据 ID，并阻止同一证据进入多个事件', () => {
+    const result = normalizeSharedTimelinePreferences({
+      eventGroups: [
+        { id: 'event-a', itemIds: ['memory:1', 'media:1'], title: ' 海边的一天 ' },
+        { id: 'event-b', itemIds: ['media:1', 'state:1'], title: '重复事件' },
+        { id: 'single', itemIds: ['only-one'] }
+      ]
+    })
+    expect(result.eventGroups).toEqual([
+      { id: 'event-a', itemIds: ['memory:1', 'media:1'], title: '海边的一天' }
+    ])
+  })
+
+
+
+  it('聊天图片会生成可回跳的媒体证据并保留真实预览', () => {
+    const imageMessage: Message = {
+      ...message,
+      id: 'image-1',
+      senderId: 'char-1',
+      type: 'image',
+      content: '这是今天看到的晚霞。',
+      imageDataUrl: 'data:image/jpeg;base64,abc',
+      imageName: 'sunset.jpg',
+      createdAt: '2026-09-19T18:00:00.000Z'
+    }
+    const result = build({ memories: [], messages: [imageMessage] })
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      id: 'media:image-1',
+      sourceKind: 'media',
+      mediaKind: 'image',
+      mediaPreviewUrl: 'data:image/jpeg;base64,abc',
+      sourceRoute: '/chat/conv-1?message=image-1'
+    })
+  })
+
+  it('音乐消息会成为真实音乐片段证据，但不会猜测不存在的歌名', () => {
+    const musicMessage: Message = {
+      ...message,
+      id: 'music-1',
+      senderId: 'char-1',
+      type: 'music',
+      content: '这段旋律听起来很轻松。',
+      createdAt: '2026-09-19T20:00:00.000Z'
+    }
+    const result = build({ memories: [], messages: [musicMessage] })
+    expect(result[0]).toMatchObject({
+      id: 'media:music-1',
+      mediaKind: 'music',
+      title: '一起听歌的片段',
+      summary: '这段旋律听起来很轻松。'
+    })
+    expect(result[0].summary).not.toContain('晴天')
+  })
+
+  it('朋友圈图片继续以动态作为来源，同时提供图片预览', () => {
+    const post: MomentPost = {
+      id: 'moment-image',
+      worldId: 'world-1',
+      authorType: 'character',
+      authorId: 'char-1',
+      content: '今天拍到的云。',
+      images: [{ dataUrl: 'data:image/webp;base64,xyz', name: 'cloud.webp' }],
+      likeCount: 0,
+      likedByMe: false,
+      source: 'manual',
+      createdAt: '2026-09-19T09:00:00.000Z',
+      updatedAt: '2026-09-19T09:00:00.000Z'
+    }
+    const result = build({ memories: [], moments: [post] })
+    expect(result[0]).toMatchObject({
+      id: 'moment:moment-image',
+      mediaKind: 'image',
+      mediaPreviewUrl: 'data:image/webp;base64,xyz',
+      mediaLabel: '1 张图片'
+    })
   })
 
   it('时间线按发生时间倒序排列', () => {

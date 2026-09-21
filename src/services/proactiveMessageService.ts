@@ -6,6 +6,7 @@ import type {
   ProactiveFrequency,
   ProactiveSource
 } from '../types/domain'
+import type { SharedTimelineRecallEvent } from './sharedTimelineEventService'
 
 function timeMinutes(value: string) {
   const [hour, minute] = value.split(':').map(Number)
@@ -49,6 +50,7 @@ export async function planProactiveMessage(options: {
   allowedSources?: ProactiveSource[]
   memories?: CharacterMemory[]
   state?: ConversationState
+  loadSharedTimelineRecall?: () => Promise<SharedTimelineRecallEvent | undefined>
 }): Promise<ProactiveMessagePlan | null> {
   if (!options.enabled || options.messages.length === 0) return null
   const nowDate = new Date()
@@ -78,6 +80,14 @@ export async function planProactiveMessage(options: {
     : undefined
   const pendingEvent = allowed.has('story-event') ? state?.pendingEvents?.[0] : undefined
   const needsCare = allowed.has('care') && /(难过|累|不舒服|生病|失眠|焦虑|紧张|害怕)/.test(latestUser)
+  let timelineRecall: SharedTimelineRecallEvent | undefined
+  if (!promise && !unresolved && !needsCare && !pendingEvent && allowed.has('daily-share') && options.loadSharedTimelineRecall) {
+    try {
+      timelineRecall = await options.loadSharedTimelineRecall()
+    } catch (error) {
+      console.warn('[proactive-message] shared timeline recall unavailable:', error)
+    }
+  }
 
   let source: ProactiveSource = 'daily-share'
   let fact = ''
@@ -95,10 +105,16 @@ export async function planProactiveMessage(options: {
     fact = `当前剧情存在一个等待后续的事件：${pendingEvent}`
   } else {
     source = 'daily-share'
-    fact = '没有新的用户消息；是否主动联系以及说什么，都由角色卡、当前剧情和最近聊天决定。'
+    fact = timelineRecall
+      ? `时光里有一条可追溯的旧事证据：${timelineRecall.date} · ${timelineRecall.sourceLabel} · ${timelineRecall.summary}`
+      : '没有新的用户消息；是否主动联系以及说什么，都由角色卡、当前剧情和最近聊天决定。'
   }
 
   if (!allowed.has(source)) return null
+
+  const recallGuard = timelineRecall
+    ? `如果角色这次主动提起过去共同经历，只能依据这个时光事件及其证据（event id: ${timelineRecall.id}; evidence ids: ${timelineRecall.evidenceIds.join(', ')}）；不要补写这些证据里没有发生过的情节。`
+    : '如果要提起过去经历，只能依据当前上下文中已有的事实，不要凭空创造共同回忆。'
 
   return {
     source,
@@ -106,6 +122,7 @@ export async function planProactiveMessage(options: {
       '【主动消息触发】',
       '现在不是用户刚发来一条新消息，而是小手机允许角色在合适时机主动发起一次联系。',
       fact,
+      recallGuard,
       '请完全依据角色卡、世界书、当前场景、记忆和最近聊天，自行决定是否要发消息以及具体内容。',
       '不要使用任何本地预设问候；如果角色此刻不应主动联系，只输出 <no_proactive_message/>。'
     ].join('\n')

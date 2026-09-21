@@ -1,5 +1,13 @@
 ## V0.5.0-alpha.5.3.0
 
+## V0.5.0-alpha.5.3.1 · 时光 V1.1
+
+- 时光新增搜索、时间筛选、月份分组和图片/音乐媒体证据。
+- AI 候选严格限制在当前可见 evidence。
+- 主动消息可在普通 daily-share 场景懒加载一条真实旧时光 evidence，并禁止扩写不存在的共同经历。
+- 无数据库迁移；预期测试矩阵 56 files / 469 tests。
+
+
 - Add native “时光 / 共同回忆” V1 with a source-backed timeline over Memory, Moments and selected Conversation State History.
 - Add user-controlled star/hide/custom-title preferences without a new IndexedDB store; source records remain canonical.
 - Add evidence-constrained AI milestone proposals: only supplied evidence IDs are accepted, proposals never auto-write facts, and user confirmation is required to persist the suggested title/star.
@@ -5238,3 +5246,16 @@ Theme、未知 JSON 与未知文本可以归档，但不会直接执行。第三
 - 角色回复完成后不再运行本地“事实纠偏/语义改写器”。除原卡明确 UI / Regex 结构校验外，应用不根据固定语义规则重写 AI 台词。
 - HTTP 402、上下文窗口不足、额度不足、`finish_reason=length/max_tokens` 与无 finish reason 但输出打满上限都进入 Token 硬停止路径。
 - 新会话主动消息默认关闭；刷新/崩溃/断线遗留的 pending assistant 不作为有效角色内容恢复，统一删除。
+## V0.5.0-alpha.5.3.2 · 时光 V1.2 / Shared Event Runtime
+
+- evidence → event 聚合层；相同 sourceMessage、短时间同会话、多来源文本重叠均可在安全阈值内合并。
+- 事件详情提供时间范围、图片画廊、证据链与逐条回源。
+- 用户可人工合并/拆分事件，eventGroups 只保存 evidence ids 与标题，不复制正文。
+- 主动旧事 guard 从单 evidence 升级为 event + evidence ids。
+- DB V18 / Backup V12 / HomeLayout revision 12 不变。
+
+
+## V0.5.0-alpha.5.3.3
+
+- Hotfix: proactive timeline recall guard test now checks semantic safety rather than the obsolete singular wording.
+- No production runtime behavior or persistence schema changes.

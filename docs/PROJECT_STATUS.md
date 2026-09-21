@@ -1,17 +1,39 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-21**  
-当前版本：**V0.5.0-alpha.5.3.0**
+当前版本：**V0.5.0-alpha.5.3.2**
 
 ```text
-App：0.5.0-alpha.5.3.0
+App：0.5.0-alpha.5.3.2
 Launcher：Grid V13（Layout Inspector V4 + Dock/Home 去重 + DOM 绘制诊断）
 IndexedDB：V18
 Backup：V12
-测试定义：54 files / 453 it-test declarations
+测试定义：57 files / 481 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+
+## 0. 本轮 alpha.5.3.2 重点
+
+- **时光 V1.2 · Shared Event Runtime**：把同一经历的记忆、状态、聊天图片/音乐和朋友圈 evidence 归并成一个共同事件，同时保留每条真实来源。
+- 自动归并遵守同 sourceMessageId、同角色/同会话短时间窗口、文本重叠与 8 小时最大跨度；不同角色永不自动合并。
+- 时光默认进入“事件”视图，事件详情提供图片画廊、完整 evidence chain 和逐条回源；仍可切换“证据”视图查看最细粒度记录。
+- 新增人工合并：用户可选择至少两条同角色 evidence 合并、命名、收藏、隐藏、改名与拆分；持久化只保存 evidence id 列表和事件元数据。
+- 主动旧事从单条 evidence 升级为事件级 guard：Prompt 同时拿到 event id 与 evidence ids，继续禁止扩写证据外共同经历。
+- `appCustomizations.sharedTimelineState` 新增非索引 `eventGroups`；IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变，无迁移。
+- 新增 10 条 Shared Event Runtime 直接测试 + 1 条偏好归一化回归；测试矩阵提升到 57 文件 / 481 tests。
+
+
+## 0. 本轮 alpha.5.3.1 重点
+
+- **时光 V1.1**：新增全文搜索、最近 30 天 / 往年今天 / 最初记录筛选和按月份分组。
+- 图片消息、音乐消息与带图朋友圈进入媒体证据卡；图片可预览，音乐只使用真实消息文本，不猜测历史歌名。
+- AI 整理改为只处理当前可见筛选结果。
+- 主动消息增加“旧事 evidence guard”：只在普通 daily-share 路径懒加载一条至少 7 天前、当前角色、未隐藏的时光证据；收藏优先，且 Prompt 禁止扩写证据外经历。
+- 时光读取失败只降级主动消息，不影响聊天加载；Provider 失败策略不变。
+- IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+- 新增 16 条直接测试，测试矩阵提升到 56 文件 / 469 tests。
 
 
 ## 0. 本轮 alpha.5.3.0 重点
@@ -362,3 +384,8 @@ npm run verify
 - `git add -A` 后必须通过 `npm run release:staged-check`。
 - `node_modules/`、`dist/`、`*.tsbuildinfo`、`.env*` 不得进入 Git 跟踪或暂存区。
 - 本地与 GitHub Actions 共用 `npm run verify` 作为质量门禁。
+
+## V0.5.0-alpha.5.3.3 hotfix
+
+- Shared Timeline V1.2 behavior unchanged.
+- Proactive recall safety regression test corrected; expected matrix remains 57 test files / 481 tests.

@@ -80,6 +80,8 @@ import { generateVisibleCharacterState } from '../services/characterStateService
 import { inferCardInitialActivity, inferCardInitialRelationship } from '../services/characterInitialStateService'
 import { collectCharacterGreetings } from '../services/characterGreetingService'
 import { planProactiveMessage } from '../services/proactiveMessageService'
+import { loadSharedTimeline, loadSharedTimelinePreferences } from '../services/sharedTimelineService'
+import { selectSharedTimelineRecallEvent } from '../services/sharedTimelineEventService'
 import { getOrCreateUserProfile } from '../services/userProfile'
 import { getPersonaForChat, listPersonas } from '../services/personaService'
 import { listActiveRegexScripts, looksLikeRichHtml, normalizeCommunityPlainText, normalizeRichHtml, type RegexExecutionTrace } from '../services/regexRuntime'
@@ -814,7 +816,17 @@ async function loadConversation(conversationId: string) {
         quietEnd: settingsRow.proactiveQuietEnd,
         allowedSources: settingsRow.proactiveAllowedSources,
         memories: memoryRows,
-        state: effectiveStateRow
+        state: effectiveStateRow,
+        loadSharedTimelineRecall: async () => {
+          const [timeline, timelinePreferences] = await Promise.all([
+            loadSharedTimeline(conversationRow.worldId),
+            loadSharedTimelinePreferences(conversationRow.worldId)
+          ])
+          return selectSharedTimelineRecallEvent(timeline, timelinePreferences, {
+            characterId: characterRow.id,
+            minAgeDays: 7
+          })
+        }
       })
       : null
     if (!isCurrentLoad()) return

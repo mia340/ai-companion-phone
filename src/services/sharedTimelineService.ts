@@ -9,7 +9,8 @@ import type {
   MomentPost
 } from '../types/domain'
 
-export type SharedTimelineSourceKind = 'memory' | 'moment' | 'state'
+export type SharedTimelineSourceKind = 'memory' | 'moment' | 'state' | 'media'
+export type SharedTimelineMediaKind = 'image' | 'music'
 
 export interface SharedTimelineItem {
   id: string
@@ -27,15 +28,26 @@ export interface SharedTimelineItem {
   sourceRoute: string
   importance: number
   sourceExcerpt?: string
+  mediaKind?: SharedTimelineMediaKind
+  mediaPreviewUrl?: string
+  mediaLabel?: string
   starred: boolean
   hidden: boolean
   customTitle?: string
+}
+
+export interface SharedTimelineManualEventGroup {
+  id: string
+  itemIds: string[]
+  title?: string
+  createdAt?: string
 }
 
 export interface SharedTimelinePreferences {
   starredIds: string[]
   hiddenIds: string[]
   customTitles: Record<string, string>
+  eventGroups?: SharedTimelineManualEventGroup[]
 }
 
 export interface SharedTimelineBuildInput {
@@ -52,11 +64,14 @@ const TIMELINE_CUSTOMIZATION_KEY = '__shared-timeline-state__'
 const MAX_TITLE_LENGTH = 32
 const MAX_SUMMARY_LENGTH = 220
 const MAX_PREFERENCE_IDS = 1200
+const MAX_EVENT_GROUPS = 240
+const MAX_EVENT_ITEMS = 24
 
 export const EMPTY_SHARED_TIMELINE_PREFERENCES: SharedTimelinePreferences = {
   starredIds: [],
   hiddenIds: [],
-  customTitles: {}
+  customTitles: {},
+  eventGroups: []
 }
 
 function timelineCustomizationId(worldId: string) {
@@ -89,7 +104,9 @@ function uniqueStrings(value: unknown, max = MAX_PREFERENCE_IDS): string[] {
 }
 
 export function normalizeSharedTimelinePreferences(value: unknown): SharedTimelinePreferences {
-  if (!value || typeof value !== 'object') return { ...EMPTY_SHARED_TIMELINE_PREFERENCES, customTitles: {} }
+  if (!value || typeof value !== 'object') {
+    return { ...EMPTY_SHARED_TIMELINE_PREFERENCES, customTitles: {}, eventGroups: [] }
+  }
   const row = value as Record<string, unknown>
   const rawTitles = row.customTitles && typeof row.customTitles === 'object'
     ? row.customTitles as Record<string, unknown>
@@ -101,10 +118,35 @@ export function normalizeSharedTimelinePreferences(value: unknown): SharedTimeli
     customTitles[id] = title
     if (Object.keys(customTitles).length >= MAX_PREFERENCE_IDS) break
   }
+
+  const eventGroups: SharedTimelineManualEventGroup[] = []
+  const claimedItemIds = new Set<string>()
+  if (Array.isArray(row.eventGroups)) {
+    for (const rawGroup of row.eventGroups) {
+      if (!rawGroup || typeof rawGroup !== 'object') continue
+      const group = rawGroup as Record<string, unknown>
+      const id = normalizedText(group.id, 80)
+      if (!id || eventGroups.some(item => item.id === id)) continue
+      const itemIds = uniqueStrings(group.itemIds, MAX_EVENT_ITEMS).filter(itemId => !claimedItemIds.has(itemId))
+      if (itemIds.length < 2) continue
+      itemIds.forEach(itemId => claimedItemIds.add(itemId))
+      const title = normalizedTitle(group.title)
+      const createdAt = normalizedText(group.createdAt, 40)
+      eventGroups.push({
+        id,
+        itemIds,
+        ...(title ? { title } : {}),
+        ...(createdAt ? { createdAt } : {})
+      })
+      if (eventGroups.length >= MAX_EVENT_GROUPS) break
+    }
+  }
+
   return {
     starredIds: uniqueStrings(row.starredIds),
     hiddenIds: uniqueStrings(row.hiddenIds),
-    customTitles
+    customTitles,
+    eventGroups
   }
 }
 
@@ -201,6 +243,48 @@ export function buildSharedTimelineItems(input: SharedTimelineBuildInput): Share
       sourceLabel: '朋友圈',
       sourceRoute: `/app/朋友圈?moment=${encodeURIComponent(post.id)}`,
       importance: post.pinned ? 4 : 3,
+      mediaKind: post.images?.[0]?.dataUrl ? 'image' : undefined,
+      mediaPreviewUrl: post.images?.[0]?.dataUrl,
+      mediaLabel: post.images?.length ? `${post.images.length} 张图片` : undefined,
+      starred: false,
+      hidden: false
+    })
+  }
+
+  for (const message of input.messages) {
+    if (message.type !== 'image' && message.type !== 'music') continue
+    const conversation = conversations.get(message.conversationId)
+    if (!conversationWorldMatches(conversation, input.worldId)) continue
+    const characterId = characterForConversation(conversation)
+    if (!characterId) continue
+    const character = characters.get(characterId)
+    if (!character) continue
+    const isImage = message.type === 'image'
+    const summary = normalizedText(
+      message.displayContent || message.content || (isImage ? message.imageName || '一起分享了一张图片' : '一起听歌的片段')
+    )
+    if (!summary) continue
+    items.push({
+      id: `media:${message.id}`,
+      worldId: input.worldId,
+      sourceKind: 'media',
+      sourceId: message.id,
+      sourceMessageId: message.id,
+      conversationId: message.conversationId,
+      characterId,
+      characterName: character.name,
+      title: isImage
+        ? (message.senderId === 'user' ? '你分享的一张图片' : 'TA 分享的一张图片')
+        : '一起听歌的片段',
+      summary,
+      occurredAt: message.createdAt,
+      sourceLabel: isImage ? '聊天 · 图片' : '聊天 · 音乐',
+      sourceRoute: `/chat/${encodeURIComponent(message.conversationId)}?message=${encodeURIComponent(message.id)}`,
+      importance: 3,
+      sourceExcerpt: summary.slice(0, 100),
+      mediaKind: isImage ? 'image' : 'music',
+      mediaPreviewUrl: isImage ? message.imageDataUrl : undefined,
+      mediaLabel: isImage ? (message.imageName || '聊天图片') : '一起听歌',
       starred: false,
       hidden: false
     })

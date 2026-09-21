@@ -31,11 +31,17 @@ export interface AppCustomization {
   /** 知间空间设置复用同一非结构化 store；字段不参与索引，因此无需数据库迁移。 */
   spaceVisibility?: 'public' | 'friends' | 'private'
   spaceBlacklistCharacterIds?: UUID[]
-  /** 时光 / 共同回忆 V1：仅保存用户对证据卡片的收藏、隐藏与标题编辑，不复制事实正文。 */
+  /** 时光 / 共同回忆：只保存用户偏好与人工事件分组，不复制证据正文。 */
   sharedTimelineState?: {
     starredIds?: string[]
     hiddenIds?: string[]
     customTitles?: Record<string, string>
+    eventGroups?: Array<{
+      id: string
+      itemIds: string[]
+      title?: string
+      createdAt?: string
+    }>
   }
   updatedAt: string
 }

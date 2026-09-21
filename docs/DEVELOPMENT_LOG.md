@@ -1,5 +1,13 @@
 ## 2026-09-21 · V0.5.0-alpha.5.3.0
 
+## V0.5.0-alpha.5.3.1 · 时光 V1.1
+
+- 时光新增搜索、时间筛选、月份分组和图片/音乐媒体证据。
+- AI 候选严格限制在当前可见 evidence。
+- 主动消息可在普通 daily-share 场景懒加载一条真实旧时光 evidence，并禁止扩写不存在的共同经历。
+- 无数据库迁移；预期测试矩阵 56 files / 469 tests。
+
+
 - 完成「时光 / 共同回忆」V1：新增 evidence-backed timeline service、原生 View、Launcher 入口与记忆中心快捷入口。
 - 时间线不新建事实表：Memory / Moment / State History 继续是事实源；`appCustomizations.sharedTimelineState` 只保存 starred/hidden/customTitles，避免复制与漂移。
 - AI 整理采用“模型提议、Runtime 验证、用户确认”的边界：输入只给候选证据摘要，输出必须引用现有 id，未知 id 丢弃，建议不自动持久化。
@@ -792,3 +800,13 @@ Windows 首轮 `npm run verify` 显示 41 个测试文件 / 329 个测试均先�
 - 文件夹内部 App 现在进入同一 Pointer 生命周期：长按/编辑态拖动、ghost、window pointerup/cancel、跨页和 Dock。
 - 新增文件夹成员内部插入排序；拖离面板时收起 Folder Overlay，再继续命中主屏 Grid。
 - 数据层新增 folder→grid / folder→dock 原子转换，继续保持单成员自动解散。
+## 2026-09-21 · V0.5.0-alpha.5.3.2 Shared Event Runtime
+
+在时光 V1/V1.1 已有“证据真实、可回源”的基础上，本轮解决同一件事被记忆、状态、图片、动态拆成多张卡的问题。新增 `sharedTimelineEventService.ts`：先应用用户人工 eventGroups，再对剩余 evidence 做保守自动聚类；自动聚类限定同角色、8 小时最大跨度，并优先使用相同 sourceMessageId。时光 UI 默认切到事件视图，详情层展示图片画廊和逐条 evidence chain；证据视图保留人工合并入口。主动消息旧事桥接改为事件级证据包，Prompt 同时携带 event id 与 evidence ids。没有新增事实 store 或数据库迁移。
+
+
+## V0.5.0-alpha.5.3.3
+
+- Windows verify exposed one false-negative regression test in `proactiveMessageService.test.ts`.
+- Runtime output correctly uses event-level multi-evidence wording “这些证据里”; the test still expected singular “证据里”.
+- Replaced the brittle exact substring with two semantic assertions while retaining event/evidence provenance assertions.

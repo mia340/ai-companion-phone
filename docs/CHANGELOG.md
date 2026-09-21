@@ -1,5 +1,13 @@
 # Changelog
 
+## V0.5.0-alpha.5.3.1 · 时光 V1.1
+
+- 时光新增搜索、时间筛选、月份分组和图片/音乐媒体证据。
+- AI 候选严格限制在当前可见 evidence。
+- 主动消息可在普通 daily-share 场景懒加载一条真实旧时光 evidence，并禁止扩写不存在的共同经历。
+- 无数据库迁移；预期测试矩阵 56 files / 469 tests。
+
+
 ## V0.5.0-alpha.5.3.0
 
 - 新增原生 App「时光 / 共同回忆」V1：从已有 Memory、朋友圈 Moment、Conversation State History 组成证据时间线，支持角色筛选、收藏、隐藏、改标题和跳回原来源。
@@ -667,4 +675,17 @@
 - 知间图标去除聊天气泡造型。
 - 文档统一归入 `docs/`：逐版本交付到 `docs/releases/`，参考研究到 `docs/research/`。
 - IndexedDB V18 / Backup V12 不变。
+## V0.5.0-alpha.5.3.2
 
+- 时光 V1.2：新增 Shared Event Runtime，把同一经历的多条 evidence 聚合为共同事件。
+- 新增事件详情、图片画廊、证据链、逐条回源，以及事件/证据双视图。
+- 支持人工选择同角色 evidence 合并事件，并可改名、收藏、隐藏、拆分；只持久化 evidence id 与事件元数据。
+- 主动旧事升级为 event id + evidence ids 双重 guard。
+- IndexedDB V18 / Backup V12 不变；预期测试矩阵 57 files / 481 tests。
+
+
+## V0.5.0-alpha.5.3.3
+
+- 修复 5.3.2 主动旧事测试对中文单复数文案过度严格导致的假失败。
+- 测试改为锁定“不补写不存在情节”的安全语义，同时继续校验 event id 与 evidence ids。
+- 生产 Runtime、IndexedDB V18、Backup V12 均不变；预期测试矩阵仍为 57 files / 481 tests。
