@@ -279,4 +279,42 @@ describe('sharedTimelineService', () => {
     }
     expect(build({ moments: [post] }).map(item => item.id)).toEqual(['moment:moment-new', 'memory:memory-1'])
   })
+
+  it('承诺记忆会携带显式 promise signal，供 Relationship Arc 使用', () => {
+    expect(build()[0].relationshipSignal).toBe('promise')
+  })
+
+  it('relationship state 保留 before/after，不靠文案猜关系方向', () => {
+    const state: ConversationStateHistory = {
+      id: 'state-rel', conversationId: 'conv-1', characterId: 'char-1', field: 'relationship',
+      label: '关系感受变化', previousValue: '朋友', nextValue: '更信任彼此',
+      sourceMessageId: 'msg-1', createdAt: '2026-09-20T12:00:00.000Z'
+    }
+    const item = build({ memories: [], stateHistory: [state] })[0]
+    expect(item).toMatchObject({
+      relationshipSignal: 'relationship-change',
+      relationshipPreviousValue: '朋友',
+      relationshipNextValue: '更信任彼此'
+    })
+  })
+
+  it('关系脉络摘要偏好会清理无效 turning point 并限制为已声明 node', () => {
+    const result = normalizeSharedTimelinePreferences({
+      relationshipArcSummaries: {
+        'arc:char-1:x': {
+          characterId: 'char-1',
+          summary: ' 有证据的脉络摘要 ',
+          nodeIds: ['arc-node:a', 'arc-node:b'],
+          evidenceIds: ['memory:1', 'state:1'],
+          turningPointNodeIds: ['arc-node:b', 'arc-node:fake'],
+          updatedAt: '2026-09-20T00:00:00Z'
+        }
+      }
+    })
+    expect(result.relationshipArcSummaries?.['arc:char-1:x']).toMatchObject({
+      characterId: 'char-1',
+      summary: '有证据的脉络摘要',
+      turningPointNodeIds: ['arc-node:b']
+    })
+  })
 })

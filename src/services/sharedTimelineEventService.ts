@@ -1,4 +1,5 @@
 import type {
+  SharedTimelineAcceptedEventSummary,
   SharedTimelineItem,
   SharedTimelineManualEventGroup,
   SharedTimelinePreferences
@@ -6,6 +7,8 @@ import type {
 
 export interface SharedTimelineEvent {
   id: string
+  /** Stable across auto/manual conversion and evidence reordering. */
+  evidenceKey: string
   worldId: string
   characterId?: string
   characterName?: string
@@ -111,6 +114,16 @@ function hashIds(ids: readonly string[]) {
   return (hash >>> 0).toString(36)
 }
 
+export function sharedTimelineEventEvidenceKey(itemIds: readonly string[]) {
+  return `evidence:${hashIds(unique(itemIds.filter(Boolean)))}`
+}
+
+function sameEvidenceSet(left: readonly string[], right: readonly string[]) {
+  if (left.length !== right.length) return false
+  const set = new Set(left)
+  return set.size === left.length && right.every(id => set.has(id))
+}
+
 function eventTitle(items: readonly SharedTimelineItem[], preferred?: string) {
   const manual = normalizeEventText(preferred, 32)
   if (manual) return manual
@@ -133,43 +146,48 @@ function eventSummary(items: readonly SharedTimelineItem[]) {
   return normalizeEventText(summaries.join(' · '), 280)
 }
 
-function buildEvent(items: SharedTimelineItem[], options: { id: string; manual: boolean; group?: SharedTimelineManualEventGroup }): SharedTimelineEvent {
-  const sorted = [...items].sort((a, b) => timeValue(a.occurredAt) - timeValue(b.occurredAt))
-  const first = sorted[0]
-  const last = sorted.at(-1) || first
-  const mediaPreviewUrls = unique(sorted.map(item => item.mediaPreviewUrl).filter((value): value is string => Boolean(value))).slice(0, 3)
-  const sourceKinds = unique(sorted.map(item => item.sourceKind))
-  const sourceLabels = unique(sorted.map(item => item.sourceLabel))
-  return {
-    id: options.id,
-    worldId: first?.worldId || '',
-    characterId: first?.characterId,
-    characterName: first?.characterName,
-    title: eventTitle(sorted, options.group?.title),
-    summary: eventSummary(sorted),
-    occurredAt: last?.occurredAt || first?.occurredAt || '',
-    startedAt: first?.occurredAt || '',
-    endedAt: last?.occurredAt || first?.occurredAt || '',
-    itemIds: sorted.map(item => item.id),
-    items: sorted,
-    sourceKinds,
-    sourceLabels,
-    mediaPreviewUrls,
-    primaryRoute: rankedPrimaryItem(sorted)?.sourceRoute || '',
-    importance: Math.max(0, ...sorted.map(item => item.importance || 0)),
-    starred: sorted.some(item => item.starred),
-    hidden: sorted.every(item => item.hidden),
-    manual: options.manual,
-    ...(options.group ? { manualGroupId: options.group.id } : {})
-  }
-}
-
 function rankedPrimaryItem(items: readonly SharedTimelineItem[]) {
   return [...items].sort((a, b) => {
     if (a.starred !== b.starred) return a.starred ? -1 : 1
     if (a.importance !== b.importance) return b.importance - a.importance
     return timeValue(b.occurredAt) - timeValue(a.occurredAt)
   })[0]
+}
+
+function buildEvent(
+  items: SharedTimelineItem[],
+  options: { id: string; manual: boolean; group?: SharedTimelineManualEventGroup; preserveOrder?: boolean }
+): SharedTimelineEvent {
+  const chronological = [...items].sort((a, b) => timeValue(a.occurredAt) - timeValue(b.occurredAt))
+  const displayed = options.preserveOrder ? [...items] : chronological
+  const first = chronological[0]
+  const last = chronological.at(-1) || first
+  const mediaPreviewUrls = unique(chronological.map(item => item.mediaPreviewUrl).filter((value): value is string => Boolean(value))).slice(0, 3)
+  const sourceKinds = unique(chronological.map(item => item.sourceKind))
+  const sourceLabels = unique(chronological.map(item => item.sourceLabel))
+  return {
+    id: options.id,
+    evidenceKey: sharedTimelineEventEvidenceKey(displayed.map(item => item.id)),
+    worldId: first?.worldId || '',
+    characterId: first?.characterId,
+    characterName: first?.characterName,
+    title: eventTitle(chronological, options.group?.title),
+    summary: eventSummary(chronological),
+    occurredAt: last?.occurredAt || first?.occurredAt || '',
+    startedAt: first?.occurredAt || '',
+    endedAt: last?.occurredAt || first?.occurredAt || '',
+    itemIds: displayed.map(item => item.id),
+    items: displayed,
+    sourceKinds,
+    sourceLabels,
+    mediaPreviewUrls,
+    primaryRoute: rankedPrimaryItem(chronological)?.sourceRoute || '',
+    importance: Math.max(0, ...chronological.map(item => item.importance || 0)),
+    starred: chronological.some(item => item.starred),
+    hidden: chronological.every(item => item.hidden),
+    manual: options.manual,
+    ...(options.group ? { manualGroupId: options.group.id } : {})
+  }
 }
 
 export function buildSharedTimelineEvents(
@@ -186,7 +204,12 @@ export function buildSharedTimelineEvents(
       .filter((item): item is SharedTimelineItem => item !== undefined && !claimed.has(item.id))
     if (groupedItems.length < 2) continue
     groupedItems.forEach(item => claimed.add(item.id))
-    events.push(buildEvent(groupedItems, { id: `manual:${group.id}`, manual: true, group }))
+    events.push(buildEvent(groupedItems, {
+      id: `manual:${group.id}`,
+      manual: true,
+      group,
+      preserveOrder: true
+    }))
   }
 
   const candidates = items
@@ -231,10 +254,20 @@ export function projectSharedTimelineEvents(
   for (const event of events) {
     const projectedItems = event.items.filter(item => visibleIds.has(item.id))
     if (!projectedItems.length) continue
-    const projected = buildEvent(projectedItems, { id: event.id, manual: event.manual })
+    const projected = buildEvent(projectedItems, {
+      id: event.id,
+      manual: event.manual,
+      preserveOrder: event.manual
+    })
+    const keepsCompleteEvidence = projectedItems.length === event.items.length
+      && projectedItems.every(item => event.itemIds.includes(item.id))
     result.push({
       ...projected,
       id: event.id,
+      // Preserve the original stable key when projection keeps the complete evidence set.
+      // If any evidence is filtered out (for example hidden), the rebuilt key intentionally
+      // changes so accepted summaries cannot leak across a different provenance set.
+      evidenceKey: keepsCompleteEvidence ? event.evidenceKey : projected.evidenceKey,
       manual: event.manual,
       ...(event.manualGroupId ? { manualGroupId: event.manualGroupId } : {}),
       ...(event.manual ? { title: event.title } : {})
@@ -275,15 +308,44 @@ export function removeManualTimelineEventGroup(
   return groups.filter(group => group.id !== groupId)
 }
 
+export function reorderManualTimelineEventGroup(
+  groups: readonly SharedTimelineManualEventGroup[],
+  groupId: string,
+  itemId: string,
+  direction: -1 | 1
+): SharedTimelineManualEventGroup[] {
+  return groups.map(group => {
+    if (group.id !== groupId) return group
+    const index = group.itemIds.indexOf(itemId)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= group.itemIds.length) return group
+    const itemIds = [...group.itemIds]
+    const [moved] = itemIds.splice(index, 1)
+    itemIds.splice(target, 0, moved)
+    return { ...group, itemIds }
+  })
+}
+
+export function resolveSharedTimelineEventSummary(
+  event: SharedTimelineEvent,
+  preferences: Pick<SharedTimelinePreferences, 'eventSummaries'> | undefined
+): SharedTimelineAcceptedEventSummary | undefined {
+  const stored = preferences?.eventSummaries?.[event.evidenceKey]
+  if (!stored || !sameEvidenceSet(stored.evidenceIds, event.itemIds)) return undefined
+  return stored
+}
+
 export function selectSharedTimelineRecallEvent(
   items: readonly SharedTimelineItem[],
-  preferences: Pick<SharedTimelinePreferences, 'eventGroups'> | undefined,
+  preferences: Pick<SharedTimelinePreferences, 'eventGroups' | 'eventSummaries'> | undefined,
   options: { characterId: string; now?: Date; minAgeDays?: number }
 ): SharedTimelineRecallEvent | undefined {
   const now = options.now ?? new Date()
   const minAge = Math.max(1, options.minAgeDays ?? 7) * 86400000
-  const event = buildSharedTimelineEvents(items, preferences)
-    .filter(row => !row.hidden && row.characterId === options.characterId)
+  const allEvents = buildSharedTimelineEvents(items, preferences)
+  const events = projectSharedTimelineEvents(allEvents, items.filter(item => !item.hidden))
+  const event = events
+    .filter(row => row.characterId === options.characterId)
     .filter(row => {
       const time = timeValue(row.endedAt)
       return time > 0 && now.getTime() - time >= minAge
@@ -295,11 +357,12 @@ export function selectSharedTimelineRecallEvent(
       return timeValue(b.endedAt) - timeValue(a.endedAt)
     })[0]
   if (!event) return undefined
+  const acceptedSummary = resolveSharedTimelineEventSummary(event, preferences)
   return {
     id: event.id,
     evidenceIds: event.itemIds,
     date: event.startedAt.slice(0, 10),
-    summary: event.summary.slice(0, 220),
+    summary: (acceptedSummary?.summary || event.summary).slice(0, 220),
     sourceLabel: event.sourceLabels.join(' + ').slice(0, 100),
     sourceRoute: event.primaryRoute,
     starred: event.starred

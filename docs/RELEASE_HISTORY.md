@@ -1,3 +1,15 @@
+## V0.5.0-alpha.5.4.2 · Relationship Arc V1 TypeScript 热修
+
+- 修复 `SharedTimelineView.vue` 的 `contextSenderLabel()` 可选参数窄化：当上下文消息 sender 不在 characterMap 且未传 event 时，不再直接访问 `event.characterName`。
+- 保持 Relationship Arc V1、Shared Event provenance、数据库与 Backup schema 行为不变；测试矩阵仍为 65 files / 547 tests。
+- 本版本仅处理 Windows 首轮 `vue-tsc -b` 暴露的 TS18048 编译错误，不增加新功能。
+
+## V0.5.0-alpha.5.4.1 · Relationship Arc V1 发布热修
+
+- Windows 首轮 verify 暴露两个 Relationship Arc 回归：跨角色异常 event wrapper 的 projection 边界，以及完整 evidence 投影时事件 `evidenceKey` 未保持稳定。
+- Runtime 改为投影前先按 event owner 收窄、evidence 再按 characterId 过滤；完整 evidence 集合保留原 key，集合变化时重算 key。
+- 功能、数据库与测试矩阵不扩张：65 files / 547 tests。
+
 ## V0.5.0-alpha.5.3.0
 
 ## V0.5.0-alpha.5.3.1 · 时光 V1.1
@@ -5259,3 +5271,22 @@ Theme、未知 JSON 与未知文本可以归档，但不会直接执行。第三
 
 - Hotfix: proactive timeline recall guard test now checks semantic safety rather than the obsolete singular wording.
 - No production runtime behavior or persistence schema changes.
+
+## V0.5.0-alpha.5.3.4 · 时光 V1.3 / Event Intelligence
+
+- 事件 AI 摘要：严格验证 event id 与完整 evidence ids，用户确认后才保存。
+- 事件备注：仅用户元数据，不自动进入角色 Prompt。
+- 真实聊天上下文：来源消息前后各一条，跨会话隔离、撤回过滤。
+- evidence 手动排序：自动事件可安全转人工事件，仍只保存 evidence ids。
+- 主动旧事优先采用仍有效的确认摘要，证据变化后摘要自动失效。
+- DB V18 / Backup V12 / HomeLayout revision 12 不变。
+
+
+
+## V0.5.0-alpha.5.4.0 · Relationship Arc V1
+
+- Shared Event 之上新增 Relationship Arc 编译层与独立 UI。
+- 关系节点语义只取来源显式结构；relationship state before/after 是唯一明确关系阶段来源。
+- AI 脉络摘要使用 arc fingerprint + node/evidence 完整集合 guard，用户确认后才持久化。
+- 支持把关系脉络带回真实聊天草稿，永不自动发送。
+- DB V18 / Backup V12 / HomeLayout revision 12 不变。

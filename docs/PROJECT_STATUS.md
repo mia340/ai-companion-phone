@@ -1,18 +1,52 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-21**  
-当前版本：**V0.5.0-alpha.5.3.2**
+当前版本：**V0.5.0-alpha.5.4.2**
 
 ```text
-App：0.5.0-alpha.5.3.2
+App：0.5.0-alpha.5.4.2
 Launcher：Grid V13（Layout Inspector V4 + Dock/Home 去重 + DOM 绘制诊断）
 IndexedDB：V18
 Backup：V12
-测试定义：57 files / 481 it-test declarations
+测试定义：65 files / 547 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
+## 0. 本轮 alpha.5.4.2 重点
+
+- **Relationship Arc V1 TypeScript 发布热修**：修复 `SharedTimelineView.vue` 的可选 event 参数访问，解决 Windows `vue-tsc -b` 报错 TS18048。
+- `contextSenderLabel()` 在 sender 不属于当前 characterMap 时安全回退到 `event?.characterName`，event 缺失则回退到“角色”。
+- 不改变 Relationship Arc、Shared Event、数据库与 Backup 行为；测试矩阵仍为 65 files / 547 tests。
+
+## 0. 本轮 alpha.5.4.1 重点
+
+- **Relationship Arc V1 发布热修**：修复 Windows 首轮 verify 暴露的角色边界投影与事件摘要 evidenceKey 稳定性问题。
+- 关系脉络在投影前先按 event owner 收窄，并再次按 evidence characterId 过滤；异常/陈旧事件包装不能把另一角色 evidence 投进当前 Arc。
+- Shared Event 在“完整 evidence 集合未变化”时保留原稳定 `evidenceKey`；只有隐藏/筛除 evidence 导致 provenance 集合变化时才重算 key，使已确认摘要既能稳定命中，又会在证据变化时正确失效。
+- Runtime 行为边界、IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 均不变；测试矩阵仍为 65 files / 547 tests。
+
+## 0. 本轮 alpha.5.4.0 重点
+
+- **Relationship Arc V1 / 关系脉络**：Shared Event 继续向上编译为按角色、按真实发生时间排序的关系节点与阶段。
+- Promise / relationship / goal / story / shared-event 分类来自来源结构本身；Runtime 不读取普通文案去猜“吵架 / 和好 / 更爱了”等关系结论。
+- 只有真实 `ConversationStateHistory(field=relationship)` 的 before/after 会形成明确关系阶段与最近关系记录。
+- AI 关系摘要严格校验 `characterId + arcFingerprint + 完整 nodeIds + 完整 evidenceIds`，turning point 只能引用已有 node；候选默认不保存。
+- 用户确认摘要按 arc fingerprint 保存；节点或 evidence 变化后自动失效，不自动写 Memory / Conversation State / 角色 Prompt。
+- 关系脉络可由用户主动带回聊天草稿，携带 arc/node/evidence provenance，不自动发送。
+- UI 拆出独立 `RelationshipArcPanel.vue`；IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变。
+- 静态测试矩阵：65 files / 547 tests；正式发布仍以 Windows / CI 双 `npm run verify` 为最终门禁。
+
+
+## 0. 本轮 alpha.5.3.4 重点
+
+- **时光 V1.3 · Event Intelligence**：共同事件新增 AI 摘要、用户备注、真实聊天上下文窗口与 evidence 手动排序。
+- AI 事件摘要必须原样返回当前 event id 与完整 evidence ids；漏证据、伪造 evidence 或 JSON 不合法都会被 Runtime 拒绝。
+- 用户确认摘要与备注按稳定 evidence fingerprint 保存；evidence 集合变化后旧摘要自动失效，隐藏证据不会通过摘要重新泄露。
+- 带 sourceMessageId 的 evidence 可读取原消息前后各 1 条真实聊天上下文；不同会话隔离，撤回消息过滤，不写回 Memory。
+- 人工事件保留 evidence 用户顺序；自动事件首次排序时转成人工事件，只持久化 evidence id 顺序。
+- 主动旧事继续使用 event id + evidence ids guard，并可优先采用仍有效的用户确认事件摘要。
+- IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变；测试矩阵提升到 59 files / 500 tests。
 
 ## 0. 本轮 alpha.5.3.2 重点
 

@@ -11,6 +11,7 @@ import type {
 
 export type SharedTimelineSourceKind = 'memory' | 'moment' | 'state' | 'media'
 export type SharedTimelineMediaKind = 'image' | 'music'
+export type SharedTimelineRelationshipSignal = 'promise' | 'relationship-change' | 'shared-event' | 'goal' | 'story'
 
 export interface SharedTimelineItem {
   id: string
@@ -31,6 +32,10 @@ export interface SharedTimelineItem {
   mediaKind?: SharedTimelineMediaKind
   mediaPreviewUrl?: string
   mediaLabel?: string
+  /** Relationship Arc 只使用来源本身已经明确表达的语义，不从文案猜关系方向。 */
+  relationshipSignal?: SharedTimelineRelationshipSignal
+  relationshipPreviousValue?: string
+  relationshipNextValue?: string
   starred: boolean
   hidden: boolean
   customTitle?: string
@@ -43,11 +48,29 @@ export interface SharedTimelineManualEventGroup {
   createdAt?: string
 }
 
+export interface SharedTimelineAcceptedEventSummary {
+  summary: string
+  evidenceIds: string[]
+  updatedAt: string
+}
+
+export interface SharedTimelineAcceptedRelationshipArcSummary {
+  characterId: string
+  summary: string
+  nodeIds: string[]
+  evidenceIds: string[]
+  turningPointNodeIds?: string[]
+  updatedAt: string
+}
+
 export interface SharedTimelinePreferences {
   starredIds: string[]
   hiddenIds: string[]
   customTitles: Record<string, string>
   eventGroups?: SharedTimelineManualEventGroup[]
+  eventNotes?: Record<string, string>
+  eventSummaries?: Record<string, SharedTimelineAcceptedEventSummary>
+  relationshipArcSummaries?: Record<string, SharedTimelineAcceptedRelationshipArcSummary>
 }
 
 export interface SharedTimelineBuildInput {
@@ -66,12 +89,22 @@ const MAX_SUMMARY_LENGTH = 220
 const MAX_PREFERENCE_IDS = 1200
 const MAX_EVENT_GROUPS = 240
 const MAX_EVENT_ITEMS = 24
+const MAX_EVENT_METADATA = 480
+const MAX_EVENT_NOTE_LENGTH = 600
+const MAX_EVENT_SUMMARY_LENGTH = 280
+const MAX_RELATIONSHIP_ARC_SUMMARIES = 80
+const MAX_RELATIONSHIP_ARC_SUMMARY_LENGTH = 420
+const MAX_RELATIONSHIP_ARC_NODES = 48
+const MAX_RELATIONSHIP_ARC_EVIDENCE = 360
 
 export const EMPTY_SHARED_TIMELINE_PREFERENCES: SharedTimelinePreferences = {
   starredIds: [],
   hiddenIds: [],
   customTitles: {},
-  eventGroups: []
+  eventGroups: [],
+  eventNotes: {},
+  eventSummaries: {},
+  relationshipArcSummaries: {}
 }
 
 function timelineCustomizationId(worldId: string) {
@@ -105,7 +138,7 @@ function uniqueStrings(value: unknown, max = MAX_PREFERENCE_IDS): string[] {
 
 export function normalizeSharedTimelinePreferences(value: unknown): SharedTimelinePreferences {
   if (!value || typeof value !== 'object') {
-    return { ...EMPTY_SHARED_TIMELINE_PREFERENCES, customTitles: {}, eventGroups: [] }
+    return { ...EMPTY_SHARED_TIMELINE_PREFERENCES, customTitles: {}, eventGroups: [], eventNotes: {}, eventSummaries: {}, relationshipArcSummaries: {} }
   }
   const row = value as Record<string, unknown>
   const rawTitles = row.customTitles && typeof row.customTitles === 'object'
@@ -142,11 +175,63 @@ export function normalizeSharedTimelinePreferences(value: unknown): SharedTimeli
     }
   }
 
+  const eventNotes: Record<string, string> = {}
+  if (row.eventNotes && typeof row.eventNotes === 'object') {
+    for (const [key, raw] of Object.entries(row.eventNotes as Record<string, unknown>)) {
+      const note = normalizedText(raw, MAX_EVENT_NOTE_LENGTH)
+      if (!key || !note) continue
+      eventNotes[key] = note
+      if (Object.keys(eventNotes).length >= MAX_EVENT_METADATA) break
+    }
+  }
+
+  const eventSummaries: Record<string, SharedTimelineAcceptedEventSummary> = {}
+  if (row.eventSummaries && typeof row.eventSummaries === 'object') {
+    for (const [key, raw] of Object.entries(row.eventSummaries as Record<string, unknown>)) {
+      if (!key || !raw || typeof raw !== 'object') continue
+      const summaryRow = raw as Record<string, unknown>
+      const summary = normalizedText(summaryRow.summary, MAX_EVENT_SUMMARY_LENGTH)
+      const evidenceIds = uniqueStrings(summaryRow.evidenceIds, MAX_EVENT_ITEMS)
+      const updatedAt = normalizedText(summaryRow.updatedAt, 40)
+      if (!summary || !evidenceIds.length || !updatedAt) continue
+      eventSummaries[key] = { summary, evidenceIds, updatedAt }
+      if (Object.keys(eventSummaries).length >= MAX_EVENT_METADATA) break
+    }
+  }
+
+  const relationshipArcSummaries: Record<string, SharedTimelineAcceptedRelationshipArcSummary> = {}
+  if (row.relationshipArcSummaries && typeof row.relationshipArcSummaries === 'object') {
+    for (const [key, raw] of Object.entries(row.relationshipArcSummaries as Record<string, unknown>)) {
+      if (!key || !raw || typeof raw !== 'object') continue
+      const summaryRow = raw as Record<string, unknown>
+      const characterId = normalizedText(summaryRow.characterId, 80)
+      const summary = normalizedText(summaryRow.summary, MAX_RELATIONSHIP_ARC_SUMMARY_LENGTH)
+      const nodeIds = uniqueStrings(summaryRow.nodeIds, MAX_RELATIONSHIP_ARC_NODES)
+      const evidenceIds = uniqueStrings(summaryRow.evidenceIds, MAX_RELATIONSHIP_ARC_EVIDENCE)
+      const turningPointNodeIds = uniqueStrings(summaryRow.turningPointNodeIds, MAX_RELATIONSHIP_ARC_NODES)
+        .filter(id => nodeIds.includes(id))
+      const updatedAt = normalizedText(summaryRow.updatedAt, 40)
+      if (!characterId || !summary || !nodeIds.length || !evidenceIds.length || !updatedAt) continue
+      relationshipArcSummaries[key] = {
+        characterId,
+        summary,
+        nodeIds,
+        evidenceIds,
+        ...(turningPointNodeIds.length ? { turningPointNodeIds } : {}),
+        updatedAt
+      }
+      if (Object.keys(relationshipArcSummaries).length >= MAX_RELATIONSHIP_ARC_SUMMARIES) break
+    }
+  }
+
   return {
     starredIds: uniqueStrings(row.starredIds),
     hiddenIds: uniqueStrings(row.hiddenIds),
     customTitles,
-    eventGroups
+    eventGroups,
+    eventNotes,
+    eventSummaries,
+    relationshipArcSummaries
   }
 }
 
@@ -171,6 +256,21 @@ function titleForMemory(memory: CharacterMemory) {
   if (memory.category === 'event' || memory.layer === 'shared') return '一起经历的事'
   if (memory.layer === 'story') return '剧情节点'
   return '重要记忆'
+}
+
+function relationshipSignalForMemory(memory: CharacterMemory): SharedTimelineRelationshipSignal | undefined {
+  if (memory.category === 'promise' || memory.layer === 'promise') return 'promise'
+  if (memory.category === 'relationship' || memory.layer === 'relationship') return 'relationship-change'
+  if (memory.layer === 'story') return 'story'
+  if (memory.category === 'event' || memory.layer === 'shared') return 'shared-event'
+  return undefined
+}
+
+function relationshipSignalForState(field: ConversationStateHistory['field']): SharedTimelineRelationshipSignal | undefined {
+  if (field === 'relationship') return 'relationship-change'
+  if (field === 'goal') return 'goal'
+  if (field === 'event') return 'shared-event'
+  return undefined
 }
 
 function titleForState(field: ConversationStateHistory['field']) {
@@ -215,6 +315,7 @@ export function buildSharedTimelineItems(input: SharedTimelineBuildInput): Share
       sourceRoute: route,
       importance: memory.importance,
       sourceExcerpt: sourceMessage ? normalizedText(sourceMessage.displayContent || sourceMessage.content, 100) : undefined,
+      relationshipSignal: relationshipSignalForMemory(memory),
       starred: false,
       hidden: false
     })
@@ -246,6 +347,7 @@ export function buildSharedTimelineItems(input: SharedTimelineBuildInput): Share
       mediaKind: post.images?.[0]?.dataUrl ? 'image' : undefined,
       mediaPreviewUrl: post.images?.[0]?.dataUrl,
       mediaLabel: post.images?.length ? `${post.images.length} 张图片` : undefined,
+      relationshipSignal: 'shared-event',
       starred: false,
       hidden: false
     })
@@ -285,6 +387,7 @@ export function buildSharedTimelineItems(input: SharedTimelineBuildInput): Share
       mediaKind: isImage ? 'image' : 'music',
       mediaPreviewUrl: isImage ? message.imageDataUrl : undefined,
       mediaLabel: isImage ? (message.imageName || '聊天图片') : '一起听歌',
+      relationshipSignal: 'shared-event',
       starred: false,
       hidden: false
     })
@@ -313,6 +416,9 @@ export function buildSharedTimelineItems(input: SharedTimelineBuildInput): Share
       sourceLabel: '状态历史',
       sourceRoute: `/chat/${encodeURIComponent(history.conversationId)}?message=${encodeURIComponent(sourceMessage.id)}`,
       importance: history.field === 'relationship' || history.field === 'event' ? 4 : 3,
+      relationshipSignal: relationshipSignalForState(history.field),
+      relationshipPreviousValue: history.field === 'relationship' ? normalizedText(history.previousValue, 120) || undefined : undefined,
+      relationshipNextValue: history.field === 'relationship' ? normalizedText(history.nextValue, 120) || undefined : undefined,
       starred: false,
       hidden: false
     })

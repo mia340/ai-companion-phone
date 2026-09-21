@@ -42,6 +42,23 @@ export interface AppCustomization {
       title?: string
       createdAt?: string
     }>
+    /** V1.3：事件级用户备注，key 为稳定 evidence fingerprint；不复制原始证据正文。 */
+    eventNotes?: Record<string, string>
+    /** V1.3：用户确认后的 AI 事件摘要；必须绑定完整 evidence id 集合，证据变化后自动失效。 */
+    eventSummaries?: Record<string, {
+      summary: string
+      evidenceIds: string[]
+      updatedAt: string
+    }>
+    /** V1.5 / Relationship Arc：用户确认后的关系脉络摘要；key 为完整 arc fingerprint。 */
+    relationshipArcSummaries?: Record<string, {
+      characterId: UUID
+      summary: string
+      nodeIds: string[]
+      evidenceIds: string[]
+      turningPointNodeIds?: string[]
+      updatedAt: string
+    }>
   }
   updatedAt: string
 }

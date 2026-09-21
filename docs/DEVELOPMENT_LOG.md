@@ -810,3 +810,7 @@ Windows 首轮 `npm run verify` 显示 41 个测试文件 / 329 个测试均先�
 - Windows verify exposed one false-negative regression test in `proactiveMessageService.test.ts`.
 - Runtime output correctly uses event-level multi-evidence wording “这些证据里”; the test still expected singular “证据里”.
 - Replaced the brittle exact substring with two semantic assertions while retaining event/evidence provenance assertions.
+
+## 2026-09-21 · alpha.5.3.4 Event Intelligence
+
+在 Shared Event 已经能做保守归并和人工分组之后，本轮把“事件详情”升级为可用的整理界面。AI 只拿事件现有 evidence，并必须原样回传 event id + 完整 evidence ids；用户确认前不持久化。事件备注与确认摘要都以 evidence fingerprint 存入 appCustomizations，避免 auto/manual id 切换造成元数据漂移。新增 source message 上下文读取和人工 evidence 顺序，继续保持事实正文只存在原 store。

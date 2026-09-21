@@ -4,7 +4,10 @@ import {
   createManualTimelineEventGroup,
   projectSharedTimelineEvents,
   removeManualTimelineEventGroup,
+  reorderManualTimelineEventGroup,
+  resolveSharedTimelineEventSummary,
   selectSharedTimelineRecallEvent,
+  sharedTimelineEventEvidenceKey,
   upsertManualTimelineEventGroup
 } from './sharedTimelineEventService'
 import type { SharedTimelineItem } from './sharedTimelineService'
@@ -140,4 +143,81 @@ describe('sharedTimelineEventService', () => {
     })
     expect(recall).toBeUndefined()
   })
+
+  it('evidenceKey 与证据顺序无关，自动事件转人工事件后仍能稳定引用元数据', () => {
+    expect(sharedTimelineEventEvidenceKey(['memory:1', 'state:1'])).toBe(
+      sharedTimelineEventEvidenceKey(['state:1', 'memory:1'])
+    )
+  })
+
+  it('人工事件会保留用户指定的证据顺序', () => {
+    const rows = [
+      item(),
+      item({ id: 'state:1', sourceKind: 'state', sourceId: 's1', occurredAt: '2026-09-01T12:10:00.000Z' })
+    ]
+    const event = buildSharedTimelineEvents(rows, {
+      eventGroups: [{ id: 'manual-order', itemIds: ['state:1', 'memory:1'] }]
+    })[0]
+    expect(event.itemIds).toEqual(['state:1', 'memory:1'])
+    expect(event.startedAt).toBe('2026-09-01T12:00:00.000Z')
+  })
+
+  it('人工事件支持单步调整证据顺序', () => {
+    expect(reorderManualTimelineEventGroup(
+      [{ id: 'g', itemIds: ['a', 'b', 'c'] }],
+      'g',
+      'c',
+      -1
+    )[0].itemIds).toEqual(['a', 'c', 'b'])
+  })
+
+  it('AI 事件摘要只有在 evidence 集合完全一致时才有效', () => {
+    const event = buildSharedTimelineEvents([
+      item(),
+      item({ id: 'state:1', sourceKind: 'state', sourceId: 's1' })
+    ], emptyPrefs)[0]
+    const valid = resolveSharedTimelineEventSummary(event, {
+      eventSummaries: {
+        [event.evidenceKey]: {
+          summary: '这是用户确认过的摘要',
+          evidenceIds: ['state:1', 'memory:1'],
+          updatedAt: '2026-09-20T00:00:00.000Z'
+        }
+      }
+    })
+    const stale = resolveSharedTimelineEventSummary(event, {
+      eventSummaries: {
+        [event.evidenceKey]: {
+          summary: '缺少证据的旧摘要',
+          evidenceIds: ['memory:1'],
+          updatedAt: '2026-09-20T00:00:00.000Z'
+        }
+      }
+    })
+    expect(valid?.summary).toBe('这是用户确认过的摘要')
+    expect(stale).toBeUndefined()
+  })
+
+  it('主动旧事会优先使用仍与完整 evidence 匹配的用户确认摘要', () => {
+    const rows = [
+      item({ occurredAt: '2026-07-01T00:00:00.000Z' }),
+      item({ id: 'state:1', sourceKind: 'state', sourceId: 's1', occurredAt: '2026-07-01T00:10:00.000Z' })
+    ]
+    const event = buildSharedTimelineEvents(rows, emptyPrefs)[0]
+    const recall = selectSharedTimelineRecallEvent(rows, {
+      eventGroups: [],
+      eventSummaries: {
+        [event.evidenceKey]: {
+          summary: '确认摘要：一起约好去海边，并记录了关系变化。',
+          evidenceIds: event.itemIds,
+          updatedAt: '2026-09-20T00:00:00.000Z'
+        }
+      }
+    }, {
+      characterId: 'char-1',
+      now: new Date('2026-09-20T00:00:00.000Z')
+    })
+    expect(recall?.summary).toContain('确认摘要')
+  })
+
 })

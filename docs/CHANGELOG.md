@@ -1,3 +1,30 @@
+## V0.5.0-alpha.5.4.2 · Relationship Arc V1 TypeScript 热修
+
+- 修复 `SharedTimelineView.vue` 的 `contextSenderLabel()` 可选参数窄化：当上下文消息 sender 不在 characterMap 且未传 event 时，不再直接访问 `event.characterName`。
+- 保持 Relationship Arc V1、Shared Event provenance、数据库与 Backup schema 行为不变；测试矩阵仍为 65 files / 547 tests。
+- 本版本仅处理 Windows 首轮 `vue-tsc -b` 暴露的 TS18048 编译错误，不增加新功能。
+
+## V0.5.0-alpha.5.4.1 · Relationship Arc V1 发布热修
+
+- 修复 Relationship Arc 在投影前未先按 event owner 收窄的问题，避免异常/陈旧 wrapper 把另一角色 evidence 投入当前角色 Arc。
+- Shared Event 在完整 evidence 集合未变化时保留原稳定 `evidenceKey`；隐藏/筛除 evidence 时继续重算 key，保证确认摘要稳定命中且 provenance 变化后自动失效。
+- 不改变 Relationship Arc V1 功能、数据库或 Backup schema；测试矩阵仍为 65 files / 547 tests。
+
+## V0.5.0-alpha.5.4.0 · Relationship Arc V1
+
+- 时光新增第三视图「关系脉络」：按角色把 Shared Event 以真实时间串成节点与阶段。
+- evidence 增加 Runtime-only relationship signal；只有明确 relationship state history 保留 before/after，普通文案不推断关系方向。
+- 新增 AI 关系脉络摘要：必须原样回传 characterId、arc fingerprint、完整 node ids / evidence ids；用户确认后才保存，脉络变化后自动失效。
+- 新增关系脉络带回聊天：只写草稿，不自动发送，并携带 arc/node/evidence provenance。
+- 新增独立 `RelationshipArcPanel.vue`，避免把整套关系编译 UI 继续堆回 SharedTimelineView。
+- IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 不变；静态测试矩阵 65 files / 547 tests。
+
+## V0.5.0-alpha.5.3.5
+
+- 时光 V1.4：周年回顾、事件带回聊天、相关时光关系图。
+- 所有新能力均基于真实 Shared Event evidence；带回聊天只写草稿，不自动发送。
+- 无数据库迁移。
+
 # Changelog
 
 ## V0.5.0-alpha.5.3.1 · 时光 V1.1
@@ -689,3 +716,11 @@
 - 修复 5.3.2 主动旧事测试对中文单复数文案过度严格导致的假失败。
 - 测试改为锁定“不补写不存在情节”的安全语义，同时继续校验 event id 与 evidence ids。
 - 生产 Runtime、IndexedDB V18、Backup V12 均不变；预期测试矩阵仍为 57 files / 481 tests。
+
+## V0.5.0-alpha.5.3.4
+
+- 时光 V1.3：事件级 AI 摘要必须绑定完整 evidence id 集合，用户确认后才保存。
+- 新增事件备注、来源消息上下文窗口和 evidence 手动排序。
+- 事件摘要/备注使用稳定 evidence fingerprint；隐藏或变更 evidence 后旧摘要自动失效。
+- 主动旧事可使用仍有效的确认摘要，event/evidence provenance guard 不变。
+- IndexedDB V18 / Backup V12 不变；预期测试矩阵 59 files / 500 tests。
