@@ -32,6 +32,8 @@ export interface AppCustomization {
   spaceVisibility?: 'public' | 'friends' | 'private'
   spaceBlacklistCharacterIds?: UUID[]
   /** 时光 / 共同回忆：只保存用户偏好与人工事件分组，不复制证据正文。 */
+  /** 心跳飞行棋：轻量局内状态。字段不参与索引，因此无需升级 IndexedDB。 */
+  coupleBoardState?: unknown
   sharedTimelineState?: {
     starredIds?: string[]
     hiddenIds?: string[]

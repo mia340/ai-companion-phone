@@ -1,3 +1,27 @@
+## 2026-09-21 · V0.5.0-alpha.5.5.2 · Launcher fixture 重复 revision 热修
+
+- Windows 5.5.1 首轮 verify 显示 `coupleBoardGameService.test.ts` 14/14 通过，`companionNavigation.test.ts` 只剩 1 条失败，总计 65/66 files、562/563 tests。
+- Vite 同时报告 `Duplicate key "homeLayoutRevision" in object literal`：该测试对象先使用 `HOME_LAYOUT_REVISION`，末尾又残留 `homeLayoutRevision: 7`。JavaScript 对象后键覆盖前键，所以 fixture 实际仍被视为 legacy revision 7。
+- 删除重复旧键，不修改任何生产代码；真实 revision 12 → 13 迁移测试继续独立保留。
+- 预期测试定义仍为 66 files / 563 declarations，正式状态以 Windows 两轮 `npm run verify` 为准。
+
+## 2026-09-21 · V0.5.0-alpha.5.5.1 · Launcher 测试热修
+
+- Windows 5.5.0 首轮 Vitest 中，`coupleBoardGameService.test.ts` 14 条全部通过；失败集中在 `companionNavigation.test.ts` 的 10 条旧 Launcher 期望。
+- 两条 catalog 断言更新为包含 `couple-board`；其余当前布局 fixture 显式写入 revision 13，防止测试数据被按 legacy revision 0 触发一次性迁移。
+- 保留 `homeLayoutBackup.test.ts` 中 revision 12 → 13 的真实迁移覆盖，因此旧用户自动补 App 行为继续受测。
+- 不修改 Couple Board Runtime、Launcher migration Runtime、IndexedDB、Backup 或 UI；测试定义保持 66 files / 563 declarations。
+
+## 2026-09-21 · V0.5.0-alpha.5.5.0 · 心跳飞行棋 V1
+
+- 新增 `coupleBoardGameService.ts`，把棋盘、题库、强度、同意边界、局内持久化与聊天草稿桥接从 View 分离成可测试 Runtime。
+- 新增 30 格蛇形棋盘和 64 条内置题目；四档强度中只有 L4 标记 adult-only，并在 Runtime 层同时检查显式确认与角色已知年龄。
+- 新增 `CoupleBoardView.vue`：玻璃卡片 + 酒红/粉紫视觉、双方棋子、骰子动画、挑战 Bottom Sheet、心动值、继续上局、结算/再来一局。
+- 聊天互动模式复用现有单聊与 `ai-companion-draft:*` 草稿入口；游戏不会自动发送消息，也不写 Memory / Conversation State / Relationship Arc。
+- `HomeAppKey` 新增 `couple-board`，Launcher revision 13 做一次性补 App 迁移；迁移逻辑改为按 revision 分段执行，避免新 revision 错误重放 V12 Widget 尺寸迁移。
+- 新增 14 条 Couple Board service tests，并给 HomeLayout migration 增加 2 条测试；测试定义 66 files / 563 declarations。
+- 当前环境只完成 TypeScript/Vue script 静态语法扫描；完整依赖安装不可用，最终仍由 Windows 双 `npm run verify` 门禁确认。
+
 ## 2026-09-21 · V0.5.0-alpha.5.3.0
 
 ## V0.5.0-alpha.5.3.1 · 时光 V1.1

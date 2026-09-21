@@ -5,6 +5,7 @@ import {
   HOME_APPS,
   HOME_GRID_COLUMNS,
   HOME_GRID_ROWS,
+  HOME_LAYOUT_REVISION,
   addHomeAppToFolder,
   createHomeFolder,
   collapseHomeLayoutPageIntoPrevious,
@@ -28,6 +29,7 @@ describe('知间桌面入口与布局', () => {
     expect(HOME_APPS.map(item => item.key)).toEqual([
       'music',
       'turtle-soup',
+      'couple-board',
       'profile',
       'memory',
       'timeline',
@@ -49,6 +51,7 @@ describe('知间桌面入口与布局', () => {
       'banxin',
       'music',
       'turtle-soup',
+      'couple-board',
       'profile',
       'memory',
       'timeline',
@@ -59,6 +62,7 @@ describe('知间桌面入口与布局', () => {
     ])
 
     const normalized = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       iconScale: 99,
       showAppLabels: false,
       homeAppKeys: ['music', 'music', 'turtle-soup', 'unknown'] as never,
@@ -81,6 +85,7 @@ describe('知间桌面入口与布局', () => {
     expect(HOME_GRID_ROWS).toBe(6)
 
     const normalized = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: ['companion', 'world', 'music'],
       dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
@@ -96,6 +101,7 @@ describe('知间桌面入口与布局', () => {
 
   it('Dock 满位时支持拖拽交换', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'turtle-soup', 'profile'],
       dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
       homeWidgetKeys: [],
@@ -110,6 +116,7 @@ describe('知间桌面入口与布局', () => {
 
   it('允许把一个 App 单独放到新页，并保留明确页归属', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'turtle-soup', 'profile'],
       homePageKeys: [['music', 'turtle-soup', 'profile']],
       dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
@@ -127,6 +134,7 @@ describe('知间桌面入口与布局', () => {
 
   it('把后一页最后一个项目移走后会立即回收空白页', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: [],
       homeLayoutPages: [
@@ -146,6 +154,7 @@ describe('知间桌面入口与布局', () => {
 
   it('页面只有在真正清空后才删除，不会把非空页自动挤回前一页', () => {
     const normalized = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'backup'],
       homeLayoutPages: [
         { items: [{ id: 'app:music', type: 'app', key: 'music', x: 0, y: 0, w: 1, h: 1 }] },
@@ -164,6 +173,7 @@ describe('知间桌面入口与布局', () => {
 
   it('显式自愈幽灵页时会同时重算 App/Widget 列表，不会把幽灵项目再次补回来', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: [],
       homeLayoutPages: [
@@ -184,6 +194,7 @@ describe('知间桌面入口与布局', () => {
 
   it('归一化会删除中间和尾部幽灵空页，并把后续非空页前移', () => {
     const normalized = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: [],
       homeLayoutPages: [
@@ -195,8 +206,7 @@ describe('知间桌面入口与布局', () => {
       dockAppKeys: ['banxin'],
       iconScale: 1,
       showAppLabels: true,
-      widgetStyle: 'frosted',
-      homeLayoutRevision: 7
+      widgetStyle: 'frosted'
     })
 
     expect(normalized.homeLayoutPages).toHaveLength(2)
@@ -206,6 +216,7 @@ describe('知间桌面入口与布局', () => {
 
   it('App 拖到已有项目之间时按插入顺序流式后移，而不是简单交换', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile', 'memory', 'backup'],
       homeWidgetKeys: [],
       homeLayoutPages: [{ items: [
@@ -232,6 +243,7 @@ describe('知间桌面入口与布局', () => {
 
   it('Widget 与 App 共用插入重排，组件尺寸参与占位并把后续 App 向后推', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: ['companion'],
       homeLayoutPages: [{ items: [
@@ -259,6 +271,7 @@ describe('知间桌面入口与布局', () => {
 
   it('两个 App 可以组成文件夹，并继续加入第三个 App', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile', 'memory'],
       homeWidgetKeys: [],
       homeLayoutPages: [{ items: [
@@ -288,6 +301,7 @@ describe('知间桌面入口与布局', () => {
 
   it('文件夹只剩一个 App 时自动解散回普通图标', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: [],
       homeLayoutPages: [{ items: [
@@ -321,6 +335,7 @@ describe('知间桌面入口与布局', () => {
 
   it('文件夹内 App 可以拖回桌面精确格位，并在只剩一个成员时自动解散', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile', 'memory'],
       homeWidgetKeys: [],
       homeLayoutPages: [{ items: [
@@ -345,6 +360,7 @@ describe('知间桌面入口与布局', () => {
 
   it('文件夹内 App 可以拖到 Dock，且剩余一个成员时自动解散', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: [],
       homeLayoutPages: [{ items: [
@@ -364,6 +380,7 @@ describe('知间桌面入口与布局', () => {
 
   it('文件夹内部拖动按插入顺序重排成员，而不是只能移出', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile', 'memory'],
       homeWidgetKeys: [],
       homeLayoutPages: [{ items: [
@@ -382,6 +399,7 @@ describe('知间桌面入口与布局', () => {
 
   it('幽灵页修复会把非空页面的项目安全搬回前页，再删除页面', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: [],
       homeLayoutPages: [
@@ -401,6 +419,7 @@ describe('知间桌面入口与布局', () => {
 
   it('幽灵页修复在空位碎片化时会先安全重排前页再回收页面', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['profile', 'memory', 'backup'],
       homeWidgetKeys: ['music'],
       homeLayoutPages: [
@@ -428,6 +447,7 @@ describe('知间桌面入口与布局', () => {
 
   it('默认桌面和归一化都不会硬编码第二页', () => {
     const normalized = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: [],
       dockAppKeys: ['banxin', 'new-character', 'world', 'settings'],
@@ -441,6 +461,7 @@ describe('知间桌面入口与布局', () => {
 
   it('强制移除幽灵页只移除桌面布局归属，不影响其他页项目', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: [],
       homeLayoutPages: [
@@ -460,6 +481,7 @@ describe('知间桌面入口与布局', () => {
 
   it('归一化会移除 Dock 与桌面的重复 App，避免历史重复项制造幽灵页', () => {
     const normalized = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile', 'banxin'],
       homeWidgetKeys: [],
       homeLayoutPages: [
@@ -477,6 +499,7 @@ describe('知间桌面入口与布局', () => {
 
   it('HomeLayout Inspector 会报告重复/重叠并由结构修复器安全收敛', () => {
     const current = normalizeHomeAppearance({
+      homeLayoutRevision: HOME_LAYOUT_REVISION,
       homeAppKeys: ['music', 'profile'],
       homeWidgetKeys: [],
       homeLayoutPages: [{ items: [

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_HOME_APPEARANCE, moveHomeAppToGrid } from './appCustomizationService'
+import { DEFAULT_HOME_APPEARANCE, HOME_LAYOUT_REVISION, moveHomeAppToGrid, normalizeHomeAppearance } from './appCustomizationService'
 import { parseHomeLayoutBackup, serializeHomeLayoutBackup } from './homeLayoutBackup'
 
 describe('homeLayoutBackup', () => {
@@ -9,6 +9,27 @@ describe('homeLayoutBackup', () => {
     const profilePage = restored.homeLayoutPages.findIndex(page => page.items.some(item => item.type === 'app' && item.key === 'profile'))
     expect(profilePage).toBe(1)
     expect(restored.dockAppKeys).toEqual(moved.dockAppKeys)
+  })
+
+
+  it('ships the couple board app in the default launcher catalog', () => {
+    expect(DEFAULT_HOME_APPEARANCE.homeAppKeys).toContain('couple-board')
+    expect(HOME_LAYOUT_REVISION).toBe(13)
+  })
+
+  it('adds the couple board app once when migrating a revision 12 launcher', () => {
+    const legacyPages = DEFAULT_HOME_APPEARANCE.homeLayoutPages.map(page => ({
+      items: page.items.filter(item => !(item.type === 'app' && item.key === 'couple-board'))
+    }))
+    const restored = normalizeHomeAppearance({
+      ...DEFAULT_HOME_APPEARANCE,
+      homeLayoutRevision: 12,
+      homeLayoutPages: legacyPages,
+      homeAppKeys: DEFAULT_HOME_APPEARANCE.homeAppKeys.filter(key => key !== 'couple-board')
+    })
+    const matches = restored.homeLayoutPages.flatMap(page => page.items)
+      .filter(item => item.type === 'app' && item.key === 'couple-board')
+    expect(matches).toHaveLength(1)
   })
 
   it('rejects arbitrary JSON before it reaches IndexedDB', () => {

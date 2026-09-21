@@ -1,3 +1,26 @@
+## V0.5.0-alpha.5.5.2 · 心跳飞行棋 V1 Launcher Fixture 热修
+
+- 修复 5.5.1 `companionNavigation.test.ts` 中唯一残留的重复 `homeLayoutRevision`：同一对象先写当前 revision 13、后又写 revision 7，导致后键覆盖并意外触发 `couple-board` 迁移。
+- 删除旧 `homeLayoutRevision: 7`，让“删除中间/尾部幽灵空页”测试只验证归一化行为，同时消除 Vite/esbuild duplicate-key warning。
+- 生产 Runtime、心跳飞行棋 UI/规则、revision 12 → 13 迁移、IndexedDB V18 与 Backup V12 均不变；测试定义仍为 66 files / 563 tests。
+
+## V0.5.0-alpha.5.5.1 · 心跳飞行棋 V1 Launcher 测试热修
+
+- 修复 5.5.0 Windows 首轮 verify 暴露的 Launcher 回归测试基线漂移：`HOME_APPS` / `CUSTOMIZABLE_APPS` 期望补入 `couple-board`。
+- 当前布局测试夹具显式使用 `HOME_LAYOUT_REVISION = 13`，避免把“当前布局”误当成旧 revision 12，再触发一次性 `couple-board` 迁移。
+- 保留 revision 12 → 13 的正式迁移测试，确保真实旧用户仍只补入一次心跳飞行棋；生产 Runtime、游戏规则、数据库与 Backup schema 均不变。
+- 测试定义仍为 66 files / 563 it-test declarations；最终仍以 Windows 两轮 `npm run verify` 为发布门禁。
+
+## V0.5.0-alpha.5.5.0 · 心跳飞行棋 V1
+
+- 新增原生 Launcher App「心跳飞行棋」：30 格双人棋盘、掷骰子、真心话、大冒险、心动格、盲盒、前进/后退与结算。
+- 题库分为纯爱 / 暧昧 / 亲密 / 成人 4 档，共 64 条内置题目；成人档要求显式 18+ 确认，年龄明确小于 18 岁的角色不能启用。
+- 所有挑战都可换题或跳过；现实互动文案始终要求参与者自行同意，Runtime 不替任何一方默认同意。
+- 支持聊天互动 / 面对面两种模式。聊天模式可把当前挑战写入真实单聊草稿，但绝不自动发送，也不自动写 Memory / Relationship State。
+- 局内状态复用 `appCustomizations` 非索引记录，本地持久化并进入现有 Backup，不新增 IndexedDB store。
+- Launcher 新增 `couple-board` App key、专属图标和 revision 13 一次性迁移；已有用户布局只补入新 App，不重放旧 Widget 尺寸迁移。
+- 测试定义提升到 66 files / 563 it-test declarations；正式发布仍以 Windows 两轮 `npm run verify` 为最终门禁。
+
 ## V0.5.0-alpha.5.4.2 · Relationship Arc V1 TypeScript 热修
 
 - 修复 `SharedTimelineView.vue` 的 `contextSenderLabel()` 可选参数窄化：当上下文消息 sender 不在 characterMap 且未传 event 时，不再直接访问 `event.characterName`。

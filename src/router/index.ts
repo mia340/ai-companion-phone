@@ -39,6 +39,7 @@ const TurtleSoupView = () => import('../views/TurtleSoupView.vue')
 const TurtleSoupHostView = () => import('../views/TurtleSoupHostView.vue')
 const MusicAppView = () => import('../views/MusicAppView.vue')
 const SharedTimelineView = () => import('../views/SharedTimelineView.vue')
+const CoupleBoardView = () => import('../views/CoupleBoardView.vue')
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -182,6 +183,10 @@ export const router = createRouter({
     {
       path: '/app/时光',
       component: SharedTimelineView
+    },
+    {
+      path: '/app/心跳飞行棋',
+      component: CoupleBoardView
     },
     {
       path: '/app/:name',

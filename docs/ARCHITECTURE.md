@@ -719,7 +719,29 @@ Backup：V12
 
 用于检查 prompt 分区、usage、memory hit、WorldBook hit、resource Focus/defer、estimated saved characters、scene transition、presence、runtime contract、raw/visible reply。
 
-## 15. 当前技术债
+## 15. Native App Runtime · 心跳飞行棋
+
+`CoupleBoardView.vue` 不直接拥有游戏规则。`coupleBoardGameService.ts` 是纯规则与持久化边界：
+
+```text
+Launcher / CoupleBoardView
+        ↓ user action
+Couple Board Runtime
+  ├─ board movement
+  ├─ prompt pool + intensity/mode filter
+  ├─ adult/consent guard
+  ├─ completion / replace / skip
+  ├─ local game snapshot
+  └─ chat-draft bridge
+        ↓
+appCustomizations / existing Conversation draft
+```
+
+成人模式只是一类被 Runtime 筛选的题库，不拥有绕过权限的特殊通道。角色年龄明确小于 18 时不能选择 L4；年龄未知时仍要求用户显式确认双方均为成年人。所有现实动作都只能作为可跳过的提示，Runtime 不把“完成挑战”写成 Memory、Relationship State 或事实。
+
+带到聊天采用草稿桥接：Game Runtime 只生成带 game/challenge reference 的 draft，并交给现有 ChatRoom。它不触发 Provider、不自动发送，也不自动改变游戏以外的事实层。
+
+## 16. 当前技术债
 
 - `ChatRoom.vue` 仍过大；
 - WorldBook Engine V2 第一阶段已实现 recursion / sticky / cooldown / delay / group scoring / token budget / depth-position；仍需继续对齐更多 SillyTavern 边界语义、跨分支 timed-effect 细节与更精确的 provider tokenizer；
@@ -728,7 +750,7 @@ Backup：V12
 - 长消息列表未完整虚拟化/分页；
 - 无跨设备同步。
 
-## 16. 文档规则
+## 17. 文档规则
 
 当前架构只维护在本文件。历史实现细节统一归档到 `RELEASE_HISTORY.md`。
 

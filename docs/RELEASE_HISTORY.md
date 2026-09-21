@@ -1,3 +1,29 @@
+## V0.5.0-alpha.5.5.2 · 心跳飞行棋 V1 Launcher Fixture 热修
+
+- Windows 5.5.1 首轮 Vitest 已通过 562/563 tests；唯一失败来自一个测试对象里重复的 `homeLayoutRevision` 键。
+- 该 fixture 的后置 revision 7 覆盖了前置当前 revision 13，因此测试运行了真实迁移并多出 `app:couple-board`；5.5.2 删除这个旧键。
+- 游戏 Runtime、Launcher migration Runtime、UI 与数据 schema 均不变。
+
+## V0.5.0-alpha.5.5.1 · 心跳飞行棋 V1 Launcher 测试热修
+
+- 修复 5.5.0 发布门禁中的 10 条 Launcher 回归测试：新 App catalog 期望与 revision 13 当前布局夹具同步。
+- revision 12 → 13 的一次性 `couple-board` 迁移逻辑保持不变并继续由独立迁移测试覆盖。
+- 游戏 Runtime、UI、数据模型与安全边界均不变；测试矩阵仍为 66 files / 563 declarations。
+
+## V0.5.0-alpha.5.5.0 · 心跳飞行棋 / Couple Board V1
+
+这一版新增一个完整 Native App，而不是在聊天页里塞小游戏逻辑。`coupleBoardGameService.ts` 负责棋盘规则、题库筛选、成人模式边界、换题/跳过/完成、局内持久化和聊天草稿桥接；`CoupleBoardView.vue` 只负责可视化棋盘与交互。
+
+核心边界：
+
+- 30 格双人棋盘，用户与单个角色各自持有独立 position / hearts / completed / skipped 状态。
+- 真心话 / 大冒险题库按强度和模式筛选；L4 成人题只在显式 18+ 确认后进入候选池，角色年龄明确小于 18 时硬阻断。
+- 每张挑战卡都提供“完成 / 换一题 / 跳过”，跳过不阻断游戏；现实动作始终以参与者自己同意为前提。
+- “带到知间聊天”只写 `ai-companion-draft:<conversationId>` 草稿，携带 game/challenge reference；不自动发送，不代替角色或用户完成挑战。
+- 状态复用已有 `appCustomizations` object store；IndexedDB V18 / Backup V12 不变。
+- HomeLayout revision 13 只负责把新 `couple-board` App 无损补进旧桌面。旧 revision 12 的 Widget 用户尺寸不会因为本次 revision bump 被再次缩放。
+- 测试定义：66 files / 563 declarations；最终以 Windows / CI `npm run verify` 为准。
+
 ## V0.5.0-alpha.5.4.2 · Relationship Arc V1 TypeScript 热修
 
 - 修复 `SharedTimelineView.vue` 的 `contextSenderLabel()` 可选参数窄化：当上下文消息 sender 不在 characterMap 且未传 event 时，不再直接访问 `event.characterName`。

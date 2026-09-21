@@ -1,17 +1,41 @@
 # AI Companion Phone · 当前项目状态
 
-更新于：**2026-09-21**  
-当前版本：**V0.5.0-alpha.5.4.2**
+更新于：**2026-09-21**
+当前版本：**V0.5.0-alpha.5.5.2**
 
 ```text
-App：0.5.0-alpha.5.4.2
-Launcher：Grid V13（Layout Inspector V4 + Dock/Home 去重 + DOM 绘制诊断）
+App：0.5.0-alpha.5.5.2
+Launcher：Grid V13（HomeLayout revision 13）
 IndexedDB：V18
 Backup：V12
-测试定义：65 files / 547 it-test declarations
+测试定义：66 files / 563 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+## 0. 本轮 alpha.5.5.2 重点
+
+- **Launcher 测试夹具热修**：5.5.1 已把大多数当前布局 fixture 标记为 revision 13，但“删除中间/尾部幽灵空页”用例仍残留第二个 `homeLayoutRevision: 7`，对象字面量后键覆盖前键，触发了真实 revision 7 → 13 迁移并补入 `couple-board`。
+- 删除该重复旧 revision 键，使此用例只验证幽灵页归一化，不再混入版本迁移；同时消除 Vite/esbuild 的 duplicate key warning。
+- revision 12 → 13 的真实 `couple-board` 迁移仍由 `homeLayoutBackup.test.ts` 独立覆盖；生产 Runtime/UI、IndexedDB V18、Backup V12、HomeLayout revision 13 均不变。
+- 测试定义仍为 66 files / 563 declarations；5.5.1 Windows 首轮实际达到 65/66 files、562/563 tests，仅此一条 fixture 失败。
+
+## 0. 本轮 alpha.5.5.1 重点
+
+- **Launcher 测试热修**：5.5.0 新增 `couple-board` 后，旧 `companionNavigation.test.ts` 仍按旧 catalog 和“未标 revision”的当前布局 fixture 断言，Windows 首轮 Vitest 因此出现 10 条失败。
+- `HOME_APPS` / `CUSTOMIZABLE_APPS` 测试基线同步加入 `couple-board`；当前布局 fixture 显式声明 HomeLayout revision 13。
+- revision 12 → 13 的真实迁移测试继续保留，确保旧用户仍会且只会补入一次新 App。
+- Couple Board Runtime/UI、IndexedDB V18、Backup V12、Launcher revision 13 均不变；测试定义仍为 66 files / 563 declarations。
+
+## 0. 本轮 alpha.5.5.0 重点
+
+- **新增原生 App「心跳飞行棋」**：30 格双人棋盘，用户 + 单角色轮流掷骰子，支持真心话、大冒险、心动、盲盒、前进/后退、休息与终点结算。
+- **四档题库强度**：纯爱 / 暧昧 / 亲密 / 成人。L4 需要显式确认双方均为成年人；若角色年龄字段明确小于 18，Runtime 直接拒绝成人模式。
+- **Consent-first**：所有挑战都能换题或跳过；现实互动只提供题目，不替用户或角色确认动作，不把“完成”推导成关系事实。
+- **聊天联动但不自动发送**：当前挑战可写入对应角色最近单聊草稿，用户进入 ChatRoom 后自行决定是否发送；不会自动写 Memory / Relationship State / Shared Event。
+- **本地续局**：游戏状态复用 `appCustomizations` 非索引记录，进入现有 Backup V12；不新增 IndexedDB store。
+- **Launcher revision 13**：新 `couple-board` App 自动补入已有桌面；迁移改为按 revision 精确执行，避免旧 Widget migration 被重复应用。
+- **测试定义**：新增 14 条游戏 Runtime tests + 2 条 Launcher migration tests，合计 66 files / 563 declarations。当前环境未完成完整 npm verify，Windows / CI 双门禁仍是发布事实源。
 
 ## 0. 本轮 alpha.5.4.2 重点
 

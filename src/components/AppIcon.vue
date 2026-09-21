@@ -70,6 +70,14 @@ const props = withDefaults(defineProps<{
         <path d="M14 35h36" stroke="white" stroke-width="3" stroke-linecap="round" opacity=".8"/>
         <path d="M48 19c4-3 7-1 6 3" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"/>
       </g>
+      <g v-else-if="props.icon === 'couple-board'">
+        <rect x="14" y="14" width="36" height="36" rx="12" fill="rgba(255,255,255,.94)" transform="rotate(-7 32 32)"/>
+        <circle cx="24" cy="25" r="3" fill="var(--icon-a)" opacity=".78"/>
+        <circle cx="39" cy="23" r="3" fill="var(--icon-a)" opacity=".78"/>
+        <circle cx="31.5" cy="34" r="3" fill="var(--icon-a)" opacity=".78"/>
+        <path d="M26 42c2.1-4.9 9-5.3 11.7-.9 2.8 4.6-2.8 8.7-5.8 10.9-3.1-2.2-8.4-5.9-5.9-10Z" fill="white"/>
+        <path d="M48.5 12.5c2.8 0 5 2.2 5 5 0 4.2-5 7.3-5 7.3s-5-3.1-5-7.3c0-2.8 2.2-5 5-5Z" fill="white" opacity=".92"/>
+      </g>
       <g v-else-if="props.icon === 'profile'">
         <circle cx="32" cy="23" r="10" fill="rgba(255,255,255,.95)"/>
         <path d="M14 53c1.6-11.2 7.7-17 18-17s16.4 5.8 18 17" fill="rgba(255,255,255,.95)"/>
