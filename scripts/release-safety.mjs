@@ -84,6 +84,27 @@ async function checkSource() {
   }
   pass('GitHub Actions uses npm run verify')
 
+  const routerSource = await readText('src/router/index.ts')
+  if (routerSource.includes('PlaceholderApp') || routerSource.includes("path: '/app/:name'")) {
+    fail('finished app routes must not fall through to the old PlaceholderApp screen')
+  }
+
+  const appCustomizationSource = await readText('src/services/appCustomizationService.ts')
+  const catalogMatch = appCustomizationSource.match(/const APP_CATALOG:[\s\S]*?= \[([\s\S]*?)\n\]/)
+  if (!catalogMatch) fail('cannot audit APP_CATALOG routes')
+  const launcherRoutes = [...catalogMatch[1].matchAll(/route:\s*'([^']+)'/g)].map((match) => match[1])
+  if (!launcherRoutes.length) fail('APP_CATALOG has no routes to audit')
+  for (const route of launcherRoutes) {
+    if (!routerSource.includes(`path: '${route}'`)) fail(`launcher app has no concrete router entry: ${route}`)
+  }
+  for (const route of ['/app/朋友圈', '/app/海龟汤', '/app/音乐', '/app/时光', '/app/心跳飞行棋']) {
+    if (!routerSource.includes(`path: '${route}'`)) fail(`missing native app route: ${route}`)
+  }
+  if (!routerSource.includes("path: '/:pathMatch(.*)*'") || !routerSource.includes("redirect: '/home'")) {
+    fail('unknown/obsolete routes must return to Home instead of rendering a placeholder')
+  }
+  pass(`all ${launcherRoutes.length} launcher apps + native app routes are concrete; PlaceholderApp fallback removed`)
+
   const requiredDocs = [
     'docs/部署与更新.md',
     'docs/知间产品原则.md',

@@ -29,7 +29,6 @@ const WorldCenterView = () => import('../views/WorldCenterView.vue')
 const PromptDebugView = () => import('../views/PromptDebugView.vue')
 const MemoryManagerView = () => import('../views/MemoryManagerView.vue')
 const MemoryCenterView = () => import('../views/MemoryCenterView.vue')
-const PlaceholderApp = () => import('../views/PlaceholderApp.vue')
 
 // 重交互 App 按路由懒加载，避免朋友圈/音乐/海龟汤/飞行棋挤进首屏主包。
 const MomentsView = () => import('../views/MomentsView.vue')
@@ -195,8 +194,8 @@ export const router = createRouter({
       component: CoupleBoardView
     },
     {
-      path: '/app/:name',
-      component: PlaceholderApp
+      path: '/:pathMatch(.*)*',
+      redirect: '/home'
     }
   ]
 })

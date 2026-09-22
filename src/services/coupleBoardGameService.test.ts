@@ -59,6 +59,15 @@ describe('coupleBoardGameService', () => {
     expect(COUPLE_BOARD_CELLS[29].type).toBe('finish')
   })
 
+  it('ships a substantial built-in question bank with unique ids across every intensity and type', () => {
+    expect(COUPLE_BOARD_PROMPTS).toHaveLength(128)
+    expect(new Set(COUPLE_BOARD_PROMPTS.map(prompt => prompt.id)).size).toBe(COUPLE_BOARD_PROMPTS.length)
+    for (const intensity of [1, 2, 3, 4] as const) {
+      expect(COUPLE_BOARD_PROMPTS.filter(prompt => prompt.intensity === intensity && prompt.type === 'truth')).toHaveLength(16)
+      expect(COUPLE_BOARD_PROMPTS.filter(prompt => prompt.intensity === intensity && prompt.type === 'dare')).toHaveLength(16)
+    }
+  })
+
   it('starts a game with the user turn and isolated player state', () => {
     const game = createCoupleBoardGame(baseSettings)
     expect(game.currentPlayer).toBe('user')

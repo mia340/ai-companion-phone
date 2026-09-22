@@ -9,7 +9,18 @@ import { startAutoActivityLoop } from './services/momentAutoActivityService'
 import { startSocialRuntimeLoop } from './services/socialRuntimeService'
 import './assets/main.css'
 
-registerSW({ immediate: true })
+let requestServiceWorkerUpdate: (reloadPage?: boolean) => Promise<void> = async () => {}
+requestServiceWorkerUpdate = registerSW({
+  immediate: true,
+  onRegisteredSW: (_swUrl, registration) => {
+    // Check the release worker on every launch so a normal refresh does not stay on an obsolete app shell.
+    void registration?.update()
+  },
+  onNeedRefresh: () => {
+    // autoUpdate normally activates immediately; this also handles browsers that still surface a waiting worker.
+    void requestServiceWorkerUpdate(true)
+  }
+})
 
 /**
  * 一次性开发引导：仅当开发模式下从地址栏带 `?applyKey=` 等参数打开时，

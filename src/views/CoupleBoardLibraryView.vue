@@ -29,7 +29,7 @@ const router = useRouter()
 const worldId = ref('world-default')
 const loading = ref(true)
 const tab = ref<'prompts' | 'events' | 'history'>('prompts')
-const scope = ref<'mine' | 'system'>('mine')
+const scope = ref<'mine' | 'system'>('system')
 const query = ref('')
 const typeFilter = ref<'all' | CoupleBoardPromptType>('all')
 const intensityFilter = ref<'all' | CoupleBoardIntensity>('all')
@@ -307,7 +307,7 @@ onMounted(async () => {
     <main class="library-shell">
       <header class="topbar">
         <button class="circle" @click="router.push('/app/心跳飞行棋')">‹</button>
-        <div><small>COUPLE BOARD · V1.2</small><b>情侣内容中心</b></div>
+        <div><small>COUPLE BOARD · V1.2.1</small><b>情侣内容中心</b></div>
         <button class="circle home" @click="router.push('/home')">⌂</button>
       </header>
 
@@ -315,15 +315,15 @@ onMounted(async () => {
         <small>YOUR PRIVATE COUPLE SPACE</small>
         <h1>把只属于你们的<br><em>题、事件和回忆</em>放进来。</h1>
         <div class="hero-stats">
+          <span><b>{{ enabledSystemPromptCount }}</b>内置题启用</span>
           <span><b>{{ preferences.customPrompts.length }}</b>专属题</span>
-          <span><b>{{ preferences.customEventCards.length }}</b>事件卡</span>
           <span><b>{{ archive.entries.length }}</b>局回忆</span>
         </div>
       </section>
 
       <nav class="tabs">
-        <button :class="{ active: tab === 'prompts' }" @click="tab = 'prompts'; scope = 'mine'">题库</button>
-        <button :class="{ active: tab === 'events' }" @click="tab = 'events'; scope = 'mine'">事件卡</button>
+        <button :class="{ active: tab === 'prompts' }" @click="tab = 'prompts'; scope = 'system'">题库</button>
+        <button :class="{ active: tab === 'events' }" @click="tab = 'events'; scope = 'system'">事件卡</button>
         <button :class="{ active: tab === 'history' }" @click="tab = 'history'">回忆册</button>
       </nav>
 
@@ -331,7 +331,7 @@ onMounted(async () => {
 
       <template v-else-if="tab === 'prompts'">
         <section class="editor-card">
-          <header><div><small>{{ editingPromptId ? 'EDIT CARD' : 'NEW CARD' }}</small><b>{{ editingPromptId ? '编辑专属题' : '写一道只有你们懂的题' }}</b></div><button v-if="editingPromptId" @click="resetPromptDraft">取消编辑</button></header>
+          <header><div><small>{{ editingPromptId ? 'EDIT CARD' : 'NEW CARD' }}</small><b>{{ editingPromptId ? '编辑专属题' : `内置已经有 ${COUPLE_BOARD_PROMPTS.length} 道，也可以继续加你们自己的` }}</b></div><button v-if="editingPromptId" @click="resetPromptDraft">取消编辑</button></header>
           <div class="segmented"><button :class="{ active: promptDraft.type === 'truth' }" @click="promptDraft.type = 'truth'">真心话</button><button :class="{ active: promptDraft.type === 'dare' }" @click="promptDraft.type = 'dare'">大冒险</button></div>
           <div class="field-grid">
             <label>强度<select v-model.number="promptDraft.intensity"><option :value="1">L1 纯爱</option><option :value="2">L2 暧昧</option><option :value="3">L3 亲密</option><option :value="4">L4 成人</option></select></label>

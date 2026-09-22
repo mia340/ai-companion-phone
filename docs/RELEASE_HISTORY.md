@@ -1,3 +1,7 @@
+## V0.5.0-alpha.5.7.1 · Couple Board V1.2.1 field hotfix
+
+针对 5.7.0 首轮实机反馈修复四类问题：彻底移除旧占位 App 页面并加强 PWA 更新；角色选择条支持真正的横向滑动/拖动；系统题库扩至 128 道且默认可见；骰子动画不再依赖持久化完成才停止。IndexedDB / Backup / Launcher revision 均不升级。
+
 ## V0.5.0-alpha.5.7.0 · Couple Board V1.2
 
 心跳飞行棋进入可长期积累内容的 V1.2：独立情侣内容中心统一管理自定义题库、系统题启停与可编辑事件牌组；完成棋局进入本地回忆册。AI 回忆题从仅 Memory 扩展为 Memory + Shared Timeline 的可验证 evidence，并保持“无证据不生成、未知 id 拒绝、生成结果不自动写事实”的边界。结算可由用户主动带到聊天草稿。次级页面进一步 route-level code split。数据库/Backup/Launcher revision 不升级；静态测试定义 67 files / 597 declarations。

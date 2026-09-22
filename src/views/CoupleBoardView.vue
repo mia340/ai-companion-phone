@@ -8,6 +8,7 @@ import { getActiveWorldId } from '../services/momentService'
 import { generateCoupleBoardMemoryPrompt } from '../services/coupleBoardMemoryPromptService'
 import {
   COUPLE_BOARD_CELLS,
+  COUPLE_BOARD_PROMPTS,
   attachCoupleBoardGeneratedPrompt,
   archiveCoupleBoardGame,
   buildCoupleBoardChatShare,
@@ -56,13 +57,21 @@ const disabledBuiltinEventCardIds = ref<string[]>([])
 const archiveCount = ref(0)
 const screen = ref<'setup' | 'game'>('setup')
 const loading = ref(true)
+const characterRow = ref<HTMLElement>()
 const diceRolling = ref(false)
+const diceResolving = ref(false)
 const diceFace = ref(1)
 const memoryGenerating = ref(false)
 const movingPlayer = ref<CoupleBoardPlayerId>()
 const landingIndex = ref<number>()
 const notice = ref('')
 let diceTimer: number | undefined
+let characterDragPointerId: number | undefined
+let characterDragStartX = 0
+let characterDragStartY = 0
+let characterDragScrollLeft = 0
+let characterDragMoved = false
+let suppressCharacterClick = false
 let noticeTimer: number | undefined
 let moveTimer: number | undefined
 
@@ -101,6 +110,12 @@ const highlights = computed(() => game.value?.status === 'finished' ? buildCoupl
 const customAvailableCount = computed(() => customPrompts.value.filter(prompt =>
   prompt.intensity <= intensity.value && prompt.modes.includes(mode.value) && (!prompt.adultOnly || intensity.value === 4)
 ).length)
+const builtinAvailableCount = computed(() => {
+  const disabled = new Set(disabledBuiltinPromptIds.value)
+  return COUPLE_BOARD_PROMPTS.filter(prompt =>
+    !disabled.has(prompt.id) && prompt.intensity <= intensity.value && prompt.modes.includes(mode.value) && (!prompt.adultOnly || intensity.value === 4)
+  ).length
+})
 const pendingSourceLabel = computed(() => {
   if (pendingPrompt.value?.source === 'memory-ai') return 'OUR MEMORY'
   if (pendingPrompt.value?.source === 'custom') return 'YOUR DECK'
@@ -130,6 +145,58 @@ function boardCellStyle(index: number) {
 
 function playerOnCell(player: CoupleBoardPlayerId, index: number) {
   return game.value?.players[player].position === index
+}
+
+function beginCharacterDrag(event: PointerEvent) {
+  const row = characterRow.value
+  if (!row || (event.pointerType === 'mouse' && event.button !== 0)) return
+  characterDragPointerId = event.pointerId
+  characterDragStartX = event.clientX
+  characterDragStartY = event.clientY
+  characterDragScrollLeft = row.scrollLeft
+  characterDragMoved = false
+  row.setPointerCapture?.(event.pointerId)
+}
+
+function moveCharacterDrag(event: PointerEvent) {
+  const row = characterRow.value
+  if (!row || characterDragPointerId !== event.pointerId) return
+  const dx = event.clientX - characterDragStartX
+  const dy = event.clientY - characterDragStartY
+  if (!characterDragMoved && Math.abs(dx) < 5) return
+  if (!characterDragMoved && Math.abs(dy) > Math.abs(dx) + 5) return
+  characterDragMoved = true
+  row.scrollLeft = characterDragScrollLeft - dx
+  if (event.cancelable) event.preventDefault()
+}
+
+function endCharacterDrag(event: PointerEvent) {
+  const row = characterRow.value
+  if (characterDragPointerId !== event.pointerId) return
+  try { row?.releasePointerCapture?.(event.pointerId) } catch { /* already released/cancelled */ }
+  characterDragPointerId = undefined
+  if (characterDragMoved) {
+    suppressCharacterClick = true
+    window.setTimeout(() => { suppressCharacterClick = false }, 0)
+  }
+  characterDragMoved = false
+}
+
+function wheelCharacterRow(event: WheelEvent) {
+  const row = characterRow.value
+  if (!row || row.scrollWidth <= row.clientWidth) return
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+  if (!delta) return
+  row.scrollLeft += delta
+  if (event.cancelable) event.preventDefault()
+}
+
+function chooseCharacter(characterId: string) {
+  if (suppressCharacterClick) {
+    suppressCharacterClick = false
+    return
+  }
+  selectedCharacterId.value = characterId
 }
 
 function buildSettings(character: Character): CoupleBoardSettings {
@@ -197,33 +264,35 @@ function animateLanding(actor: CoupleBoardPlayerId, index: number) {
 }
 
 async function rollDice() {
-  if (!game.value || game.value.pending || game.value.pendingEvent || game.value.status !== 'playing' || diceRolling.value) return
-  diceRolling.value = true
+  if (!game.value || game.value.pending || game.value.pendingEvent || game.value.status !== 'playing' || diceRolling.value || diceResolving.value) return
   const actor = game.value.currentPlayer
-  let ticks = 0
-  const spin = () => {
-    diceFace.value = 1 + Math.floor(Math.random() * 6)
-    ticks += 1
-    if (ticks < 8) {
-      diceTimer = window.setTimeout(spin, 58)
-      return
+  diceRolling.value = true
+  diceResolving.value = true
+  try {
+    for (let tick = 0; tick < 8; tick += 1) {
+      diceFace.value = 1 + Math.floor(Math.random() * 6)
+      await new Promise<void>(resolve => {
+        diceTimer = window.setTimeout(resolve, 58)
+      })
     }
+
     const finalDice = 1 + Math.floor(Math.random() * 6)
     diceFace.value = finalDice
-    const next = rollCoupleBoard(game.value!, finalDice, Math.random())
-    void (async () => {
-      try {
-        await persist(next)
-        animateLanding(actor, next.players[actor].position)
-        if ('vibrate' in navigator) navigator.vibrate?.(35)
-      } catch (error) {
-        showNotice(error instanceof Error ? error.message : '保存棋局失败，请再试一次。')
-      } finally {
-        diceRolling.value = false
-      }
-    })()
+    // Stop the visual spin before IndexedDB/archive work. A slow save must never look like an endless die.
+    diceRolling.value = false
+
+    const source = game.value
+    if (!source) return
+    const next = rollCoupleBoard(source, finalDice, Math.random())
+    await persist(next)
+    animateLanding(actor, next.players[actor].position)
+    if ('vibrate' in navigator) navigator.vibrate?.(35)
+  } catch (error) {
+    showNotice(error instanceof Error ? error.message : '掷骰子失败，请再试一次。')
+  } finally {
+    diceRolling.value = false
+    diceResolving.value = false
   }
-  spin()
 }
 
 async function completeChallenge() {
@@ -404,7 +473,7 @@ onUnmounted(() => {
 
       <header class="topbar">
         <button class="round-btn" aria-label="返回" @click="screen === 'game' ? goSetupKeepingGame() : router.push('/home')">‹</button>
-        <div class="brand-lockup"><small>COUPLE BOARD · V1.2</small><b>心跳飞行棋</b></div>
+        <div class="brand-lockup"><small>COUPLE BOARD · V1.2.1</small><b>心跳飞行棋</b></div>
         <button class="round-btn ghost" aria-label="回到主屏幕" @click="router.push('/home')">⌂</button>
       </header>
 
@@ -424,9 +493,9 @@ onUnmounted(() => {
         </section>
 
         <section class="setup-section">
-          <header><span>01</span><div><b>选你的搭档</b><small>这一局只属于你们两个</small></div></header>
-          <div v-if="characters.length" class="character-row">
-            <button v-for="character in characters" :key="character.id" class="character-chip" :class="{ selected: selectedCharacterId === character.id }" @click="selectedCharacterId = character.id">
+          <header><span>01</span><div><b>选你的搭档</b><small>{{ characters.length > 3 ? `${characters.length} 位可选 · 左右滑动或拖动查看更多` : '这一局只属于你们两个' }}</small></div></header>
+          <div v-if="characters.length" ref="characterRow" class="character-row" @pointerdown="beginCharacterDrag" @pointermove="moveCharacterDrag" @pointerup="endCharacterDrag" @pointercancel="endCharacterDrag" @wheel="wheelCharacterRow">
+            <button v-for="character in characters" :key="character.id" class="character-chip" :class="{ selected: selectedCharacterId === character.id }" @click="chooseCharacter(character.id)">
               <CharacterAvatar :avatar="character.avatar" :name="character.name" :size="42" /><span><b>{{ character.name }}</b><small>{{ character.age ? `${character.age} 岁` : '年龄未设置' }}</small></span><i>✓</i>
             </button>
           </div>
@@ -457,7 +526,7 @@ onUnmounted(() => {
         <section class="setup-section deck-section">
           <header><span>04</span><div><b>情侣内容中心</b><small>题库、事件卡和对局回忆都在这里管理</small></div></header>
           <button class="deck-card" @click="router.push('/app/心跳飞行棋/library')">
-            <span class="deck-icon">✦</span><span><b>{{ customPrompts.length }} 道专属题 · {{ customEventCards.length }} 张专属事件</b><small>当前可抽 {{ customAvailableCount }} 道自定义题 · 已保存 {{ archiveCount }} 局回忆</small></span><i>›</i>
+            <span class="deck-icon">✦</span><span><b>{{ COUPLE_BOARD_PROMPTS.length - disabledBuiltinPromptIds.length }} 道内置题 · {{ customPrompts.length }} 道专属题</b><small>当前设置可抽 {{ builtinAvailableCount + customAvailableCount }} 道题 · {{ customEventCards.length }} 张专属事件 · {{ archiveCount }} 局回忆</small></span><i>›</i>
           </button>
         </section>
 
@@ -482,7 +551,7 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <section v-if="game.status === 'playing'" class="dice-dock"><div><small>{{ game.pending ? 'CHALLENGE ACTIVE' : game.pendingEvent ? 'EVENT ACTIVE' : 'ROLL THE DICE' }}</small><b>{{ game.pending || game.pendingEvent ? `${pendingActorName} 还有一张卡没处理` : `轮到 ${currentPlayer?.name}` }}</b></div><button class="dice-button" :class="{ rolling: diceRolling }" :disabled="Boolean(game.pending || game.pendingEvent) || diceRolling" @click="rollDice"><span>{{ diceGlyph }}</span><small>{{ diceRolling ? '...' : '掷' }}</small></button></section>
+        <section v-if="game.status === 'playing'" class="dice-dock"><div><small>{{ game.pending ? 'CHALLENGE ACTIVE' : game.pendingEvent ? 'EVENT ACTIVE' : diceResolving ? 'SAVING TURN' : 'ROLL THE DICE' }}</small><b>{{ game.pending || game.pendingEvent ? `${pendingActorName} 还有一张卡没处理` : diceResolving ? '正在结算这一掷…' : `轮到 ${currentPlayer?.name}` }}</b></div><button class="dice-button" :class="{ rolling: diceRolling }" :disabled="Boolean(game.pending || game.pendingEvent) || diceRolling || diceResolving" @click="rollDice"><span>{{ diceGlyph }}</span><small>{{ diceRolling ? '...' : diceResolving ? '存' : '掷' }}</small></button></section>
 
         <section v-else class="finish-card">
           <small>HEARTBEAT HIGHLIGHTS</small><h2>{{ winnerName }} 先到终点 ♡</h2><p>输赢留在棋盘上，真正值得带走的是这一局里被说出口、被尊重、被记住的瞬间。</p>
@@ -524,8 +593,8 @@ onUnmounted(() => {
 <style scoped>
 .love-game-shell{--wine:#6f2748;--rose:#c35e82;--blush:#f7d9df;--cream:#fff9f5;--ink:#4a2a38;--muted:#9f7c89;position:relative;min-height:100%;height:100%;overflow:auto;background:radial-gradient(120% 58% at 15% -5%,rgba(255,224,231,.92),transparent 62%),radial-gradient(85% 50% at 100% 5%,rgba(232,212,247,.76),transparent 66%),linear-gradient(180deg,#fffaf8 0%,#fff7f8 46%,#f9eef2 100%);color:var(--ink);padding:9px 15px 26px;scrollbar-width:none}.love-game-shell::-webkit-scrollbar{display:none}.ambient{position:absolute;border-radius:50%;filter:blur(2px);pointer-events:none}.ambient-a{width:140px;height:140px;right:-74px;top:94px;background:rgba(208,114,147,.08)}.ambient-b{width:110px;height:110px;left:-65px;top:410px;background:rgba(128,94,169,.07)}.spark{position:absolute;color:rgba(142,60,92,.24);font-family:Georgia,serif;pointer-events:none}.spark-1{top:122px;right:26px}.spark-2{top:260px;left:12px}.spark-3{top:540px;right:18px}.topbar{position:relative;z-index:8;display:grid;grid-template-columns:36px 1fr 36px;align-items:center;min-height:50px}.round-btn{width:31px;height:31px;border:1px solid rgba(112,55,77,.08);border-radius:50%;background:rgba(255,255,255,.62);box-shadow:0 8px 20px rgba(89,42,60,.06);color:#6f3e52;font-size:19px}.round-btn.ghost{font-size:13px}.brand-lockup{text-align:center;display:grid;gap:1px}.brand-lockup small{font-size:5.5px;letter-spacing:.19em;color:#bd859a}.brand-lockup b{font:600 11px Georgia,"Songti SC",serif}.loading-card{margin:35vh auto 0;display:grid;place-items:center;gap:8px}.loading-heart{font-size:26px;color:#c05f82;animation:pulse 1s ease-in-out infinite}.loading-card p{margin:0;color:#9d7887;font-size:11px}@keyframes pulse{50%{transform:scale(1.18);opacity:.65}}
 .hero-card{position:relative;overflow:hidden;padding:24px 20px 17px;margin-top:7px;border:1px solid rgba(126,58,83,.08);border-radius:27px;background:linear-gradient(145deg,rgba(255,255,255,.92),rgba(255,245,248,.78));box-shadow:0 24px 58px rgba(99,43,65,.11)}.hero-card>div:not(.hero-orbit){position:relative;z-index:2}.eyebrow{font-size:6px;letter-spacing:.23em;color:#bd7891}.hero-card h1{margin:7px 0 8px;font:500 31px/1.13 Georgia,"Songti SC",serif;letter-spacing:-.04em}.hero-card h1 em{color:#a34469;font-style:italic}.hero-card p{max-width:235px;margin:0;color:#906f7d;font-size:8px;line-height:1.65}.hero-orbit{position:absolute!important;right:-25px;top:-22px;width:140px;height:140px;border:1px solid rgba(174,88,119,.1);border-radius:50%}.hero-orbit:after{content:"";position:absolute;inset:24px;border:1px dashed rgba(174,88,119,.12);border-radius:50%}.hero-dice{position:absolute;right:37px;top:52px;width:54px;height:54px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(145deg,#8c385b,#c55f82);color:#fff;box-shadow:0 14px 30px rgba(128,50,80,.25);font-size:9px;transform:rotate(9deg)}.hero-dice span{font-size:25px;line-height:.8}.hero-tags{display:flex;gap:5px;margin-top:15px}.hero-tags span{padding:4px 7px;border-radius:999px;background:#f5e8ed;color:#99687a;font-size:6px}.resume-card{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin:12px 0;padding:11px 12px;border-radius:20px;background:linear-gradient(115deg,#6f2748,#9f4265);color:#fff;box-shadow:0 14px 32px rgba(108,39,72,.18)}.resume-avatars{display:flex;align-items:center}.resume-avatars>span:first-child{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#fff1f4;color:#963e60;font-size:9px;font-weight:800}.heart-link{margin:0 -3px;color:#ffdae4;font-size:10px;z-index:2}.resume-card>div:nth-child(2){display:grid;gap:2px}.resume-card small{font-size:7px;opacity:.68}.resume-card b{font-size:10px}.resume-card button{border:0;border-radius:999px;background:#fff;color:#8b3458;padding:7px 11px;font-size:8px;font-weight:800}
-.setup-section{position:relative;margin-top:22px}.setup-section>header{display:grid;grid-template-columns:26px 1fr;align-items:center;gap:7px;margin-bottom:9px}.setup-section>header>span{font:italic 17px Georgia,serif;color:#d09aad}.setup-section>header>div{display:grid}.setup-section>header b{font-size:10px}.setup-section>header small{font-size:6.5px;color:#a48792;margin-top:1px}.character-row{display:flex;gap:7px;overflow:auto;padding:2px 1px 5px;scrollbar-width:none}.character-row::-webkit-scrollbar{display:none}.character-chip{position:relative;min-width:122px;display:grid;grid-template-columns:42px 1fr;align-items:center;gap:7px;padding:7px;border:1px solid rgba(116,61,82,.07);border-radius:17px;background:rgba(255,255,255,.68);text-align:left;color:inherit}.character-chip>span{display:grid;min-width:0}.character-chip b{font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.character-chip small{font-size:6px;color:#a0838e;margin-top:2px}.character-chip i{display:none;position:absolute;right:6px;top:6px;width:14px;height:14px;border-radius:50%;background:#9d4263;color:#fff;font-size:7px;font-style:normal;place-items:center}.character-chip.selected{border-color:#ce8da5;background:#fff;box-shadow:0 8px 22px rgba(140,61,92,.09)}.character-chip.selected i{display:grid}.empty-button{width:100%;border:1px dashed #d8b7c3;border-radius:16px;background:rgba(255,255,255,.6);padding:15px;color:#986b7c;font-size:8px}.mode-grid,.intensity-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.mode-grid button{display:grid;justify-items:start;gap:2px;padding:12px;border:1px solid rgba(118,63,83,.07);border-radius:18px;background:rgba(255,255,255,.67);color:inherit;text-align:left}.mode-grid i{font-size:17px;font-style:normal}.mode-grid b{font-size:9px}.mode-grid small{font-size:6.2px;color:#9d7d89;line-height:1.4}.mode-grid button.selected{border-color:#cf8da5;background:#fff;box-shadow:0 8px 24px rgba(140,61,92,.09)}.intensity-grid button{position:relative;display:grid;grid-template-columns:29px 1fr;align-items:center;gap:6px;padding:10px;border:1px solid rgba(118,63,83,.07);border-radius:16px;background:rgba(255,255,255,.65);color:inherit;text-align:left}.intensity-grid button.selected{border-color:#ce8ca5;background:#fff7f9;box-shadow:0 8px 22px rgba(140,61,92,.08)}.intensity-grid button.adult{background:linear-gradient(145deg,rgba(88,36,58,.93),rgba(123,45,73,.9));color:#fff}.intensity-grid button.adult small{color:#eec8d5}.level-number{font:italic 15px Georgia,serif;color:#be7b95}.adult .level-number{color:#f1b6cb}.intensity-grid button>span:nth-child(2){display:grid}.intensity-grid b{font-size:9px}.intensity-grid small{font-size:6.3px;color:#a88995;margin-top:2px}.intensity-grid em{position:absolute;right:7px;top:6px;padding:2px 4px;border-radius:5px;background:#fff0f4;color:#923a5c;font-size:6px;font-style:normal;font-weight:900}.adult-confirm{display:grid;grid-template-columns:22px 1fr;gap:8px;margin-top:8px;padding:10px;border-radius:15px;background:rgba(101,43,66,.06);cursor:pointer}.adult-confirm input{display:none}.checkmark{width:20px;height:20px;border-radius:7px;border:1px solid #c99aae;background:#fff;display:grid;place-items:center;color:transparent;font-size:9px}.adult-confirm input:checked+.checkmark{background:#8f385c;color:#fff;border-color:#8f385c}.adult-confirm>span:last-child{display:grid}.adult-confirm b{font-size:8px}.adult-confirm small{font-size:6.5px;line-height:1.4;color:#9f7c89;margin-top:2px}.adult-confirm.blocked{opacity:.58;cursor:not-allowed}.deck-card{width:100%;display:grid;grid-template-columns:38px 1fr 14px;align-items:center;gap:9px;padding:11px;border:1px solid rgba(118,63,83,.08);border-radius:18px;background:linear-gradient(135deg,rgba(255,255,255,.84),rgba(250,239,244,.74));color:inherit;text-align:left}.deck-icon{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;background:#f1dfe6;color:#91405f;font-size:16px}.deck-card>span:nth-child(2){display:grid}.deck-card b{font-size:9px}.deck-card small{font-size:6.3px;line-height:1.4;color:#a17c8b;margin-top:2px}.deck-card i{font-size:16px;font-style:normal;color:#b08092}.ready-card{position:sticky;bottom:8px;z-index:20;display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin-top:24px;padding:12px 12px 12px 14px;border:1px solid rgba(255,255,255,.7);border-radius:20px;background:rgba(82,36,55,.93);backdrop-filter:blur(14px);box-shadow:0 20px 40px rgba(84,37,56,.25);color:#fff}.ready-card>div{display:grid}.ready-card small{font-size:6px;letter-spacing:.16em;color:#d9a8ba}.ready-card b{font-size:9px;margin-top:3px}.ready-card button{display:flex;align-items:center;gap:8px;border:0;border-radius:13px;background:#fff;color:#7c2e4f;padding:9px 10px;font-size:8px;font-weight:900}.ready-card button:disabled{opacity:.4}.ready-card button i{font-size:13px;font-style:normal}
-.game-head{display:grid;grid-template-columns:1fr 28px 1fr;gap:5px;align-items:center;margin:2px 0 10px}.player-card{position:relative;display:grid;grid-template-columns:38px 1fr;align-items:center;gap:7px;padding:8px;border:1px solid rgba(112,55,77,.07);border-radius:17px;background:rgba(255,255,255,.7);transition:.25s}.player-card.active{border-color:#d18ea8;background:#fff;box-shadow:0 10px 26px rgba(145,61,93,.12);transform:translateY(-1px)}.user-avatar{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(145deg,#efd2dc,#d5a4b7);color:#7f3b56;font-size:9px;font-weight:800}.player-card>div:nth-child(2){display:grid;min-width:0}.player-card small{font-size:5.5px;letter-spacing:.12em;color:#ba8a9c}.player-card b{font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.player-card span{font-size:7px;color:#b14f75;margin-top:1px}.player-card em{position:absolute;right:7px;bottom:5px;font-size:5.5px;color:#b295a0;font-style:normal}.versus{text-align:center;display:grid;gap:1px}.versus span{color:#b34e75;font-size:12px}.versus small{font-size:5px;color:#b3909d}.board-card{position:relative;padding:11px;border:1px solid rgba(112,55,77,.07);border-radius:24px;background:linear-gradient(145deg,rgba(255,255,255,.86),rgba(255,246,248,.72));box-shadow:0 18px 45px rgba(102,55,73,.1);overflow:hidden}.board-topline{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:1px 2px 10px}.board-topline>div{display:grid}.board-topline small{font-size:6.5px;color:#af8193}.board-topline b{font-size:8px;margin-top:2px;max-width:215px}.board-topline>span{white-space:nowrap;padding:4px 6px;border-radius:999px;background:#f4e5ea;color:#9a5a73;font-size:5.8px}.board-grid{position:relative;display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(6,54px);gap:4px}.board-ribbon{position:absolute;z-index:0;border:1px dashed rgba(177,91,122,.1);border-radius:999px;pointer-events:none}.ribbon-one{inset:18px 5px 98px}.ribbon-two{inset:105px 42px 12px}.board-cell{position:relative;z-index:1;min-width:0;display:grid;place-items:center;align-content:center;border:1px solid rgba(118,63,83,.07);border-radius:14px;background:rgba(255,255,255,.78);box-shadow:0 4px 12px rgba(104,56,75,.04);transition:.25s}.board-cell>small{position:absolute;left:5px;top:4px;font-size:5px;color:#c0a1ad}.board-cell>span{font-size:14px;line-height:1}.board-cell>b{margin-top:2px;max-width:48px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:5.5px;color:#8d6877}.cell-truth{background:linear-gradient(145deg,#fff,#f7f0fa)}.cell-dare{background:linear-gradient(145deg,#fff,#fff0f3)}.cell-heart{background:linear-gradient(145deg,#fff8fa,#f8dfe7)}.cell-surprise{background:linear-gradient(145deg,#fff9f2,#f7e8d9)}.cell-boost{background:linear-gradient(145deg,#f8fbff,#e6edf9)}.cell-rewind{background:linear-gradient(145deg,#fbf7fb,#ece3ef)}.cell-start,.cell-finish{background:linear-gradient(145deg,#8b365a,#c36183);color:#fff}.cell-start>b,.cell-finish>b,.cell-start>small,.cell-finish>small{color:#fff}.board-cell.occupied{border-color:rgba(157,63,99,.28);box-shadow:0 7px 18px rgba(144,59,91,.13)}.board-cell.landing:after{content:"";position:absolute;inset:-3px;border:1px solid rgba(193,84,125,.5);border-radius:16px;animation:landingRing .7s ease-out both}@keyframes landingRing{0%{transform:scale(.8);opacity:0}35%{opacity:1}100%{transform:scale(1.16);opacity:0}}.tokens{position:absolute;right:3px;bottom:3px;display:flex}.token{width:17px;height:17px;margin-left:-3px;border:2px solid #fff;border-radius:50%;display:grid;place-items:center;box-shadow:0 3px 7px rgba(95,47,66,.18);font-size:5px;font-style:normal;font-weight:800;overflow:hidden}.token-user{background:#f8dce6;color:#833550}.token-partner{background:#873655;color:#fff;font-size:8px}.token.moving{animation:tokenHop .62s cubic-bezier(.2,.8,.2,1)}@keyframes tokenHop{0%{transform:translateY(9px) scale(.78);opacity:.2}45%{transform:translateY(-8px) scale(1.18)}70%{transform:translateY(2px) scale(.96)}100%{transform:none;opacity:1}}.dice-dock{position:sticky;bottom:9px;z-index:18;display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin-top:10px;padding:10px 10px 10px 13px;border-radius:19px;background:rgba(75,31,49,.94);color:#fff;box-shadow:0 18px 42px rgba(75,31,49,.28);backdrop-filter:blur(12px)}.dice-dock>div{display:grid}.dice-dock small{font-size:5.5px;letter-spacing:.15em;color:#dcb0c0}.dice-dock b{font-size:9px;margin-top:2px}.dice-button{width:53px;height:53px;border:0;border-radius:16px;background:linear-gradient(145deg,#fff,#f6dfe7);box-shadow:inset 0 1px #fff,0 8px 20px rgba(35,12,22,.22);color:#7f2e50;display:grid;place-items:center;align-content:center;perspective:200px}.dice-button span{font-size:29px;line-height:.8;transform-origin:center}.dice-button small{font-size:6px;color:#9a5270;margin-top:3px}.dice-button:disabled{opacity:.48}.dice-button.rolling span{animation:diceFlip .22s linear infinite}@keyframes diceFlip{50%{transform:rotateX(180deg) rotateZ(25deg) scale(.82)}}
+.setup-section{position:relative;margin-top:22px}.setup-section>header{display:grid;grid-template-columns:26px 1fr;align-items:center;gap:7px;margin-bottom:9px}.setup-section>header>span{font:italic 17px Georgia,serif;color:#d09aad}.setup-section>header>div{display:grid}.setup-section>header b{font-size:10px}.setup-section>header small{font-size:6.5px;color:#a48792;margin-top:1px}.character-row{display:flex;gap:7px;overflow-x:auto;overflow-y:hidden;padding:2px 1px 7px;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-y;cursor:grab;scroll-snap-type:x proximity}.character-row:active{cursor:grabbing}.character-row::-webkit-scrollbar{display:none}.character-chip{position:relative;flex:0 0 122px;min-width:122px;scroll-snap-align:start;touch-action:pan-y;display:grid;grid-template-columns:42px 1fr;align-items:center;gap:7px;padding:7px;border:1px solid rgba(116,61,82,.07);border-radius:17px;background:rgba(255,255,255,.68);text-align:left;color:inherit}.character-chip>span{display:grid;min-width:0}.character-chip b{font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.character-chip small{font-size:6px;color:#a0838e;margin-top:2px}.character-chip i{display:none;position:absolute;right:6px;top:6px;width:14px;height:14px;border-radius:50%;background:#9d4263;color:#fff;font-size:7px;font-style:normal;place-items:center}.character-chip.selected{border-color:#ce8da5;background:#fff;box-shadow:0 8px 22px rgba(140,61,92,.09)}.character-chip.selected i{display:grid}.empty-button{width:100%;border:1px dashed #d8b7c3;border-radius:16px;background:rgba(255,255,255,.6);padding:15px;color:#986b7c;font-size:8px}.mode-grid,.intensity-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.mode-grid button{display:grid;justify-items:start;gap:2px;padding:12px;border:1px solid rgba(118,63,83,.07);border-radius:18px;background:rgba(255,255,255,.67);color:inherit;text-align:left}.mode-grid i{font-size:17px;font-style:normal}.mode-grid b{font-size:9px}.mode-grid small{font-size:6.2px;color:#9d7d89;line-height:1.4}.mode-grid button.selected{border-color:#cf8da5;background:#fff;box-shadow:0 8px 24px rgba(140,61,92,.09)}.intensity-grid button{position:relative;display:grid;grid-template-columns:29px 1fr;align-items:center;gap:6px;padding:10px;border:1px solid rgba(118,63,83,.07);border-radius:16px;background:rgba(255,255,255,.65);color:inherit;text-align:left}.intensity-grid button.selected{border-color:#ce8ca5;background:#fff7f9;box-shadow:0 8px 22px rgba(140,61,92,.08)}.intensity-grid button.adult{background:linear-gradient(145deg,rgba(88,36,58,.93),rgba(123,45,73,.9));color:#fff}.intensity-grid button.adult small{color:#eec8d5}.level-number{font:italic 15px Georgia,serif;color:#be7b95}.adult .level-number{color:#f1b6cb}.intensity-grid button>span:nth-child(2){display:grid}.intensity-grid b{font-size:9px}.intensity-grid small{font-size:6.3px;color:#a88995;margin-top:2px}.intensity-grid em{position:absolute;right:7px;top:6px;padding:2px 4px;border-radius:5px;background:#fff0f4;color:#923a5c;font-size:6px;font-style:normal;font-weight:900}.adult-confirm{display:grid;grid-template-columns:22px 1fr;gap:8px;margin-top:8px;padding:10px;border-radius:15px;background:rgba(101,43,66,.06);cursor:pointer}.adult-confirm input{display:none}.checkmark{width:20px;height:20px;border-radius:7px;border:1px solid #c99aae;background:#fff;display:grid;place-items:center;color:transparent;font-size:9px}.adult-confirm input:checked+.checkmark{background:#8f385c;color:#fff;border-color:#8f385c}.adult-confirm>span:last-child{display:grid}.adult-confirm b{font-size:8px}.adult-confirm small{font-size:6.5px;line-height:1.4;color:#9f7c89;margin-top:2px}.adult-confirm.blocked{opacity:.58;cursor:not-allowed}.deck-card{width:100%;display:grid;grid-template-columns:38px 1fr 14px;align-items:center;gap:9px;padding:11px;border:1px solid rgba(118,63,83,.08);border-radius:18px;background:linear-gradient(135deg,rgba(255,255,255,.84),rgba(250,239,244,.74));color:inherit;text-align:left}.deck-icon{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;background:#f1dfe6;color:#91405f;font-size:16px}.deck-card>span:nth-child(2){display:grid}.deck-card b{font-size:9px}.deck-card small{font-size:6.3px;line-height:1.4;color:#a17c8b;margin-top:2px}.deck-card i{font-size:16px;font-style:normal;color:#b08092}.ready-card{position:sticky;bottom:8px;z-index:20;display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin-top:24px;padding:12px 12px 12px 14px;border:1px solid rgba(255,255,255,.7);border-radius:20px;background:rgba(82,36,55,.93);backdrop-filter:blur(14px);box-shadow:0 20px 40px rgba(84,37,56,.25);color:#fff}.ready-card>div{display:grid}.ready-card small{font-size:6px;letter-spacing:.16em;color:#d9a8ba}.ready-card b{font-size:9px;margin-top:3px}.ready-card button{display:flex;align-items:center;gap:8px;border:0;border-radius:13px;background:#fff;color:#7c2e4f;padding:9px 10px;font-size:8px;font-weight:900}.ready-card button:disabled{opacity:.4}.ready-card button i{font-size:13px;font-style:normal}
+.game-head{display:grid;grid-template-columns:1fr 28px 1fr;gap:5px;align-items:center;margin:2px 0 10px}.player-card{position:relative;display:grid;grid-template-columns:38px 1fr;align-items:center;gap:7px;padding:8px;border:1px solid rgba(112,55,77,.07);border-radius:17px;background:rgba(255,255,255,.7);transition:.25s}.player-card.active{border-color:#d18ea8;background:#fff;box-shadow:0 10px 26px rgba(145,61,93,.12);transform:translateY(-1px)}.user-avatar{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(145deg,#efd2dc,#d5a4b7);color:#7f3b56;font-size:9px;font-weight:800}.player-card>div:nth-child(2){display:grid;min-width:0}.player-card small{font-size:5.5px;letter-spacing:.12em;color:#ba8a9c}.player-card b{font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.player-card span{font-size:7px;color:#b14f75;margin-top:1px}.player-card em{position:absolute;right:7px;bottom:5px;font-size:5.5px;color:#b295a0;font-style:normal}.versus{text-align:center;display:grid;gap:1px}.versus span{color:#b34e75;font-size:12px}.versus small{font-size:5px;color:#b3909d}.board-card{position:relative;padding:11px;border:1px solid rgba(112,55,77,.07);border-radius:24px;background:linear-gradient(145deg,rgba(255,255,255,.86),rgba(255,246,248,.72));box-shadow:0 18px 45px rgba(102,55,73,.1);overflow:hidden}.board-topline{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:1px 2px 10px}.board-topline>div{display:grid}.board-topline small{font-size:6.5px;color:#af8193}.board-topline b{font-size:8px;margin-top:2px;max-width:215px}.board-topline>span{white-space:nowrap;padding:4px 6px;border-radius:999px;background:#f4e5ea;color:#9a5a73;font-size:5.8px}.board-grid{position:relative;display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(6,54px);gap:4px}.board-ribbon{position:absolute;z-index:0;border:1px dashed rgba(177,91,122,.1);border-radius:999px;pointer-events:none}.ribbon-one{inset:18px 5px 98px}.ribbon-two{inset:105px 42px 12px}.board-cell{position:relative;z-index:1;min-width:0;display:grid;place-items:center;align-content:center;border:1px solid rgba(118,63,83,.07);border-radius:14px;background:rgba(255,255,255,.78);box-shadow:0 4px 12px rgba(104,56,75,.04);transition:.25s}.board-cell>small{position:absolute;left:5px;top:4px;font-size:5px;color:#c0a1ad}.board-cell>span{font-size:14px;line-height:1}.board-cell>b{margin-top:2px;max-width:48px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:5.5px;color:#8d6877}.cell-truth{background:linear-gradient(145deg,#fff,#f7f0fa)}.cell-dare{background:linear-gradient(145deg,#fff,#fff0f3)}.cell-heart{background:linear-gradient(145deg,#fff8fa,#f8dfe7)}.cell-surprise{background:linear-gradient(145deg,#fff9f2,#f7e8d9)}.cell-boost{background:linear-gradient(145deg,#f8fbff,#e6edf9)}.cell-rewind{background:linear-gradient(145deg,#fbf7fb,#ece3ef)}.cell-start,.cell-finish{background:linear-gradient(145deg,#8b365a,#c36183);color:#fff}.cell-start>b,.cell-finish>b,.cell-start>small,.cell-finish>small{color:#fff}.board-cell.occupied{border-color:rgba(157,63,99,.28);box-shadow:0 7px 18px rgba(144,59,91,.13)}.board-cell.landing:after{content:"";position:absolute;inset:-3px;border:1px solid rgba(193,84,125,.5);border-radius:16px;animation:landingRing .7s ease-out both}@keyframes landingRing{0%{transform:scale(.8);opacity:0}35%{opacity:1}100%{transform:scale(1.16);opacity:0}}.tokens{position:absolute;right:3px;bottom:3px;display:flex}.token{width:17px;height:17px;margin-left:-3px;border:2px solid #fff;border-radius:50%;display:grid;place-items:center;box-shadow:0 3px 7px rgba(95,47,66,.18);font-size:5px;font-style:normal;font-weight:800;overflow:hidden}.token-user{background:#f8dce6;color:#833550}.token-partner{background:#873655;color:#fff;font-size:8px}.token.moving{animation:tokenHop .62s cubic-bezier(.2,.8,.2,1)}@keyframes tokenHop{0%{transform:translateY(9px) scale(.78);opacity:.2}45%{transform:translateY(-8px) scale(1.18)}70%{transform:translateY(2px) scale(.96)}100%{transform:none;opacity:1}}.dice-dock{position:sticky;bottom:9px;z-index:18;display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin-top:10px;padding:10px 10px 10px 13px;border-radius:19px;background:rgba(75,31,49,.94);color:#fff;box-shadow:0 18px 42px rgba(75,31,49,.28);backdrop-filter:blur(12px)}.dice-dock>div{display:grid}.dice-dock small{font-size:5.5px;letter-spacing:.15em;color:#dcb0c0}.dice-dock b{font-size:9px;margin-top:2px}.dice-button{width:53px;height:53px;border:0;border-radius:16px;background:linear-gradient(145deg,#fff,#f6dfe7);box-shadow:inset 0 1px #fff,0 8px 20px rgba(35,12,22,.22);color:#7f2e50;display:grid;place-items:center;align-content:center;perspective:200px}.dice-button span{font-size:29px;line-height:.8;transform-origin:center}.dice-button small{font-size:6px;color:#9a5270;margin-top:3px}.dice-button:disabled{opacity:.48}.dice-button.rolling span{animation:diceFlip .22s linear 3}@keyframes diceFlip{50%{transform:rotateX(180deg) rotateZ(25deg) scale(.82)}}
 .finish-card{margin-top:10px;padding:18px;border-radius:22px;background:linear-gradient(145deg,#6f2949,#9f4566 58%,#b95f7d);color:#fff;box-shadow:0 18px 40px rgba(96,37,62,.2)}.finish-card>small{font-size:6px;letter-spacing:.18em;color:#e6b5c7}.finish-card h2{margin:6px 0;font:500 22px Georgia,"Songti SC",serif}.finish-card>p{margin:0;color:#f1d9e2;font-size:8px;line-height:1.6}.highlight-stack{display:grid;gap:6px;margin-top:13px}.highlight-card{display:grid;grid-template-columns:27px 1fr;gap:7px;padding:9px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.09)}.highlight-card>span{font-size:18px}.highlight-card>div{display:grid}.highlight-card small{font-size:5.3px;letter-spacing:.14em;color:#e6b7c7}.highlight-card b{font-size:8px;margin-top:1px}.highlight-card p{margin:2px 0 0;color:#ecd5de;font-size:6.3px;line-height:1.45}.finish-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.finish-actions button{border:0;border-radius:11px;background:#fff;color:#7f3152;padding:8px 12px;font-size:8px;font-weight:800}.finish-actions button.secondary{background:rgba(255,255,255,.13);color:#fff}
 .challenge-backdrop{position:absolute;z-index:50;inset:0;display:flex;align-items:flex-end;background:rgba(67,27,44,.2);backdrop-filter:blur(3px);padding:0 8px 8px}.challenge-sheet{width:100%;padding:8px 14px 14px;border:1px solid rgba(255,255,255,.7);border-radius:27px 27px 22px 22px;background:linear-gradient(160deg,rgba(255,255,255,.99),rgba(255,244,247,.98));box-shadow:0 -22px 65px rgba(72,30,47,.22)}.sheet-handle{width:38px;height:4px;border-radius:999px;background:#e1cbd3;margin:0 auto 13px}.challenge-sheet>header{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px}.challenge-sheet>header>span{padding:7px 8px;border-radius:10px;font-size:6.5px;font-weight:900;letter-spacing:.1em}.challenge-sheet>header>span.truth{background:#eee7f6;color:#7e668f}.challenge-sheet>header>span.dare{background:#f8e0e8;color:#a44468}.challenge-sheet>header>div{display:grid}.challenge-sheet header small{font-size:5.6px;color:#b58c9b;letter-spacing:.06em}.challenge-sheet header b{font-size:11px}.challenge-sheet header em{font-size:8px;font-style:normal;color:#b34870}.challenge-text{margin:16px 3px 13px;font:500 18px/1.55 Georgia,"Songti SC",serif;color:#512f3c}.consent-note,.memory-proof{display:flex;gap:8px;padding:9px 10px;border-radius:14px;background:#f7ecef}.memory-proof{margin-bottom:7px;background:linear-gradient(135deg,#f3eef8,#f9f0f3)}.consent-note>span,.memory-proof>span{color:#b44d73}.consent-note p,.memory-proof p{display:grid;margin:0}.consent-note b,.memory-proof b{font-size:7.5px}.consent-note small,.memory-proof small{font-size:6.3px;line-height:1.45;color:#9e7a87;margin-top:1px}.memory-generate{width:100%;display:grid;grid-template-columns:22px 1fr 12px;align-items:center;gap:7px;margin-top:7px;border:1px solid rgba(139,69,96,.1);border-radius:13px;background:#fff;color:#775163;padding:8px 9px;text-align:left}.memory-generate>span{width:22px;height:22px;border-radius:8px;display:grid;place-items:center;background:#f1e7f5;color:#8a5b9e}.memory-generate p{display:grid;margin:0}.memory-generate b{font-size:7.3px}.memory-generate small{font-size:5.8px;color:#a38390;margin-top:1px}.memory-generate i{font-style:normal}.memory-generate:disabled{opacity:.55}.challenge-actions{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:6px;margin-top:8px}.challenge-actions button{border:0;border-radius:12px;background:#f2e8eb;color:#875269;padding:10px 6px;font-size:8px;font-weight:800}.challenge-actions .complete{background:linear-gradient(135deg,#853555,#b64f73);color:#fff}.challenge-actions .complete span{font-size:6px;opacity:.72}.chat-share{width:100%;display:flex;justify-content:space-between;margin-top:7px;border:1px solid rgba(136,64,91,.1);border-radius:12px;background:#fff;color:#7a455a;padding:9px 10px;font-size:7.5px;text-align:left}.chat-share span{color:#b28a99;font-size:6.5px}.event-backdrop{align-items:center;padding:18px}.event-sheet{position:relative;overflow:hidden;width:100%;padding:22px 18px 17px;border-radius:26px;background:linear-gradient(145deg,#7c3151,#a94c70 56%,#c66c86);color:#fff;text-align:center;box-shadow:0 25px 70px rgba(80,27,48,.3)}.event-glow{position:absolute;width:160px;height:160px;right:-70px;top:-80px;border-radius:50%;background:rgba(255,255,255,.13)}.event-sheet>small{position:relative;font-size:5.8px;letter-spacing:.18em;color:#edc4d2}.event-emoji{position:relative;margin:12px auto 5px;width:54px;height:54px;border-radius:18px;display:grid;place-items:center;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);font-size:27px;animation:eventFloat 2.2s ease-in-out infinite}@keyframes eventFloat{50%{transform:translateY(-4px) rotate(2deg)}}.event-sheet h2{position:relative;margin:6px 0;font:500 24px Georgia,"Songti SC",serif}.event-sheet>p{position:relative;margin:0 auto;max-width:260px;color:#f4dfe6;font-size:8px;line-height:1.6}.event-reward{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:13px 0}.event-reward span{padding:8px;border-radius:12px;background:rgba(255,255,255,.1);font-size:6.5px}.event-reward b{display:block;margin-top:2px;font-size:9px}.event-sheet>button{position:relative;width:100%;border:0;border-radius:13px;background:#fff;color:#843657;padding:10px;font-size:8px;font-weight:900}.event-sheet>button span{margin-left:5px}
 .toast{position:fixed;z-index:90;left:50%;bottom:30px;transform:translateX(-50%);max-width:290px;padding:9px 13px;border-radius:999px;background:rgba(63,29,42,.94);box-shadow:0 8px 30px rgba(63,29,42,.2);color:#fff;font-size:8px;text-align:center}.toast-enter-active,.toast-leave-active,.card-pop-enter-active,.card-pop-leave-active{transition:.22s ease}.toast-enter-from,.toast-leave-to{opacity:0;transform:translate(-50%,8px)}.card-pop-enter-from,.card-pop-leave-to{opacity:0}.card-pop-enter-from>section,.card-pop-leave-to>section{transform:translateY(16px) scale(.97)}.card-pop-enter-active>section,.card-pop-leave-active>section{transition:.24s cubic-bezier(.2,.8,.2,1)}
