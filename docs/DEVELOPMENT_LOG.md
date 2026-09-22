@@ -1,3 +1,13 @@
+## 2026-09-22 · V0.5.0-alpha.5.6.0 · 心跳飞行棋 V1.1
+
+- 完整复查 5.5.2 源码包（377 个 UTF-8 文本文件，约 8.3 万行）并沿用现有 Native App / Memory / appCustomizations 边界，未新增数据库 store。
+- `coupleBoardGameService.ts` 新增自定义题库快照、6 张事件卡、AI session prompt 注入与 Heartbeat Highlights；旧 V1 snapshot 的新字段全部 optional，保持兼容。
+- 新增 `coupleBoardMemoryPromptService.ts`：从真实 conversation memory context 选取 evidence，排除 subjective/story/promise/conflict/invalid；模型输出必须引用允许的 evidence id，且不得改变当前 truth/dare 类型。
+- `CoupleBoardView.vue` 升级 V1.1：题库编辑、真实回忆重新出题、事件卡、终局高光、骰子/棋子/卡片动效与 reduced-motion。
+- 游戏与偏好仍只写 `appCustomizations`；AI 生成题只驻留当前局，不写回 Memory、不自动发送聊天。
+- `coupleBoardGameService.test.ts` 扩充，并新增 `coupleBoardMemoryPromptService.test.ts`；静态测试定义 67 files / 580 declarations。
+- 当前容器无法解析 npm registry，`npm ci` 无法完成；已用 TypeScript 5.8.3 `transpileModule` 对新增/修改 TS 与 Vue script 做语法诊断（0 errors），完整 `npm run verify` 留给 Windows / CI 最终门禁。
+
 ## 2026-09-21 · V0.5.0-alpha.5.5.2 · Launcher fixture 重复 revision 热修
 
 - Windows 5.5.1 首轮 verify 显示 `coupleBoardGameService.test.ts` 14/14 通过，`companionNavigation.test.ts` 只剩 1 条失败，总计 65/66 files、562/563 tests。

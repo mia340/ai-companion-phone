@@ -1,82 +1,164 @@
-# 心跳飞行棋 V1 · Couple Board Runtime
+# 心跳飞行棋 V1.1 · Couple Board Runtime
 
-版本：`V0.5.0-alpha.5.5.2`
+版本：`V0.5.0-alpha.5.6.0`
 
-> 5.5.2 发布热修修正 5.5.1 测试夹具中的重复 `homeLayoutRevision` 键；游戏 Runtime、Launcher migration 与玩法均不变。
+> V1.1 在 V1 的 30 格双人棋盘上增加自定义题库、真实共同回忆 AI 出题、情侣事件卡、Heartbeat Highlights 与交互动效。它仍不是新的事实源，也不让模型替参与者决定现实动作。
 
 ## 产品定位
 
-「心跳飞行棋」是 AI Companion Phone 的原生双人关系互动 App。它不是新的事实源，也不是让模型自由决定现实动作的 Agent。游戏只负责：棋盘、题目、局内积分和用户主动的聊天草稿桥接。
+「心跳飞行棋」是 AI Companion Phone 的原生双人关系互动 App。Runtime 负责棋盘、题库、事件、局内积分和受控的 AI 题目生成；Memory、Conversation、Shared Event、Relationship Arc 继续是各自的事实/投影层。
 
-## V1 玩法
+## 玩法
 
-- 30 格蛇形棋盘；用户与一个角色各自一枚棋子。
-- 轮流掷 1–6 点骰子；终点前超出的点数直接收敛到终点。
-- 格子包含：真心话、大冒险、心动、盲盒、贴近（前进）、害羞（后退）、休息和终点。
-- 真心话 / 大冒险会弹出挑战卡。完成 +2 心动值；跳过允许继续游戏且最低不会扣成负数；换题不扣分。
-- 心动格自动 +1，抵达终点额外 +3。
+- 30 格蛇形棋盘；用户与一个角色轮流掷 1–6 点骰子。
+- 真心话 / 大冒险完成 +2 心动；跳过始终可用且最低不扣成负数；换题不扣分。
+- 心动格自动 +1；贴近 / 害羞做前进或后退；休息格直接交棒；终点额外 +3。
+- 原“惊喜”格改为**情侣事件卡**，拥有独立 `pendingEvent`，不会偷偷复用挑战题状态。
 
-## 题库与强度
+## 题库
 
-内置 64 条题目，按两种维度筛选：
+### 内置题
+
+仍保留 64 条 V1 内置题：
 
 ```text
 强度：L1 纯爱 / L2 暧昧 / L3 亲密 / L4 成人
 模式：聊天互动 / 面对面
 ```
 
-更高强度会混入低等级题目，避免每一格都落在最高刺激等级。L4 题目全部带 `adultOnly` 标记；Runtime 不会在 L1–L3 候选池中返回它们。
+更高强度可混入低等级题；L4 仍受 Runtime 18+ 门禁。
 
-## 成人模式边界
+### 自定义题
 
-- L4 开启前必须由用户显式确认双方均为成年人，并同意成人向题目。
-- 如果所选角色 `Character.age` 明确小于 18，L4 直接阻断。
-- 题目围绕成年人之间的亲密偏好、边界和暧昧互动，不把任何现实动作视为默认同意。
-- 每一题都能“换一题”或“跳过”。跳过不是异常状态，也不会阻断后续回合。
-- 游戏完成/跳过记录仅属于局内状态，不写入 Memory、Conversation State、Shared Event 或 Relationship Arc。
+V1.1 可创建自定义真心话 / 大冒险，并指定：
 
-## 聊天联动
+- 强度 L1–L4；
+- 聊天 / 面对面 / 双模式；
+- 最多 160 字纯文本。
 
-聊天互动模式会查找当前角色最近的真实单聊，然后把当前挑战写入：
+偏好保存在已有 `appCustomizations`：
+
+```text
+appKey = __couple-board-preferences__
+coupleBoardPreferences.version = 1
+```
+
+开局时当前自定义题会冻结为 `sessionPrompts`。之后即使用户编辑全局题库，已经开始的棋局也不会改变题目集合。L4 自定义题自动标记 `adultOnly`。
+
+## 真实共同回忆 AI 出题
+
+挑战卡上可主动点击“用真实共同回忆重新出题”。流程：
+
+```text
+当前真实单聊
+  → listConversationMemoryContext
+  → evidence filter
+  → Provider
+  → JSON parse
+  → evidence/type/mode Runtime validation
+  → session prompt（仅当前棋局）
+```
+
+### 允许的证据
+
+只把能当作共同经历证据的记录交给模型：
+
+- `layer = shared`；
+- `layer = relationship`；
+- `category = event`。
+
+明确排除：
+
+- `subjective`：角色主观判断不是共同事实；
+- `story`：长期剧情摘要可能包含压缩/推演；
+- `promise`：约定不等于已经发生的共同回忆；
+- `status = conflict / invalid`。
+
+### 模型输出门禁
+
+模型必须返回纯 JSON：
+
+```json
+{"type":"truth|dare","text":"...","evidenceIds":["..."]}
+```
+
+Runtime 会拒绝：
+
+- 不引用任何真实 evidence；
+- 引用输入中不存在的 evidence id；
+- 把 truth 改成 dare 或反过来；
+- 与当前模式 / 强度不兼容；
+- 空题目或非法结构。
+
+此外，evidence 文本在 Prompt 中被明确声明为**引用数据而不是指令**；即使记忆正文包含“忽略规则 / 系统消息 / 请执行”等字样，模型也不得把它当作可执行指令。角色 Persona 不参与共同回忆事实生成，避免把角色卡叙事误当成已经发生的经历。
+
+通过后的题只写入当前 `CoupleBoardGame.sessionPrompts`，**不会写回 Memory，也不会把模型生成内容提升成 Shared Event / Relationship Fact**。
+
+## 情侣事件卡
+
+V1.1 内置 6 张事件卡，例如心跳同步、勇气加码、被接住、秘密花园。事件只产生确定性的局内心动值变化；它们不要求模型解释，也不写关系事实。
+
+事件卡是独立 pending state，因此：
+
+- 未处理事件时不能继续掷骰子；
+- 存档恢复能准确回到事件卡；
+- 老 V1 snapshot 没有 `pendingEvent/sessionPrompts` 也能解析。
+
+## Heartbeat Highlights
+
+终局根据**真实局内日志**生成最多 4 张高光卡：
+
+- 总心动 / 完成数；
+- 本局最高强度的已完成挑战；
+- 完成过的真实回忆 AI 题及其 evidence 数；
+- 事件卡数量，或没有事件卡时被尊重的“跳过”边界。
+
+这是确定性 Runtime 汇总，不让模型评价“谁更爱谁”、关系好坏或胜负价值。
+
+## 成人模式与同意边界
+
+- L4 开启前需要用户显式确认双方均为成年人。
+- 如果 `Character.age` 明确小于 18，Runtime 直接拒绝 L4。
+- 成人档仍只做非露骨、同意优先的亲密题；现实动作必须由参与者自己同意。
+- 任何题目都能更换或跳过；跳过不是失败，也不会阻断游戏。
+- 自定义 L4 与 AI 生成 L4 同样受门禁，不存在绕过路径。
+
+## 聊天桥接
+
+聊天模式仍只把当前挑战写入：
 
 ```text
 ai-companion-draft:<conversationId>
 ```
 
-草稿携带 `game:<id>; challenge:<promptId>` reference，并明确告诉角色不要替用户回答或决定现实动作。用户仍需进入 ChatRoom 后自行点击发送。
+用户必须自己进入 ChatRoom 并点击发送。对于回忆 AI 题，草稿只额外标明“来自已存共同记忆”和 evidence 数，不把 evidence 原文强塞进消息。
 
-**不会自动：**
+## 持久化 / Schema
 
-- 调 Provider；
-- 发送消息；
-- 标记挑战完成；
-- 修改记忆；
-- 修改关系状态。
-
-## 持久化
-
-V1 不新增 IndexedDB store。游戏快照使用已有 `appCustomizations`：
+V1.1 不新增 IndexedDB store：
 
 ```text
-appKey = __couple-board-state__
-coupleBoardState = CoupleBoardGame
+__couple-board-state__        → CoupleBoardGame
+__couple-board-preferences__  → CoupleBoardPreferences
 ```
 
-该 object store 已经进入 Backup V12，因此续局状态自然跟随备份导出/恢复。
+它们都复用 `appCustomizations`，因此自然进入现有 Backup V12。
 
-## Launcher 迁移
-
-新增 `HomeAppKey = couple-board`，HomeLayout revision 从 12 升到 13。
-
-迁移只做一件事：旧布局里没有心跳飞行棋时，把它放入第一个可用 1×1 槽位，满页时再开新页。旧版 V12 Widget 尺寸迁移现在只对 `storedRevision < 12` 执行，避免 revision bump 后再次覆盖用户自己调过的 Widget 尺寸。
+```text
+IndexedDB:           V18（不变）
+Backup:              V12（不变）
+Launcher Grid:       V13（不变）
+HomeLayout revision: 13（不变）
+```
 
 ## 测试定义
 
-V1 新增 14 条 Couple Board service tests，并在 HomeLayout backup/migration 测试中增加 2 条：
+V1.1 扩充游戏 Runtime，并新增 Memory Prompt Service 测试，静态定义为：
 
 ```text
-Test files declarations: 66
-it/test declarations:   563
+Test files: 67
+it/test:    580
+Couple Board related: 30
 ```
 
-当前交付环境没有完整 npm 依赖，因此这些数字是源码测试定义，不冒充已经跑过的 Vitest 结果。Windows 与 CI 的 `npm run verify` 仍是最终发布门禁。
+当前容器 npm registry 无法解析，因此没有把语法/静态检查冒充完整 Vitest。正式发布以 Windows / CI 两轮 `npm run verify` 为准。

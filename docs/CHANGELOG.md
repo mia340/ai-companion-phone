@@ -1,3 +1,12 @@
+## V0.5.0-alpha.5.6.0 · 心跳飞行棋 V1.1
+
+- 新增本机自定义真心话 / 大冒险题库，按题型、强度和模式筛选；开局冻结题库快照，避免局中编辑改变已有棋局。
+- 新增基于真实 Memory evidence 的 AI 回忆出题：只允许 shared / relationship / event 证据，严格校验返回 evidence id 与当前 truth/dare 类型；不接受 promise / subjective / story 充当共同回忆。
+- AI 回忆题只进入当前棋局，不自动写回 Memory、Conversation State、Shared Event 或 Relationship Arc，也不自动发送聊天。
+- “惊喜”格升级为 6 张情侣事件卡，事件拥有独立 pending state 与局内心动值结算；旧 V1 存档继续兼容。
+- 新增 Heartbeat Highlights 终局高光，并刷新骰子、棋子、任务卡、事件卡与自定义题库 UI；支持 `prefers-reduced-motion`。
+- IndexedDB V18、Backup V12、Launcher Grid V13 / HomeLayout revision 13 不变；测试定义提升为 67 files / 580 declarations。
+
 ## V0.5.0-alpha.5.5.2 · 心跳飞行棋 V1 Launcher Fixture 热修
 
 - 修复 5.5.1 `companionNavigation.test.ts` 中唯一残留的重复 `homeLayoutRevision`：同一对象先写当前 revision 13、后又写 revision 7，导致后键覆盖并意外触发 `couple-board` 迁移。

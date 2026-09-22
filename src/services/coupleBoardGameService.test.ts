@@ -1,17 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import {
   COUPLE_BOARD_CELLS,
+  attachCoupleBoardGeneratedPrompt,
   buildCoupleBoardChatShare,
+  buildCoupleBoardHighlights,
+  coupleBoardChallengeFingerprint,
+  createCoupleBoardCustomPrompt,
   createCoupleBoardGame,
   drawCoupleBoardPrompt,
+  getCoupleBoardGamePrompt,
   getCoupleBoardPrompt,
   mergeCoupleBoardShareIntoDraft,
   parseCoupleBoardGame,
+  parseCoupleBoardPreferences,
   promptsFor,
+  promptsForGame,
   replaceCoupleBoardPrompt,
   resolveCoupleBoardChallenge,
+  resolveCoupleBoardEvent,
   rollCoupleBoard,
   validateCoupleBoardAdultMode,
+  type CoupleBoardPrompt,
   type CoupleBoardSettings
 } from './coupleBoardGameService'
 
@@ -43,6 +52,8 @@ describe('coupleBoardGameService', () => {
     expect(game.players.user.position).toBe(0)
     expect(game.players.partner.name).toBe('阿澈')
     expect(game.pending).toBeUndefined()
+    expect(game.pendingEvent).toBeUndefined()
+    expect(game.sessionPrompts).toEqual([])
   })
 
   it('blocks adult mode for an explicitly underage character', () => {
@@ -94,6 +105,14 @@ describe('coupleBoardGameService', () => {
     expect(next.pending?.replacementCount).toBe(1)
   })
 
+  it('changes the async challenge fingerprint when the pending card changes', () => {
+    const rolled = rollCoupleBoard(gameAt(0), 1, 0)
+    const before = coupleBoardChallengeFingerprint(rolled)
+    const replaced = replaceCoupleBoardPrompt(rolled, 0.99)
+    expect(coupleBoardChallengeFingerprint(replaced)).not.toBe(before)
+    expect(coupleBoardChallengeFingerprint(resolveCoupleBoardChallenge(replaced, 'skipped'))).toBe('')
+  })
+
   it('applies board movement effects before resolving the final cell', () => {
     const boosted = rollCoupleBoard(gameAt(4), 1, 0)
     expect(boosted.players.user.position).toBe(7)
@@ -117,6 +136,14 @@ describe('coupleBoardGameService', () => {
     expect(parseCoupleBoardGame({ ...game, players: null })).toBeUndefined()
   })
 
+  it('keeps parsing V1 snapshots that predate session prompts and event cards', () => {
+    const game = createCoupleBoardGame(baseSettings)
+    const legacy = { ...game } as Record<string, unknown>
+    delete legacy.sessionPrompts
+    delete legacy.pendingEvent
+    expect(parseCoupleBoardGame(legacy)?.id).toBe(game.id)
+  })
+
   it('builds a chat draft without auto-sending or deciding consent for the user', () => {
     const rolled = rollCoupleBoard(gameAt(0), 1, 0)
     const share = buildCoupleBoardChatShare(rolled, 'conv-1')!
@@ -134,5 +161,103 @@ describe('coupleBoardGameService', () => {
     expect(chat.some(prompt => prompt.id === 'd4-03')).toBe(true)
     expect(reality.some(prompt => prompt.id === 'd4-03')).toBe(false)
     expect(drawCoupleBoardPrompt('dare', 1, 'chat', 0).type).toBe('dare')
+  })
+
+  it('sanitizes custom prompts and forces level-4 entries behind the adult gate', () => {
+    const prompt = createCoupleBoardCustomPrompt({
+      type: 'truth',
+      intensity: 4,
+      modes: ['chat', 'chat'],
+      text: '<b>说出一个只想让我知道的小秘密</b>'
+    }, new Date('2026-09-21T01:00:00.000Z'))
+    expect(prompt.source).toBe('custom')
+    expect(prompt.adultOnly).toBe(true)
+    expect(prompt.modes).toEqual(['chat'])
+    expect(prompt.text).not.toContain('<b>')
+  })
+
+  it('freezes eligible custom prompts into a game and filters them by mode and intensity', () => {
+    const customChat = createCoupleBoardCustomPrompt({
+      type: 'truth', intensity: 2, modes: ['chat'], text: '我们的自定义真心话'
+    })
+    const customReality = createCoupleBoardCustomPrompt({
+      type: 'truth', intensity: 2, modes: ['reality'], text: '现实模式题'
+    })
+    const tooStrong = createCoupleBoardCustomPrompt({
+      type: 'truth', intensity: 3, modes: ['chat'], text: '更高强度题'
+    })
+    const game = createCoupleBoardGame(baseSettings, new Date(), [customChat, customReality, tooStrong])
+    const pool = promptsForGame(game, 'truth')
+    expect(pool.some(row => row.id === customChat.id)).toBe(true)
+    expect(pool.some(row => row.id === customReality.id)).toBe(false)
+    expect(pool.some(row => row.id === tooStrong.id)).toBe(false)
+  })
+
+  it('persists only valid custom prompts in preferences', () => {
+    const custom = createCoupleBoardCustomPrompt({
+      type: 'dare', intensity: 1, modes: ['chat'], text: '发一个你现在最想发的表情'
+    })
+    const parsed = parseCoupleBoardPreferences({
+      version: 1,
+      customPrompts: [custom, { ...custom, id: 'fake-built-in', source: 'builtin' }],
+      updatedAt: '2026-09-21T00:00:00.000Z'
+    })
+    expect(parsed?.customPrompts).toHaveLength(1)
+    expect(parsed?.customPrompts[0].id).toBe(custom.id)
+  })
+
+  it('turns surprise cells into resolvable event cards with explicit heart deltas', () => {
+    const rolled = rollCoupleBoard(gameAt(3), 1, 0, new Date('2026-09-21T02:00:00.000Z'))
+    expect(rolled.players.user.position).toBe(4)
+    expect(rolled.pending).toBeUndefined()
+    expect(rolled.pendingEvent?.eventCardId).toBe('event-sync')
+    expect(rolled.currentPlayer).toBe('user')
+
+    const resolved = resolveCoupleBoardEvent(rolled, new Date('2026-09-21T02:01:00.000Z'))
+    expect(resolved.players.user.hearts).toBe(1)
+    expect(resolved.players.partner.hearts).toBe(1)
+    expect(resolved.pendingEvent).toBeUndefined()
+    expect(resolved.currentPlayer).toBe('partner')
+  })
+
+  it('attaches an evidence-backed memory AI prompt only to the current challenge', () => {
+    const rolled = rollCoupleBoard(gameAt(0), 1, 0)
+    const memoryPrompt: CoupleBoardPrompt = {
+      id: 'memory-proof-1',
+      type: 'truth',
+      intensity: 2,
+      modes: ['chat'],
+      text: '还记得我们第一次一起熬夜聊到很晚吗？那晚最让你心动的一句话是什么？',
+      adultOnly: false,
+      source: 'memory-ai',
+      memoryEvidenceIds: ['mem-1']
+    }
+    const attached = attachCoupleBoardGeneratedPrompt(rolled, memoryPrompt)
+    expect(attached.pending?.promptId).toBe(memoryPrompt.id)
+    expect(getCoupleBoardGamePrompt(attached, memoryPrompt.id)?.memoryEvidenceIds).toEqual(['mem-1'])
+    expect(attached.sessionPrompts?.some(row => row.id === memoryPrompt.id)).toBe(true)
+  })
+
+  it('rejects generated prompts that do not carry memory evidence', () => {
+    const rolled = rollCoupleBoard(gameAt(0), 1, 0)
+    const prompt: CoupleBoardPrompt = {
+      id: 'memory-unproven', type: 'truth', intensity: 2, modes: ['chat'],
+      text: '一个没有证据的问题', adultOnly: false, source: 'memory-ai'
+    }
+    expect(() => attachCoupleBoardGeneratedPrompt(rolled, prompt)).toThrow('真实记忆证据')
+  })
+
+  it('builds heartbeat highlights from completed prompts, memory proof and events', () => {
+    let game = rollCoupleBoard(gameAt(0), 1, 0)
+    const memoryPrompt: CoupleBoardPrompt = {
+      id: 'memory-highlight', type: 'truth', intensity: 2, modes: ['chat'],
+      text: '关于那次一起看海，你最想留住哪个瞬间？', adultOnly: false,
+      source: 'memory-ai', memoryEvidenceIds: ['mem-sea']
+    }
+    game = attachCoupleBoardGeneratedPrompt(game, memoryPrompt)
+    game = resolveCoupleBoardChallenge(game, 'completed')
+    const highlights = buildCoupleBoardHighlights(game)
+    expect(highlights.some(row => row.id === 'heartbeat-total')).toBe(true)
+    expect(highlights.some(row => row.id === 'memory-challenge')).toBe(true)
   })
 })

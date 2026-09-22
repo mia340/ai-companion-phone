@@ -1,17 +1,29 @@
 # AI Companion Phone · 当前项目状态
 
-更新于：**2026-09-21**
-当前版本：**V0.5.0-alpha.5.5.2**
+更新于：**2026-09-22**
+当前版本：**V0.5.0-alpha.5.6.0**
 
 ```text
-App：0.5.0-alpha.5.5.2
+App：0.5.0-alpha.5.6.0
 Launcher：Grid V13（HomeLayout revision 13）
 IndexedDB：V18
 Backup：V12
-测试定义：66 files / 563 it-test declarations
+测试定义：67 files / 580 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+## 0. 本轮 alpha.5.6.0 重点 · 心跳飞行棋 V1.1
+
+- **自定义真心话 / 大冒险题库**：用户可按题型、强度和聊天/面对面模式保存本机题目；开局时把可用题库冻结进本局，避免中途编辑让存档语义漂移。
+- **真实共同回忆出题**：挑战卡可主动调用已配置模型重新出题，但输入只允许来自当前真实单聊的 shared / relationship / event 证据；Runtime 强校验 evidence id、题型与模式，伪造 evidence 或改题型直接拒绝。
+- **不把承诺冒充回忆**：`promise` 层不进入“共同回忆出题”证据池；subjective / story / conflict / invalid 同样排除。生成题只存在当前棋局，不写回 Memory，也不自动发送聊天。
+- **情侣事件卡**：原“惊喜”格升级为独立 Event Card 状态；6 张事件卡只改变局内心动值，不制造关系事实，并可从旧存档安全恢复。
+- **心动高光结算**：终局按真实局内记录生成 Heartbeat Highlights，包括总心动、完成挑战、真实回忆题、事件卡或被尊重的跳过边界，不让模型总结或评价关系好坏。
+- **交互动效与任务卡 UI**：棋子落点、骰子翻转、事件卡浮动、任务卡来源标签、自定义题库编辑 Sheet 与 reduced-motion 兼容。
+- **Schema 不变**：IndexedDB V18、Backup V12、Launcher Grid V13 / HomeLayout revision 13 均不变；偏好继续复用 `appCustomizations`。
+- **测试定义**：新增 `coupleBoardMemoryPromptService.test.ts`，并扩充游戏 Runtime 回归，当前静态定义为 67 files / 580 declarations。当前环境依赖无法完整安装，因此正式通过仍以 Windows / CI 双 `npm run verify` 为最终门禁。
+
 
 ## 0. 本轮 alpha.5.5.2 重点
 

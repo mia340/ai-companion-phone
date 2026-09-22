@@ -23,6 +23,26 @@ describe('Backup Zod + restore preflight', () => {
     expect(parsed.data.appCustomizations).toEqual([])
   })
 
+  it('保留心跳飞行棋 V1.1 的非索引题库偏好字段', () => {
+    const backup = minimalBackup()
+    backup.data.appCustomizations.push({
+      id: 'w1:__couple-board-preferences__',
+      worldId: 'w1',
+      appKey: '__couple-board-preferences__',
+      coupleBoardPreferences: {
+        version: 1,
+        customPrompts: [{
+          id: 'custom-1', type: 'truth', intensity: 2, modes: ['chat'],
+          text: '我们自己的题', source: 'custom'
+        }],
+        updatedAt: '2026-09-22T00:00:00.000Z'
+      },
+      updatedAt: '2026-09-22T00:00:00.000Z'
+    })
+    const parsed = parseBackupEnvelope(backup)
+    expect(parsed.data.appCustomizations[0].coupleBoardPreferences).toEqual(backup.data.appCustomizations[0].coupleBoardPreferences)
+  })
+
   it('恢复前阻止悬空会话/消息引用，避免清库后才发现坏备份', () => {
     const backup = minimalBackup()
     backup.data.messages.push({ id: 'm1', worldId: 'w1', conversationId: 'missing', senderId: 'user', content: 'x', type: 'text', status: 'delivered', createdAt: '' })

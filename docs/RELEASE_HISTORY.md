@@ -1,3 +1,7 @@
+## V0.5.0-alpha.5.6.0 · Couple Board V1.1
+
+心跳飞行棋从固定内置题库升级为可扩展但仍 evidence-first 的关系互动 Runtime：加入本机自定义题库、真实共同回忆 AI 出题、情侣事件卡和 Heartbeat Highlights。回忆题必须引用真实已存 evidence id；Runtime 不允许模型凭空补共同经历。数据库/Backup/Launcher revision 不升级。静态测试定义为 67 files / 580 declarations，正式发布门禁仍为两轮 `npm run verify`。
+
 ## V0.5.0-alpha.5.5.2 · 心跳飞行棋 V1 Launcher Fixture 热修
 
 - Windows 5.5.1 首轮 Vitest 已通过 562/563 tests；唯一失败来自一个测试对象里重复的 `homeLayoutRevision` 键。
