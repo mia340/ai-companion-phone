@@ -1,17 +1,26 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-22**
-当前版本：**V0.5.0-alpha.5.7.1**
+当前版本：**V0.5.0-alpha.5.7.2**
 
 ```text
-App：0.5.0-alpha.5.7.1
+App：0.5.0-alpha.5.7.2
 Launcher：Grid V13（HomeLayout revision 13）
 IndexedDB：V18
 Backup：V12
-测试定义：67 files / 598 it-test declarations
+测试定义：67 files / 600 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+## 0. 本轮 alpha.5.7.2 重点 · 心跳飞行棋 V1.2.2 可玩性热修
+
+- **角色可点击**：删除角色条自定义 pointer capture/drag/click suppression，改为原生横向滚动 + 箭头；点击选择永远先于滚动增强逻辑。
+- **继续与骰子不再 DataCloneError**：游戏状态统一通过 `gameSchema.parse()` 深拷贝为普通快照，不再对 Vue Proxy 直接 `structuredClone`。
+- **开局事务化**：先写 IndexedDB，再切到棋盘；保存失败则留在设置页并给出提示。
+- **兼容旧 WebView**：角色定位不依赖 `CSS.escape`。
+- **发布守卫**：source check 会阻止 Couple Board 恢复 pointer capture / suppress click / direct structuredClone。
+- **Schema 不变**：IndexedDB V18、Backup V12、Launcher Grid V13、HomeLayout revision 13。
 
 ## 0. 本轮 alpha.5.7.1 重点 · 心跳飞行棋 V1.2.1 现场热修
 

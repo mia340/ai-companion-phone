@@ -507,8 +507,15 @@ function otherPlayer(player: CoupleBoardPlayerId): CoupleBoardPlayerId {
   return player === 'user' ? 'partner' : 'user'
 }
 
+export function cloneCoupleBoardGame(game: CoupleBoardGame): CoupleBoardGame {
+  // Vue refs expose object values as reactive proxies. native structured cloning of a Proxy throws
+  // DataCloneError in browsers, so normalize through the existing Zod schema instead.
+  // Zod returns a plain deep-cloned snapshot and also keeps the persisted shape honest.
+  return gameSchema.parse(game)
+}
+
 function cloneGame(game: CoupleBoardGame): CoupleBoardGame {
-  return structuredClone(game)
+  return cloneCoupleBoardGame(game)
 }
 
 function uniqueModes(modes: readonly CoupleBoardMode[]) {
@@ -1204,7 +1211,7 @@ export async function saveCoupleBoardGame(worldId: string, game: CoupleBoardGame
     id: `${worldId}:${STATE_APP_KEY}`,
     worldId,
     appKey: STATE_APP_KEY,
-    coupleBoardState: game,
+    coupleBoardState: cloneCoupleBoardGame(game),
     updatedAt: now
   }
   await db.appCustomizations.put(row)
@@ -1239,7 +1246,7 @@ export function buildCoupleBoardArchiveEntry(game: CoupleBoardGame): CoupleBoard
     createdAt: game.createdAt,
     finishedAt: game.updatedAt,
     highlights: buildCoupleBoardHighlights(game),
-    game: structuredClone(game)
+    game: cloneCoupleBoardGame(game)
   }
 }
 

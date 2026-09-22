@@ -105,6 +105,22 @@ async function checkSource() {
   }
   pass(`all ${launcherRoutes.length} launcher apps + native app routes are concrete; PlaceholderApp fallback removed`)
 
+  const coupleBoardView = await readText('src/views/CoupleBoardView.vue')
+  const coupleBoardService = await readText('src/services/coupleBoardGameService.ts')
+  if (coupleBoardView.includes('setPointerCapture') || coupleBoardView.includes('suppressCharacterClick')) {
+    fail('Couple Board character picker must not capture pointer taps or suppress character clicks')
+  }
+  if (coupleBoardView.includes('structuredClone(') || coupleBoardService.includes('structuredClone(')) {
+    fail('Couple Board runtime must not structuredClone Vue reactive proxies')
+  }
+  if (!coupleBoardView.includes("type=\"button\" class=\"character-chip\"") || !coupleBoardView.includes('@click="chooseCharacter(character.id)"')) {
+    fail('Couple Board character chips must remain native clickable buttons')
+  }
+  if (!coupleBoardService.includes('cloneCoupleBoardGame')) {
+    fail('Couple Board must normalize reactive snapshots before persistence and game transitions')
+  }
+  pass('Couple Board tap/resume/clone regressions are guarded')
+
   const requiredDocs = [
     'docs/部署与更新.md',
     'docs/知间产品原则.md',

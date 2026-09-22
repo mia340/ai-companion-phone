@@ -1,3 +1,7 @@
+## V0.5.0-alpha.5.7.2 · Couple Board V1.2.2 playability hotfix
+
+针对 5.7.1 实机反馈的两条阻断型问题：触屏角色选择点击被自定义拖拽捕获，以及继续/掷骰子对 Vue reactive Proxy 直接 structuredClone 导致 DataCloneError。V1.2.2 改回原生滚动手势并统一使用 schema clone；开局持久化失败时不会进入半开局状态。数据 schema 不升级。
+
 ## V0.5.0-alpha.5.7.1 · Couple Board V1.2.1 field hotfix
 
 针对 5.7.0 首轮实机反馈修复四类问题：彻底移除旧占位 App 页面并加强 PWA 更新；角色选择条支持真正的横向滑动/拖动；系统题库扩至 128 道且默认可见；骰子动画不再依赖持久化完成才停止。IndexedDB / Backup / Launcher revision 均不升级。

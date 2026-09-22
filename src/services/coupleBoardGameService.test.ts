@@ -1,3 +1,4 @@
+import { reactive } from 'vue'
 import { describe, expect, it } from 'vitest'
 import {
   COUPLE_BOARD_CELLS,
@@ -9,6 +10,7 @@ import {
   buildCoupleBoardHighlights,
   buildCoupleBoardResultChatShare,
   coupleBoardChallengeFingerprint,
+  cloneCoupleBoardGame,
   createCoupleBoardCustomEventCard,
   createCoupleBoardCustomPrompt,
   createCoupleBoardGame,
@@ -76,6 +78,23 @@ describe('coupleBoardGameService', () => {
     expect(game.pending).toBeUndefined()
     expect(game.pendingEvent).toBeUndefined()
     expect(game.sessionPrompts).toEqual([])
+  })
+
+  it('clones Vue reactive game snapshots without structuredClone DataCloneError', () => {
+    const reactiveGame = reactive(createCoupleBoardGame(baseSettings))
+    const cloned = cloneCoupleBoardGame(reactiveGame)
+    expect(cloned).not.toBe(reactiveGame)
+    expect(cloned).toEqual(reactiveGame)
+    expect(() => rollCoupleBoard(reactiveGame, 1, 0)).not.toThrow()
+  })
+
+  it('archives a Vue reactive finished game as a plain snapshot', () => {
+    const reactiveGame = reactive(gameAt(27))
+    const finished = reactive(rollCoupleBoard(reactiveGame, 6, 0))
+    const entry = buildCoupleBoardArchiveEntry(finished)
+    expect(entry.game).not.toBe(finished)
+    expect(entry.game.status).toBe('finished')
+    expect(entry.game.winner).toBe('user')
   })
 
   it('blocks adult mode for an explicitly underage character', () => {

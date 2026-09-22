@@ -1,3 +1,12 @@
+## V0.5.0-alpha.5.7.2 · 心跳飞行棋 V1.2.2 可玩性热修
+
+- 修复角色卡片在触屏上被自定义 pointer capture / drag 手势吞掉点击的问题；角色选择改回浏览器原生横向滚动，点击选择优先。
+- 修复“继续上一局”和掷骰子对 Vue reactive Proxy 直接 `structuredClone` 导致 DataCloneError 的问题；统一通过 Zod schema 生成可持久化纯快照。
+- 开局改为“先持久化、成功后进入棋盘”，失败会留在设置页并显示错误，不再出现半开局状态。
+- 角色选择滚动不再依赖 `CSS.escape`，兼容较旧 WebView；左右箭头、触摸横滑和滚轮继续保留。
+- release-safety 新增 Couple Board 交互回归守卫：禁止 pointer capture / click suppression 回流，禁止 Couple Board runtime 重新直接 structuredClone reactive state。
+- 数据版本不变：IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 13。
+
 ## V0.5.0-alpha.5.7.1 · 心跳飞行棋 V1.2.1 现场热修
 
 - 删除通用 PlaceholderApp 页面与 `/app/:name` fallback；未知旧路由回 Home。

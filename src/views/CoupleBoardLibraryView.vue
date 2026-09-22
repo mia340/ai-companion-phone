@@ -307,7 +307,7 @@ onMounted(async () => {
     <main class="library-shell">
       <header class="topbar">
         <button class="circle" @click="router.push('/app/心跳飞行棋')">‹</button>
-        <div><small>COUPLE BOARD · V1.2.1</small><b>情侣内容中心</b></div>
+        <div><small>COUPLE BOARD · V1.2.2</small><b>情侣内容中心</b></div>
         <button class="circle home" @click="router.push('/home')">⌂</button>
       </header>
 
