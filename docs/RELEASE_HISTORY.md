@@ -1,3 +1,7 @@
+## V0.5.0-alpha.5.7.0 · Couple Board V1.2
+
+心跳飞行棋进入可长期积累内容的 V1.2：独立情侣内容中心统一管理自定义题库、系统题启停与可编辑事件牌组；完成棋局进入本地回忆册。AI 回忆题从仅 Memory 扩展为 Memory + Shared Timeline 的可验证 evidence，并保持“无证据不生成、未知 id 拒绝、生成结果不自动写事实”的边界。结算可由用户主动带到聊天草稿。次级页面进一步 route-level code split。数据库/Backup/Launcher revision 不升级；静态测试定义 67 files / 597 declarations。
+
 ## V0.5.0-alpha.5.6.0 · Couple Board V1.1
 
 心跳飞行棋从固定内置题库升级为可扩展但仍 evidence-first 的关系互动 Runtime：加入本机自定义题库、真实共同回忆 AI 出题、情侣事件卡和 Heartbeat Highlights。回忆题必须引用真实已存 evidence id；Runtime 不允许模型凭空补共同经历。数据库/Backup/Launcher revision 不升级。静态测试定义为 67 files / 580 declarations，正式发布门禁仍为两轮 `npm run verify`。

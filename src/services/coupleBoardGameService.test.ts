@@ -1,16 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import {
   COUPLE_BOARD_CELLS,
+  COUPLE_BOARD_EVENT_CARDS,
+  COUPLE_BOARD_PROMPTS,
   attachCoupleBoardGeneratedPrompt,
+  buildCoupleBoardArchiveEntry,
   buildCoupleBoardChatShare,
   buildCoupleBoardHighlights,
+  buildCoupleBoardResultChatShare,
   coupleBoardChallengeFingerprint,
+  createCoupleBoardCustomEventCard,
   createCoupleBoardCustomPrompt,
   createCoupleBoardGame,
+  drawCoupleBoardGameEventCard,
   drawCoupleBoardPrompt,
+  exportCoupleBoardLibrary,
+  getCoupleBoardGameEventCard,
   getCoupleBoardGamePrompt,
   getCoupleBoardPrompt,
+  importCoupleBoardLibrary,
+  mergeCoupleBoardResultShareIntoDraft,
   mergeCoupleBoardShareIntoDraft,
+  parseCoupleBoardArchive,
   parseCoupleBoardGame,
   parseCoupleBoardPreferences,
   promptsFor,
@@ -19,6 +30,8 @@ import {
   resolveCoupleBoardChallenge,
   resolveCoupleBoardEvent,
   rollCoupleBoard,
+  updateCoupleBoardCustomEventCard,
+  updateCoupleBoardCustomPrompt,
   validateCoupleBoardAdultMode,
   type CoupleBoardPrompt,
   type CoupleBoardSettings
@@ -244,7 +257,7 @@ describe('coupleBoardGameService', () => {
       id: 'memory-unproven', type: 'truth', intensity: 2, modes: ['chat'],
       text: '一个没有证据的问题', adultOnly: false, source: 'memory-ai'
     }
-    expect(() => attachCoupleBoardGeneratedPrompt(rolled, prompt)).toThrow('真实记忆证据')
+    expect(() => attachCoupleBoardGeneratedPrompt(rolled, prompt)).toThrow('真实证据')
   })
 
   it('builds heartbeat highlights from completed prompts, memory proof and events', () => {
@@ -260,4 +273,147 @@ describe('coupleBoardGameService', () => {
     expect(highlights.some(row => row.id === 'heartbeat-total')).toBe(true)
     expect(highlights.some(row => row.id === 'memory-challenge')).toBe(true)
   })
+
+  it('migrates V1 preferences to the V1.2 library shape without losing custom prompts', () => {
+    const custom = createCoupleBoardCustomPrompt({ type: 'truth', intensity: 2, modes: ['chat'], text: '迁移题' })
+    const parsed = parseCoupleBoardPreferences({ version: 1, customPrompts: [custom], updatedAt: '2026-09-20T00:00:00.000Z' })
+    expect(parsed?.version).toBe(2)
+    expect(parsed?.customPrompts.map(row => row.id)).toEqual([custom.id])
+    expect(parsed?.customEventCards).toEqual([])
+    expect(parsed?.disabledBuiltinPromptIds).toEqual([])
+  })
+
+  it('creates and edits custom event cards while sanitizing native-app text', () => {
+    const created = createCoupleBoardCustomEventCard({
+      title: '<b>交换一下</b>', text: '<i>换个位置，再靠近一点</i>', emoji: '🔁',
+      heartDeltaActor: 1, heartDeltaOther: 0, swapPositions: true
+    }, new Date('2026-09-21T04:00:00.000Z'))
+    expect(created.source).toBe('custom')
+    expect(created.title).not.toContain('<b>')
+    expect(created.swapPositions).toBe(true)
+    const edited = updateCoupleBoardCustomEventCard(created, {
+      title: '再来一次', text: '这一回合由当前玩家再掷一次。', emoji: '🎲',
+      heartDeltaActor: 0, heartDeltaOther: 0, extraTurn: true
+    })
+    expect(edited.id).toBe(created.id)
+    expect(edited.extraTurn).toBe(true)
+    expect(edited.swapPositions).toBeUndefined()
+  })
+
+  it('rejects a custom event card with no game effect', () => {
+    expect(() => createCoupleBoardCustomEventCard({
+      title: '空事件', text: '什么都不发生', emoji: '·', heartDeltaActor: 0, heartDeltaOther: 0
+    })).toThrow('至少要有一个效果')
+  })
+
+  it('freezes custom event cards and disabled built-ins into a new session', () => {
+    const customEvent = createCoupleBoardCustomEventCard({
+      title: '只抽我', text: '自定义事件', emoji: '💫', heartDeltaActor: 2, heartDeltaOther: 0
+    })
+    const game = createCoupleBoardGame(baseSettings, new Date(), [], {
+      customEventCards: [customEvent],
+      disabledBuiltinEventCardIds: COUPLE_BOARD_EVENT_CARDS.map(card => card.id),
+      disabledBuiltinPromptIds: [COUPLE_BOARD_PROMPTS[0].id]
+    })
+    expect(game.sessionEventCards?.map(card => card.id)).toEqual([customEvent.id])
+    expect(drawCoupleBoardGameEventCard(game, 0).id).toBe(customEvent.id)
+    expect(game.disabledPromptIds).toContain(COUPLE_BOARD_PROMPTS[0].id)
+  })
+
+  it('treats disabled-all challenge/event decks as safe pass-through cells instead of crashing', () => {
+    const truthIds = COUPLE_BOARD_PROMPTS.filter(row => row.type === 'truth').map(row => row.id)
+    const game = createCoupleBoardGame(baseSettings, new Date(), [], {
+      disabledBuiltinPromptIds: truthIds,
+      disabledBuiltinEventCardIds: COUPLE_BOARD_EVENT_CARDS.map(card => card.id)
+    })
+    game.players.user.position = 0
+    const truthPass = rollCoupleBoard(game, 1, 0)
+    expect(truthPass.pending).toBeUndefined()
+    expect(truthPass.currentPlayer).toBe('partner')
+
+    truthPass.players.partner.position = 3
+    const eventPass = rollCoupleBoard(truthPass, 1, 0)
+    expect(eventPass.pendingEvent).toBeUndefined()
+    expect(eventPass.currentPlayer).toBe('user')
+  })
+
+  it('keeps a disabled built-in prompt out of the current session pool', () => {
+    const disabled = promptsFor('truth', 2, 'chat')[0]
+    const game = createCoupleBoardGame(baseSettings, new Date(), [], { disabledBuiltinPromptIds: [disabled.id] })
+    expect(promptsForGame(game, 'truth').some(row => row.id === disabled.id)).toBe(false)
+  })
+
+  it('resolves swap-position custom events against the frozen event deck', () => {
+    const swap = createCoupleBoardCustomEventCard({
+      title: '交换', text: '交换双方位置', emoji: '🔁', heartDeltaActor: 0, heartDeltaOther: 0, swapPositions: true
+    })
+    const game = createCoupleBoardGame(baseSettings, new Date(), [], {
+      customEventCards: [swap], disabledBuiltinEventCardIds: COUPLE_BOARD_EVENT_CARDS.map(card => card.id)
+    })
+    game.players.user.position = 3
+    game.players.partner.position = 12
+    const rolled = rollCoupleBoard(game, 1, 0)
+    expect(getCoupleBoardGameEventCard(rolled, rolled.pendingEvent?.eventCardId || '')?.id).toBe(swap.id)
+    const resolved = resolveCoupleBoardEvent(rolled)
+    expect(resolved.players.user.position).toBe(12)
+    expect(resolved.players.partner.position).toBe(4)
+  })
+
+  it('lets an extra-turn custom event keep the same player after resolution', () => {
+    const extra = createCoupleBoardCustomEventCard({
+      title: '再来一次', text: '当前玩家再掷一次', emoji: '🎲', heartDeltaActor: 0, heartDeltaOther: 0, extraTurn: true
+    })
+    const game = createCoupleBoardGame(baseSettings, new Date(), [], {
+      customEventCards: [extra], disabledBuiltinEventCardIds: COUPLE_BOARD_EVENT_CARDS.map(card => card.id)
+    })
+    game.players.user.position = 3
+    const rolled = rollCoupleBoard(game, 1, 0)
+    const resolved = resolveCoupleBoardEvent(rolled)
+    expect(resolved.currentPlayer).toBe('user')
+    expect(resolved.pendingEvent).toBeUndefined()
+  })
+
+  it('round-trips the portable V1.2 library JSON and ignores unknown disabled ids', () => {
+    const custom = createCoupleBoardCustomPrompt({ type: 'truth', intensity: 1, modes: ['chat'], text: '导出题' })
+    const event = createCoupleBoardCustomEventCard({ title: '导出卡', text: '双方加一', emoji: '💞', heartDeltaActor: 1, heartDeltaOther: 1 })
+    const text = exportCoupleBoardLibrary({
+      version: 2, customPrompts: [custom], customEventCards: [event],
+      disabledBuiltinPromptIds: [COUPLE_BOARD_PROMPTS[0].id], disabledBuiltinEventCardIds: [COUPLE_BOARD_EVENT_CARDS[0].id],
+      updatedAt: '2026-09-21T00:00:00.000Z'
+    })
+    const imported = importCoupleBoardLibrary(text)
+    expect(imported.customPrompts[0].text).toBe('导出题')
+    expect(imported.customEventCards[0].title).toBe('导出卡')
+    expect(imported.disabledBuiltinPromptIds).toEqual([COUPLE_BOARD_PROMPTS[0].id])
+  })
+
+  it('builds an idempotent archive entry for a finished game with highlights', () => {
+    const game = gameAt(27)
+    const finished = rollCoupleBoard(game, 6, 0, new Date('2026-09-21T05:00:00.000Z'))
+    const entry = buildCoupleBoardArchiveEntry(finished)
+    expect(entry.id).toBe(`archive:${finished.id}`)
+    expect(entry.gameId).toBe(finished.id)
+    expect(entry.totalHearts).toBeGreaterThanOrEqual(3)
+    const parsed = parseCoupleBoardArchive({ version: 1, entries: [entry], updatedAt: entry.finishedAt })
+    expect(parsed?.entries[0].gameId).toBe(finished.id)
+  })
+
+  it('builds a final result draft only after a game finishes and never auto-sends it', () => {
+    const finished = rollCoupleBoard(gameAt(27), 6, 0)
+    const share = buildCoupleBoardResultChatShare(finished, 'conv-1')!
+    expect(share.draft).toContain('心跳飞行棋结算')
+    expect(share.draft).toContain('不要替我补写')
+    expect(mergeCoupleBoardResultShareIntoDraft('', share)).toBe(share.draft)
+    expect(mergeCoupleBoardResultShareIntoDraft(share.draft, share)).toBe(share.draft)
+    expect(buildCoupleBoardResultChatShare(createCoupleBoardGame(baseSettings), 'conv-1')).toBeUndefined()
+  })
+
+  it('edits custom prompts without changing their stable ids', () => {
+    const prompt = createCoupleBoardCustomPrompt({ type: 'truth', intensity: 1, modes: ['chat'], text: '旧题' })
+    const edited = updateCoupleBoardCustomPrompt(prompt, { type: 'dare', intensity: 2, modes: ['reality'], text: '新题' })
+    expect(edited.id).toBe(prompt.id)
+    expect(edited.type).toBe('dare')
+    expect(edited.text).toBe('新题')
+  })
+
 })

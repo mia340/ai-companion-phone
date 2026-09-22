@@ -34,8 +34,10 @@ export interface AppCustomization {
   /** 时光 / 共同回忆：只保存用户偏好与人工事件分组，不复制证据正文。 */
   /** 心跳飞行棋：轻量局内状态。字段不参与索引，因此无需升级 IndexedDB。 */
   coupleBoardState?: unknown
-  /** 心跳飞行棋 V1.1：用户自定义题库偏好；仍复用 appCustomizations，不新增 IndexedDB store。 */
+  /** 心跳飞行棋 V1.2：题库、事件卡与启停偏好；仍复用 appCustomizations，不新增 IndexedDB store。 */
   coupleBoardPreferences?: unknown
+  /** 心跳飞行棋 V1.2：已完成对局的轻量回忆册，最多保留最近 24 局。 */
+  coupleBoardArchive?: unknown
   sharedTimelineState?: {
     starredIds?: string[]
     hiddenIds?: string[]

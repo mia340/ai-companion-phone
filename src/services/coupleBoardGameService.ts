@@ -35,6 +35,8 @@ export interface CoupleBoardPrompt {
   adultOnly?: boolean
   source?: CoupleBoardPromptSource
   memoryEvidenceIds?: string[]
+  /** V1.2 unified evidence ids; timeline ids use the timeline: prefix. */
+  evidenceIds?: string[]
 }
 
 export interface CoupleBoardCustomPromptDraft {
@@ -45,9 +47,22 @@ export interface CoupleBoardCustomPromptDraft {
 }
 
 export interface CoupleBoardPreferences {
-  version: 1
+  version: 2
   customPrompts: CoupleBoardPrompt[]
+  customEventCards: CoupleBoardEventCard[]
+  disabledBuiltinPromptIds: string[]
+  disabledBuiltinEventCardIds: string[]
   updatedAt: string
+}
+
+export interface CoupleBoardCustomEventCardDraft {
+  title: string
+  text: string
+  emoji: string
+  heartDeltaActor: number
+  heartDeltaOther: number
+  swapPositions?: boolean
+  extraTurn?: boolean
 }
 
 export interface CoupleBoardSettings {
@@ -84,6 +99,9 @@ export interface CoupleBoardEventCard {
   emoji: string
   heartDeltaActor: number
   heartDeltaOther: number
+  source?: 'builtin' | 'custom'
+  swapPositions?: boolean
+  extraTurn?: boolean
 }
 
 export interface CoupleBoardPendingEvent {
@@ -127,6 +145,10 @@ export interface CoupleBoardGame {
   pendingEvent?: CoupleBoardPendingEvent
   /** Custom prompts are frozen into the session; AI-memory prompts are stored here only for this game. */
   sessionPrompts?: CoupleBoardPrompt[]
+  /** V1.2 freezes the event deck too, so editing the library never mutates an active game. */
+  sessionEventCards?: CoupleBoardEventCard[]
+  /** V1.2 freezes disabled built-in prompts for the current session. */
+  disabledPromptIds?: string[]
   history: CoupleBoardTurnLog[]
   createdAt: string
   updatedAt: string
@@ -244,12 +266,12 @@ export const COUPLE_BOARD_PROMPTS: CoupleBoardPrompt[] = [
 ]
 
 export const COUPLE_BOARD_EVENT_CARDS: CoupleBoardEventCard[] = [
-  { id: 'event-sync', title: '心跳同步', text: '这一刻你们刚好站在同一边。两个人都收下一点心动。', emoji: '💞', heartDeltaActor: 1, heartDeltaOther: 1 },
-  { id: 'event-brave', title: '勇气加码', text: '刚才那一步比想象中更勇敢。当前玩家额外收下 2 点心动。', emoji: '✨', heartDeltaActor: 2, heartDeltaOther: 0 },
-  { id: 'event-caught', title: '被接住了', text: '有些靠近不是往前走，而是有人稳稳接住你。对方 +2 心动。', emoji: '🫶', heartDeltaActor: 0, heartDeltaOther: 2 },
-  { id: 'event-secret', title: '秘密花园', text: '这一回合不用证明什么，留一点只属于你们的安静。双方 +1 心动。', emoji: '🌷', heartDeltaActor: 1, heartDeltaOther: 1 },
-  { id: 'event-moon', title: '月光偏心', text: '今晚的运气悄悄偏向了你。当前玩家 +1，对方也 +1。', emoji: '🌙', heartDeltaActor: 1, heartDeltaOther: 1 },
-  { id: 'event-letter', title: '未寄出的信', text: '把一句想说却没急着说出口的话留在心里。当前玩家 +1 心动。', emoji: '💌', heartDeltaActor: 1, heartDeltaOther: 0 }
+  { id: 'event-sync', source: 'builtin', title: '心跳同步', text: '这一刻你们刚好站在同一边。两个人都收下一点心动。', emoji: '💞', heartDeltaActor: 1, heartDeltaOther: 1 },
+  { id: 'event-brave', source: 'builtin', title: '勇气加码', text: '刚才那一步比想象中更勇敢。当前玩家额外收下 2 点心动。', emoji: '✨', heartDeltaActor: 2, heartDeltaOther: 0 },
+  { id: 'event-caught', source: 'builtin', title: '被接住了', text: '有些靠近不是往前走，而是有人稳稳接住你。对方 +2 心动。', emoji: '🫶', heartDeltaActor: 0, heartDeltaOther: 2 },
+  { id: 'event-secret', source: 'builtin', title: '秘密花园', text: '这一回合不用证明什么，留一点只属于你们的安静。双方 +1 心动。', emoji: '🌷', heartDeltaActor: 1, heartDeltaOther: 1 },
+  { id: 'event-moon', source: 'builtin', title: '月光偏心', text: '今晚的运气悄悄偏向了你。当前玩家 +1，对方也 +1。', emoji: '🌙', heartDeltaActor: 1, heartDeltaOther: 1 },
+  { id: 'event-letter', source: 'builtin', title: '未寄出的信', text: '把一句想说却没急着说出口的话留在心里。当前玩家 +1 心动。', emoji: '💌', heartDeltaActor: 1, heartDeltaOther: 0 }
 ]
 
 const promptSchema = z.object({
@@ -260,7 +282,20 @@ const promptSchema = z.object({
   text: z.string().min(1).max(240),
   adultOnly: z.boolean().optional(),
   source: z.union([z.literal('builtin'), z.literal('custom'), z.literal('memory-ai')]).optional(),
-  memoryEvidenceIds: z.array(z.string().min(1)).max(12).optional()
+  memoryEvidenceIds: z.array(z.string().min(1)).max(12).optional(),
+  evidenceIds: z.array(z.string().min(1)).max(16).optional()
+})
+
+const eventCardSchema = z.object({
+  id: z.string().min(1).max(120),
+  title: z.string().min(1).max(48),
+  text: z.string().min(1).max(220),
+  emoji: z.string().min(1).max(8),
+  heartDeltaActor: z.number().int().min(-5).max(5),
+  heartDeltaOther: z.number().int().min(-5).max(5),
+  source: z.union([z.literal('builtin'), z.literal('custom')]).optional(),
+  swapPositions: z.boolean().optional(),
+  extraTurn: z.boolean().optional()
 })
 
 const settingsSchema = z.object({
@@ -305,6 +340,8 @@ const gameSchema: z.ZodType<CoupleBoardGame> = z.object({
     eventCardId: z.string()
   }).optional(),
   sessionPrompts: z.array(promptSchema).max(120).optional(),
+  sessionEventCards: z.array(eventCardSchema).max(80).optional(),
+  disabledPromptIds: z.array(z.string().min(1).max(120)).max(160).optional(),
   history: z.array(z.object({
     id: z.string(),
     actor: z.union([z.literal('user'), z.literal('partner')]),
@@ -321,14 +358,68 @@ const gameSchema: z.ZodType<CoupleBoardGame> = z.object({
   updatedAt: z.string()
 })
 
-const preferencesSchema: z.ZodType<CoupleBoardPreferences> = z.object({
+const preferencesV1Schema = z.object({
   version: z.literal(1),
   customPrompts: z.array(promptSchema).max(120),
   updatedAt: z.string()
 })
 
+const preferencesV2Schema: z.ZodType<CoupleBoardPreferences> = z.object({
+  version: z.literal(2),
+  customPrompts: z.array(promptSchema).max(120),
+  customEventCards: z.array(eventCardSchema).max(80),
+  disabledBuiltinPromptIds: z.array(z.string().min(1).max(120)).max(160),
+  disabledBuiltinEventCardIds: z.array(z.string().min(1).max(120)).max(80),
+  updatedAt: z.string()
+})
+
+export interface CoupleBoardArchiveEntry {
+  id: string
+  gameId: string
+  characterId: string
+  characterName: string
+  mode: CoupleBoardMode
+  intensity: CoupleBoardIntensity
+  winner?: CoupleBoardPlayerId
+  totalHearts: number
+  completed: number
+  skipped: number
+  eventCount: number
+  evidencePromptCount: number
+  turnCount: number
+  createdAt: string
+  finishedAt: string
+  highlights: CoupleBoardHighlight[]
+  game: CoupleBoardGame
+}
+
+export interface CoupleBoardArchive {
+  version: 1
+  entries: CoupleBoardArchiveEntry[]
+  updatedAt: string
+}
+
+const archiveEntrySchema: z.ZodType<CoupleBoardArchiveEntry> = z.object({
+  id: z.string(), gameId: z.string(), characterId: z.string(), characterName: z.string(),
+  mode: z.union([z.literal('chat'), z.literal('reality')]),
+  intensity: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  winner: z.union([z.literal('user'), z.literal('partner')]).optional(),
+  totalHearts: z.number().int().min(0), completed: z.number().int().min(0), skipped: z.number().int().min(0),
+  eventCount: z.number().int().min(0), evidencePromptCount: z.number().int().min(0), turnCount: z.number().int().min(0),
+  createdAt: z.string(), finishedAt: z.string(), highlights: z.array(z.object({
+    id: z.string(), emoji: z.string(), eyebrow: z.string(), title: z.string(), detail: z.string()
+  })).max(6), game: gameSchema
+})
+
+const archiveSchema: z.ZodType<CoupleBoardArchive> = z.object({
+  version: z.literal(1),
+  entries: z.array(archiveEntrySchema).max(24),
+  updatedAt: z.string()
+})
+
 const STATE_APP_KEY = '__couple-board-state__'
 const PREFERENCES_APP_KEY = '__couple-board-preferences__'
+const ARCHIVE_APP_KEY = '__couple-board-archive__'
 
 function nowIso(now = new Date()) {
   return now.toISOString()
@@ -341,6 +432,11 @@ function randomId(prefix: string) {
 function clampRandom(random: number) {
   if (!Number.isFinite(random)) return 0
   return Math.min(0.999999, Math.max(0, random))
+}
+
+function clampHeartDelta(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(-5, Math.min(5, Math.trunc(value)))
 }
 
 function otherPlayer(player: CoupleBoardPlayerId): CoupleBoardPlayerId {
@@ -367,8 +463,33 @@ function normalizeSessionPrompt(prompt: CoupleBoardPrompt): CoupleBoardPrompt | 
     ...parsed.data,
     modes: uniqueModes(parsed.data.modes),
     text,
-    adultOnly: parsed.data.adultOnly || parsed.data.intensity === 4
+    adultOnly: parsed.data.adultOnly || parsed.data.intensity === 4,
+    ...(parsed.data.evidenceIds?.length ? { evidenceIds: [...new Set(parsed.data.evidenceIds)].slice(0, 16) } : {}),
+    ...(parsed.data.memoryEvidenceIds?.length ? { memoryEvidenceIds: [...new Set(parsed.data.memoryEvidenceIds)].slice(0, 12) } : {})
   }
+}
+
+function normalizeEventCard(card: CoupleBoardEventCard): CoupleBoardEventCard | undefined {
+  const parsed = eventCardSchema.safeParse(card)
+  if (!parsed.success) return undefined
+  const title = sanitizeNativeAppText(parsed.data.title, { singleLine: true }).slice(0, 48).trim()
+  const text = sanitizeNativeAppText(parsed.data.text, { singleLine: true }).slice(0, 180).trim()
+  const emoji = sanitizeNativeAppText(parsed.data.emoji, { singleLine: true }).slice(0, 4).trim() || '💌'
+  if (!title || !text) return undefined
+  return { ...parsed.data, title, text, emoji }
+}
+
+function uniqueKnownIds(value: readonly string[], known: ReadonlySet<string>, max: number) {
+  const result: string[] = []
+  const seen = new Set<string>()
+  for (const raw of value) {
+    const id = String(raw || '').trim()
+    if (!id || !known.has(id) || seen.has(id)) continue
+    seen.add(id)
+    result.push(id)
+    if (result.length >= max) break
+  }
+  return result
 }
 
 export function validateCoupleBoardAdultMode(settings: CoupleBoardSettings): string | undefined {
@@ -399,14 +520,92 @@ export function createCoupleBoardCustomPrompt(
   }
 }
 
+export function updateCoupleBoardCustomPrompt(
+  existing: CoupleBoardPrompt,
+  draft: CoupleBoardCustomPromptDraft
+): CoupleBoardPrompt {
+  if (existing.source !== 'custom') throw new Error('只能编辑自定义题目。')
+  const text = sanitizeNativeAppText(draft.text, { singleLine: true }).slice(0, 160).trim()
+  if (!text) throw new Error('自定义题目不能为空。')
+  return {
+    ...existing,
+    type: draft.type,
+    intensity: draft.intensity,
+    modes: uniqueModes(draft.modes),
+    text,
+    adultOnly: draft.intensity === 4,
+    source: 'custom'
+  }
+}
+
+export function createCoupleBoardCustomEventCard(
+  draft: CoupleBoardCustomEventCardDraft,
+  now = new Date()
+): CoupleBoardEventCard {
+  const title = sanitizeNativeAppText(draft.title, { singleLine: true }).slice(0, 48).trim()
+  const text = sanitizeNativeAppText(draft.text, { singleLine: true }).slice(0, 180).trim()
+  const emoji = sanitizeNativeAppText(draft.emoji, { singleLine: true }).slice(0, 4).trim() || '💌'
+  if (!title || !text) throw new Error('事件卡标题和内容不能为空。')
+  const card: CoupleBoardEventCard = {
+    id: `custom-event-${now.getTime().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    title,
+    text,
+    emoji,
+    heartDeltaActor: clampHeartDelta(draft.heartDeltaActor),
+    heartDeltaOther: clampHeartDelta(draft.heartDeltaOther),
+    source: 'custom',
+    ...(draft.swapPositions ? { swapPositions: true } : {}),
+    ...(draft.extraTurn ? { extraTurn: true } : {})
+  }
+  if (!card.heartDeltaActor && !card.heartDeltaOther && !card.swapPositions && !card.extraTurn) {
+    throw new Error('事件卡至少要有一个效果。')
+  }
+  return card
+}
+
+export function updateCoupleBoardCustomEventCard(
+  existing: CoupleBoardEventCard,
+  draft: CoupleBoardCustomEventCardDraft
+): CoupleBoardEventCard {
+  if (existing.source !== 'custom') throw new Error('只能编辑自定义事件卡。')
+  return { ...createCoupleBoardCustomEventCard(draft), id: existing.id }
+}
+
 export function parseCoupleBoardPreferences(value: unknown): CoupleBoardPreferences | undefined {
-  const parsed = preferencesSchema.safeParse(value)
-  if (!parsed.success) return undefined
-  const customPrompts = parsed.data.customPrompts
+  const parsedV2 = preferencesV2Schema.safeParse(value)
+  const promptIds = new Set(COUPLE_BOARD_PROMPTS.map(row => row.id))
+  const eventIds = new Set(COUPLE_BOARD_EVENT_CARDS.map(row => row.id))
+  if (parsedV2.success) {
+    const customPrompts = parsedV2.data.customPrompts
+      .map(normalizeSessionPrompt)
+      .filter((row): row is CoupleBoardPrompt => Boolean(row))
+      .filter(row => row.source === 'custom')
+    const customEventCards = parsedV2.data.customEventCards
+      .map(normalizeEventCard)
+      .filter((row): row is CoupleBoardEventCard => Boolean(row))
+      .filter(row => row.source === 'custom')
+    return {
+      ...parsedV2.data,
+      customPrompts,
+      customEventCards,
+      disabledBuiltinPromptIds: uniqueKnownIds(parsedV2.data.disabledBuiltinPromptIds, promptIds, 160),
+      disabledBuiltinEventCardIds: uniqueKnownIds(parsedV2.data.disabledBuiltinEventCardIds, eventIds, 80)
+    }
+  }
+  const parsedV1 = preferencesV1Schema.safeParse(value)
+  if (!parsedV1.success) return undefined
+  const customPrompts = parsedV1.data.customPrompts
     .map(normalizeSessionPrompt)
     .filter((row): row is CoupleBoardPrompt => Boolean(row))
     .filter(row => row.source === 'custom')
-  return { ...parsed.data, customPrompts }
+  return {
+    version: 2,
+    customPrompts,
+    customEventCards: [],
+    disabledBuiltinPromptIds: [],
+    disabledBuiltinEventCardIds: [],
+    updatedAt: parsedV1.data.updatedAt
+  }
 }
 
 export async function loadCoupleBoardPreferences(worldId: string): Promise<CoupleBoardPreferences> {
@@ -414,21 +613,46 @@ export async function loadCoupleBoardPreferences(worldId: string): Promise<Coupl
   const parsed = parseCoupleBoardPreferences(
     (row as AppCustomization & { coupleBoardPreferences?: unknown } | undefined)?.coupleBoardPreferences
   )
-  return parsed || { version: 1, customPrompts: [], updatedAt: new Date(0).toISOString() }
+  return parsed || {
+    version: 2,
+    customPrompts: [],
+    customEventCards: [],
+    disabledBuiltinPromptIds: [],
+    disabledBuiltinEventCardIds: [],
+    updatedAt: new Date(0).toISOString()
+  }
 }
 
-export async function saveCoupleBoardPreferences(worldId: string, customPrompts: CoupleBoardPrompt[]) {
+export async function saveCoupleBoardPreferences(
+  worldId: string,
+  input: Pick<CoupleBoardPreferences, 'customPrompts' | 'customEventCards' | 'disabledBuiltinPromptIds' | 'disabledBuiltinEventCardIds'> | CoupleBoardPrompt[]
+) {
+  const previous = await loadCoupleBoardPreferences(worldId)
+  const source = Array.isArray(input)
+    ? { ...previous, customPrompts: input }
+    : { ...previous, ...input }
   const now = new Date().toISOString()
+  const promptIds = new Set(COUPLE_BOARD_PROMPTS.map(row => row.id))
+  const eventIds = new Set(COUPLE_BOARD_EVENT_CARDS.map(row => row.id))
   const preferences: CoupleBoardPreferences = {
-    version: 1,
-    customPrompts: customPrompts
+    version: 2,
+    customPrompts: source.customPrompts
       .map(normalizeSessionPrompt)
       .filter((row): row is CoupleBoardPrompt => Boolean(row))
       .filter(row => row.source === 'custom')
       .slice(0, 120),
+    customEventCards: source.customEventCards
+      .map(normalizeEventCard)
+      .filter((row): row is CoupleBoardEventCard => Boolean(row))
+      .filter(row => row.source === 'custom')
+      .slice(0, 80),
+    disabledBuiltinPromptIds: uniqueKnownIds(source.disabledBuiltinPromptIds, promptIds, 160),
+    disabledBuiltinEventCardIds: uniqueKnownIds(source.disabledBuiltinEventCardIds, eventIds, 80),
     updatedAt: now
   }
+  const existing = await db.appCustomizations.get(`${worldId}:${PREFERENCES_APP_KEY}`)
   const row: AppCustomization & { coupleBoardPreferences: CoupleBoardPreferences } = {
+    ...(existing ?? {}),
     id: `${worldId}:${PREFERENCES_APP_KEY}`,
     worldId,
     appKey: PREFERENCES_APP_KEY,
@@ -439,10 +663,55 @@ export async function saveCoupleBoardPreferences(worldId: string, customPrompts:
   return preferences
 }
 
+export function exportCoupleBoardLibrary(preferences: CoupleBoardPreferences) {
+  return JSON.stringify({
+    format: 'ai-companion-phone-couple-board-library',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    data: {
+      customPrompts: preferences.customPrompts,
+      customEventCards: preferences.customEventCards,
+      disabledBuiltinPromptIds: preferences.disabledBuiltinPromptIds,
+      disabledBuiltinEventCardIds: preferences.disabledBuiltinEventCardIds
+    }
+  }, null, 2)
+}
+
+export function importCoupleBoardLibrary(raw: string): Pick<CoupleBoardPreferences, 'customPrompts' | 'customEventCards' | 'disabledBuiltinPromptIds' | 'disabledBuiltinEventCardIds'> {
+  let value: unknown
+  try { value = JSON.parse(raw) } catch { throw new Error('题库文件不是有效 JSON。') }
+  if (!value || typeof value !== 'object') throw new Error('题库文件结构无效。')
+  const root = value as Record<string, unknown>
+  if (root.format !== 'ai-companion-phone-couple-board-library' || root.version !== 1 || !root.data || typeof root.data !== 'object') {
+    throw new Error('这不是心跳飞行棋 V1.2 题库文件。')
+  }
+  const data = root.data as Record<string, unknown>
+  const candidate = parseCoupleBoardPreferences({
+    version: 2,
+    customPrompts: Array.isArray(data.customPrompts) ? data.customPrompts : [],
+    customEventCards: Array.isArray(data.customEventCards) ? data.customEventCards : [],
+    disabledBuiltinPromptIds: Array.isArray(data.disabledBuiltinPromptIds) ? data.disabledBuiltinPromptIds : [],
+    disabledBuiltinEventCardIds: Array.isArray(data.disabledBuiltinEventCardIds) ? data.disabledBuiltinEventCardIds : [],
+    updatedAt: new Date().toISOString()
+  })
+  if (!candidate) throw new Error('题库文件内容无法通过校验。')
+  return {
+    customPrompts: candidate.customPrompts,
+    customEventCards: candidate.customEventCards,
+    disabledBuiltinPromptIds: candidate.disabledBuiltinPromptIds,
+    disabledBuiltinEventCardIds: candidate.disabledBuiltinEventCardIds
+  }
+}
+
 export function createCoupleBoardGame(
   settings: CoupleBoardSettings,
   now = new Date(),
-  sessionPrompts: CoupleBoardPrompt[] = []
+  sessionPrompts: CoupleBoardPrompt[] = [],
+  options: {
+    customEventCards?: CoupleBoardEventCard[]
+    disabledBuiltinPromptIds?: string[]
+    disabledBuiltinEventCardIds?: string[]
+  } = {}
 ): CoupleBoardGame {
   const adultError = validateCoupleBoardAdultMode(settings)
   if (adultError) throw new Error(adultError)
@@ -452,6 +721,14 @@ export function createCoupleBoardGame(
     .filter((row): row is CoupleBoardPrompt => Boolean(row))
     .filter(row => row.source === 'custom')
     .slice(0, 120)
+  const disabledEventIds = new Set(options.disabledBuiltinEventCardIds || [])
+  const frozenEvents = [
+    ...COUPLE_BOARD_EVENT_CARDS.filter(card => !disabledEventIds.has(card.id)),
+    ...(options.customEventCards || [])
+      .map(normalizeEventCard)
+      .filter((row): row is CoupleBoardEventCard => Boolean(row))
+      .filter(row => row.source === 'custom')
+  ].slice(0, 80)
   return {
     version: 1,
     id: randomId('couple-board'),
@@ -464,6 +741,8 @@ export function createCoupleBoardGame(
       partner: { id: 'partner', name: settings.characterName, position: 0, hearts: 0, completed: 0, skipped: 0 }
     },
     sessionPrompts: frozenPrompts,
+    sessionEventCards: frozenEvents,
+    disabledPromptIds: [...new Set(options.disabledBuiltinPromptIds || [])].slice(0, 160),
     history: [],
     createdAt: timestamp,
     updatedAt: timestamp
@@ -494,7 +773,11 @@ function sessionPromptPool(game: CoupleBoardGame, type: CoupleBoardPromptType) {
 }
 
 export function promptsForGame(game: CoupleBoardGame, type: CoupleBoardPromptType) {
-  return [...promptsFor(type, game.settings.intensity, game.settings.mode), ...sessionPromptPool(game, type)]
+  const disabled = new Set(game.disabledPromptIds || [])
+  return [
+    ...promptsFor(type, game.settings.intensity, game.settings.mode).filter(prompt => !disabled.has(prompt.id)),
+    ...sessionPromptPool(game, type)
+  ]
 }
 
 export function drawCoupleBoardPrompt(
@@ -569,6 +852,24 @@ export function getCoupleBoardEventCard(eventCardId: string) {
   return COUPLE_BOARD_EVENT_CARDS.find(card => card.id === eventCardId)
 }
 
+function eventDeckForGame(game: CoupleBoardGame) {
+  // Old V1 snapshots have no sessionEventCards and keep the original built-in deck.
+  // V1.2 snapshots may intentionally freeze an empty deck when every event is disabled.
+  return game.sessionEventCards === undefined ? COUPLE_BOARD_EVENT_CARDS : game.sessionEventCards
+}
+
+export function drawCoupleBoardGameEventCard(game: CoupleBoardGame, random = Math.random(), excludeId?: string) {
+  const candidates = eventDeckForGame(game)
+  const withoutExcluded = excludeId ? candidates.filter(card => card.id !== excludeId) : candidates
+  const pool = withoutExcluded.length ? withoutExcluded : candidates
+  if (!pool.length) throw new Error('当前事件卡牌组为空。')
+  return pool[Math.floor(clampRandom(random) * pool.length)]
+}
+
+export function getCoupleBoardGameEventCard(game: CoupleBoardGame, eventCardId: string) {
+  return (game.sessionEventCards || []).find(card => card.id === eventCardId) || getCoupleBoardEventCard(eventCardId)
+}
+
 function challengeTypeForCell(type: CoupleBoardCellType): CoupleBoardPromptType | undefined {
   if (type === 'truth') return 'truth'
   if (type === 'dare') return 'dare'
@@ -626,20 +927,32 @@ export function rollCoupleBoard(
   if (cell.type === 'heart') player.hearts += 1
 
   if (cell.type === 'surprise') {
-    const eventCard = drawCoupleBoardEventCard(random)
-    entry.eventCardId = eventCard.id
-    next.pendingEvent = { actor, cellIndex: to, eventCardId: eventCard.id }
+    const eventDeck = eventDeckForGame(next)
+    if (eventDeck.length) {
+      const eventCard = drawCoupleBoardGameEventCard(next, random)
+      entry.eventCardId = eventCard.id
+      next.pendingEvent = { actor, cellIndex: to, eventCardId: eventCard.id }
+    } else {
+      next.currentPlayer = otherPlayer(actor)
+      next.turn += 1
+    }
   } else {
     const promptType = challengeTypeForCell(cell.type)
     if (promptType) {
-      const prompt = drawCoupleBoardGamePrompt(next, promptType, random)
-      entry.promptId = prompt.id
-      next.pending = {
-        actor,
-        cellIndex: to,
-        promptId: prompt.id,
-        promptType,
-        replacementCount: 0
+      const pool = promptsForGame(next, promptType)
+      if (pool.length) {
+        const prompt = pool[Math.floor(clampRandom(random) * pool.length)]
+        entry.promptId = prompt.id
+        next.pending = {
+          actor,
+          cellIndex: to,
+          promptId: prompt.id,
+          promptType,
+          replacementCount: 0
+        }
+      } else {
+        next.currentPlayer = otherPlayer(actor)
+        next.turn += 1
       }
     } else {
       next.currentPlayer = otherPlayer(actor)
@@ -678,7 +991,8 @@ export function attachCoupleBoardGeneratedPrompt(
   const normalized = normalizeSessionPrompt({ ...prompt, source: 'memory-ai' })
   if (!normalized || normalized.source !== 'memory-ai') throw new Error('AI 回忆题格式无效。')
   if (normalized.type !== game.pending.promptType) throw new Error('AI 回忆题类型与当前格子不一致。')
-  if (!normalized.memoryEvidenceIds?.length) throw new Error('AI 回忆题缺少真实记忆证据。')
+  const evidenceIds = normalized.evidenceIds?.length ? normalized.evidenceIds : normalized.memoryEvidenceIds
+  if (!evidenceIds?.length) throw new Error('AI 回忆题缺少真实证据。')
   if (normalized.intensity > game.settings.intensity || !normalized.modes.includes(game.settings.mode)) {
     throw new Error('AI 回忆题与当前游戏模式不一致。')
   }
@@ -724,14 +1038,19 @@ export function resolveCoupleBoardEvent(game: CoupleBoardGame, now = new Date())
   if (!game.pendingEvent) throw new Error('当前没有待处理事件卡。')
   const next = cloneGame(game)
   const pending = next.pendingEvent!
-  const card = getCoupleBoardEventCard(pending.eventCardId)
+  const card = getCoupleBoardGameEventCard(next, pending.eventCardId)
   if (!card) throw new Error('事件卡不存在。')
   const actor = next.players[pending.actor]
   const other = next.players[otherPlayer(pending.actor)]
   actor.hearts = Math.max(0, actor.hearts + card.heartDeltaActor)
   other.hearts = Math.max(0, other.hearts + card.heartDeltaOther)
+  if (card.swapPositions) {
+    const actorPosition = actor.position
+    actor.position = other.position
+    other.position = actorPosition
+  }
   next.pendingEvent = undefined
-  next.currentPlayer = otherPlayer(pending.actor)
+  next.currentPlayer = card.extraTurn ? pending.actor : otherPlayer(pending.actor)
   next.turn += 1
   next.updatedAt = nowIso(now)
   return next
@@ -770,7 +1089,7 @@ export function buildCoupleBoardHighlights(game: CoupleBoardGame): CoupleBoardHi
 
   const memoryLog = [...completedLogs].reverse().find(row => {
     const prompt = getCoupleBoardGamePrompt(game, row.promptId || '')
-    return prompt?.source === 'memory-ai' && Boolean(prompt.memoryEvidenceIds?.length)
+    return prompt?.source === 'memory-ai' && Boolean(prompt.evidenceIds?.length || prompt.memoryEvidenceIds?.length)
   })
   if (memoryLog) {
     const prompt = getCoupleBoardGamePrompt(game, memoryLog.promptId || '')!
@@ -779,7 +1098,7 @@ export function buildCoupleBoardHighlights(game: CoupleBoardGame): CoupleBoardHi
       emoji: '🕰️',
       eyebrow: 'OUR MEMORY',
       title: '真实回忆变成了一道题',
-      detail: `这道高光由 ${prompt.memoryEvidenceIds?.length || 0} 条已存记忆作为证据生成，没有写回或改动原记忆。`
+      detail: `这道高光由 ${prompt.evidenceIds?.length || prompt.memoryEvidenceIds?.length || 0} 条已存证据生成，没有写回或改动原记录。`
     })
   }
 
@@ -832,6 +1151,89 @@ export async function clearCoupleBoardGame(worldId: string) {
   await db.appCustomizations.delete(`${worldId}:${STATE_APP_KEY}`)
 }
 
+export function buildCoupleBoardArchiveEntry(game: CoupleBoardGame): CoupleBoardArchiveEntry {
+  if (game.status !== 'finished') throw new Error('只有已经结束的棋局才能进入回忆册。')
+  const evidencePromptCount = game.history.filter(row => {
+    if (!row.promptId) return false
+    const prompt = getCoupleBoardGamePrompt(game, row.promptId)
+    return prompt?.source === 'memory-ai' && Boolean(prompt.evidenceIds?.length || prompt.memoryEvidenceIds?.length)
+  }).length
+  return {
+    id: `archive:${game.id}`,
+    gameId: game.id,
+    characterId: game.settings.characterId,
+    characterName: game.settings.characterName,
+    mode: game.settings.mode,
+    intensity: game.settings.intensity,
+    winner: game.winner,
+    totalHearts: game.players.user.hearts + game.players.partner.hearts,
+    completed: game.players.user.completed + game.players.partner.completed,
+    skipped: game.players.user.skipped + game.players.partner.skipped,
+    eventCount: game.history.filter(row => row.eventCardId).length,
+    evidencePromptCount,
+    turnCount: game.history.length,
+    createdAt: game.createdAt,
+    finishedAt: game.updatedAt,
+    highlights: buildCoupleBoardHighlights(game),
+    game: structuredClone(game)
+  }
+}
+
+export function parseCoupleBoardArchive(value: unknown): CoupleBoardArchive | undefined {
+  const parsed = archiveSchema.safeParse(value)
+  return parsed.success ? parsed.data : undefined
+}
+
+export async function loadCoupleBoardArchive(worldId: string): Promise<CoupleBoardArchive> {
+  const row = await db.appCustomizations.get(`${worldId}:${ARCHIVE_APP_KEY}`)
+  const parsed = parseCoupleBoardArchive(
+    (row as AppCustomization & { coupleBoardArchive?: unknown } | undefined)?.coupleBoardArchive
+  )
+  return parsed || { version: 1, entries: [], updatedAt: new Date(0).toISOString() }
+}
+
+export async function archiveCoupleBoardGame(worldId: string, game: CoupleBoardGame) {
+  const entry = buildCoupleBoardArchiveEntry(game)
+  const previous = await loadCoupleBoardArchive(worldId)
+  const now = new Date().toISOString()
+  const entries = [entry, ...previous.entries.filter(row => row.gameId !== game.id)]
+    .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))
+    .slice(0, 24)
+  const archive: CoupleBoardArchive = { version: 1, entries, updatedAt: now }
+  const existing = await db.appCustomizations.get(`${worldId}:${ARCHIVE_APP_KEY}`)
+  const row: AppCustomization & { coupleBoardArchive: CoupleBoardArchive } = {
+    ...(existing ?? {}),
+    id: `${worldId}:${ARCHIVE_APP_KEY}`,
+    worldId,
+    appKey: ARCHIVE_APP_KEY,
+    coupleBoardArchive: archive,
+    updatedAt: now
+  }
+  await db.appCustomizations.put(row)
+  return archive
+}
+
+export async function removeCoupleBoardArchiveEntry(worldId: string, gameId: string) {
+  const previous = await loadCoupleBoardArchive(worldId)
+  const now = new Date().toISOString()
+  const archive: CoupleBoardArchive = {
+    version: 1,
+    entries: previous.entries.filter(row => row.gameId !== gameId),
+    updatedAt: now
+  }
+  const existing = await db.appCustomizations.get(`${worldId}:${ARCHIVE_APP_KEY}`)
+  const row: AppCustomization & { coupleBoardArchive: CoupleBoardArchive } = {
+    ...(existing ?? {}),
+    id: `${worldId}:${ARCHIVE_APP_KEY}`,
+    worldId,
+    appKey: ARCHIVE_APP_KEY,
+    coupleBoardArchive: archive,
+    updatedAt: now
+  }
+  await db.appCustomizations.put(row)
+  return archive
+}
+
 export interface CoupleBoardChatShare {
   conversationId: string
   draft: string
@@ -851,7 +1253,7 @@ export function buildCoupleBoardChatShare(
     ? `我们正在玩「心跳飞行棋」。轮到你了，落在${prompt.type === 'truth' ? '真心话' : '大冒险'}格：`
     : `我们正在玩「心跳飞行棋」。轮到我了，落在${prompt.type === 'truth' ? '真心话' : '大冒险'}格：`
   const memoryNote = prompt.source === 'memory-ai'
-    ? `\n这道题只根据已经存下的共同记忆生成，证据数：${prompt.memoryEvidenceIds?.length || 0}。`
+    ? `\n这道题只根据已经存下的真实证据生成，证据数：${prompt.evidenceIds?.length || prompt.memoryEvidenceIds?.length || 0}。`
     : ''
   const instruction = game.pending.actor === 'partner'
     ? '请按你的角色设定回应，但不要替我决定任何现实动作；任何不舒服的内容都可以直接跳过。'
@@ -866,5 +1268,34 @@ export function mergeCoupleBoardShareIntoDraft(existing: string, share: CoupleBo
   const current = existing.trim()
   if (!current) return share.draft
   if (current.includes(`[心跳飞行棋 game:`)) return current
+  return `${current}\n\n${share.draft}`
+}
+
+
+export function buildCoupleBoardResultChatShare(
+  game: CoupleBoardGame,
+  conversationId: string
+): CoupleBoardChatShare | undefined {
+  if (game.status !== 'finished' || !conversationId) return undefined
+  const totalHearts = game.players.user.hearts + game.players.partner.hearts
+  const completed = game.players.user.completed + game.players.partner.completed
+  const eventCount = game.history.filter(row => row.eventCardId).length
+  const highlights = buildCoupleBoardHighlights(game).slice(0, 3)
+  const lines = highlights.map(item => `- ${item.title}：${item.detail}`)
+  return {
+    conversationId,
+    draft: [
+      `我们刚玩完一局「心跳飞行棋」。这一局一共留下 ${totalHearts} 点心动，完成 ${completed} 个挑战，抽到 ${eventCount} 张事件卡。`,
+      lines.length ? `本局高光：\n${lines.join('\n')}` : '',
+      '这是我主动带到聊天里的游戏结算；请把它当作共同聊天素材，不要替我补写没有发生过的经历。',
+      `[心跳飞行棋结算 game:${game.id}]`
+    ].filter(Boolean).join('\n\n')
+  }
+}
+
+export function mergeCoupleBoardResultShareIntoDraft(existing: string, share: CoupleBoardChatShare) {
+  const current = existing.trim()
+  if (!current) return share.draft
+  if (current.includes(`[心跳飞行棋结算 game:`)) return current
   return `${current}\n\n${share.draft}`
 }

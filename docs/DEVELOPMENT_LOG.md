@@ -1,3 +1,14 @@
+## 2026-09-22 · V0.5.0-alpha.5.7.0 · 心跳飞行棋 V1.2
+
+- `CoupleBoardPreferences` 从 V1 向后兼容迁移到 V2：新增自定义事件卡、系统题/系统事件启停；已有 V1 自定义题无损迁移。
+- 新增 `CoupleBoardLibraryView.vue`，把题库、事件卡和回忆册从游戏主界面解耦；支持编辑、过滤、启停、JSON 导入导出。
+- 对局开局冻结 `sessionPrompts / sessionEventCards / disabledPromptIds`，避免内容中心修改影响进行中的存档；全部禁用时挑战/事件格安全跳过而不是抛错。
+- 新增最近 24 局本地回忆册，完成局按真实 history 生成统计与高光，归档幂等；仍复用 `appCustomizations`，不新增 IndexedDB store。
+- `coupleBoardMemoryPromptService` 升级 V2 evidence：在真实 Memory 之外加入当前角色 Shared Timeline 的 factual shared-event / memory 投影，排除 promise / goal / story，且 timeline id 与 memory id 分离并验证。
+- 结算新增用户主动“分享结算”草稿桥接；不自动发送、不自动写 Memory/Shared Event/Relationship Arc。
+- Router 将角色编辑、设置、备份、Memory 等次级页面改成懒加载 route chunks，继续偿还主包体积技术债。
+- 新增/扩充回归后静态定义为 67 files / 597 declarations；当前容器 npm registry 不可用，完整 `npm run verify` 仍由 Windows 两轮门禁确认。
+
 ## 2026-09-22 · V0.5.0-alpha.5.6.0 · 心跳飞行棋 V1.1
 
 - 完整复查 5.5.2 源码包（377 个 UTF-8 文本文件，约 8.3 万行）并沿用现有 Native App / Memory / appCustomizations 边界，未新增数据库 store。

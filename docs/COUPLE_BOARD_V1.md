@@ -1,8 +1,8 @@
-# 心跳飞行棋 V1.1 · Couple Board Runtime
+# 心跳飞行棋 V1.2 · Couple Board Runtime
 
-版本：`V0.5.0-alpha.5.6.0`
+版本：`V0.5.0-alpha.5.7.0`
 
-> V1.1 在 V1 的 30 格双人棋盘上增加自定义题库、真实共同回忆 AI 出题、情侣事件卡、Heartbeat Highlights 与交互动效。它仍不是新的事实源，也不让模型替参与者决定现实动作。
+> V1.2 在 V1.1 基础上增加情侣内容中心、可编辑事件牌组、游戏回忆册与 Memory + Shared Timeline evidence 出题。它仍不是新的事实源，也不让模型替参与者决定现实动作。
 
 ## 产品定位
 
@@ -30,7 +30,7 @@
 
 ### 自定义题
 
-V1.1 可创建自定义真心话 / 大冒险，并指定：
+V1.2 的情侣内容中心可创建、编辑、删除自定义真心话 / 大冒险，并指定：
 
 - 强度 L1–L4；
 - 聊天 / 面对面 / 双模式；
@@ -40,7 +40,7 @@ V1.1 可创建自定义真心话 / 大冒险，并指定：
 
 ```text
 appKey = __couple-board-preferences__
-coupleBoardPreferences.version = 1
+coupleBoardPreferences.version = 2
 ```
 
 开局时当前自定义题会冻结为 `sessionPrompts`。之后即使用户编辑全局题库，已经开始的棋局也不会改变题目集合。L4 自定义题自动标记 `adultOnly`。
@@ -50,9 +50,9 @@ coupleBoardPreferences.version = 1
 挑战卡上可主动点击“用真实共同回忆重新出题”。流程：
 
 ```text
-当前真实单聊
-  → listConversationMemoryContext
-  → evidence filter
+当前角色
+  → listConversationMemoryContext + loadSharedTimeline
+  → Memory / Timeline evidence filter + 去重
   → Provider
   → JSON parse
   → evidence/type/mode Runtime validation
@@ -63,15 +63,15 @@ coupleBoardPreferences.version = 1
 
 只把能当作共同经历证据的记录交给模型：
 
-- `layer = shared`；
-- `layer = relationship`；
-- `category = event`。
+- Memory：`layer = shared / relationship` 或 `category = event`；
+- Shared Timeline：当前角色、未隐藏，且来源是 memory 或明确 `relationshipSignal = shared-event` 的 factual 投影。
 
 明确排除：
 
 - `subjective`：角色主观判断不是共同事实；
 - `story`：长期剧情摘要可能包含压缩/推演；
-- `promise`：约定不等于已经发生的共同回忆；
+- `promise / goal`：约定或目标不等于已经发生的共同回忆；
+- Timeline `story` signal；
 - `status = conflict / invalid`。
 
 ### 模型输出门禁
@@ -96,13 +96,15 @@ Runtime 会拒绝：
 
 ## 情侣事件卡
 
-V1.1 内置 6 张事件卡，例如心跳同步、勇气加码、被接住、秘密花园。事件只产生确定性的局内心动值变化；它们不要求模型解释，也不写关系事实。
+V1.2 保留 6 张内置事件卡，并允许在情侣内容中心新增自定义事件卡。自定义卡可以改变双方心动、交换棋子位置或让当前玩家再掷一次；所有效果都是确定性 Runtime 结算，不要求模型解释，也不写关系事实。
 
 事件卡是独立 pending state，因此：
 
 - 未处理事件时不能继续掷骰子；
 - 存档恢复能准确回到事件卡；
-- 老 V1 snapshot 没有 `pendingEvent/sessionPrompts` 也能解析。
+- 老 V1 snapshot 没有 `pendingEvent/sessionPrompts/sessionEventCards` 也能解析；
+- 新局会冻结 `sessionEventCards`，局中编辑全局牌组不会改变当前存档；
+- 全部事件卡禁用时，事件格安全交棒，不会因空牌组崩溃。
 
 ## Heartbeat Highlights
 
@@ -125,21 +127,22 @@ V1.1 内置 6 张事件卡，例如心跳同步、勇气加码、被接住、秘
 
 ## 聊天桥接
 
-聊天模式仍只把当前挑战写入：
+聊天模式可把当前挑战或完成后的结算写入：
 
 ```text
 ai-companion-draft:<conversationId>
 ```
 
-用户必须自己进入 ChatRoom 并点击发送。对于回忆 AI 题，草稿只额外标明“来自已存共同记忆”和 evidence 数，不把 evidence 原文强塞进消息。
+用户必须自己进入 ChatRoom 并点击发送。挑战草稿不会自动发送；终局“分享结算”也只使用真实局内统计与高光。对于 AI 证据题，草稿只标明 evidence 数，不把 evidence 原文强塞进消息。
 
 ## 持久化 / Schema
 
-V1.1 不新增 IndexedDB store：
+V1.2 不新增 IndexedDB store：
 
 ```text
 __couple-board-state__        → CoupleBoardGame
-__couple-board-preferences__  → CoupleBoardPreferences
+__couple-board-preferences__  → CoupleBoardPreferences V2
+__couple-board-archive__      → CoupleBoardArchive V1
 ```
 
 它们都复用 `appCustomizations`，因此自然进入现有 Backup V12。
@@ -153,12 +156,12 @@ HomeLayout revision: 13（不变）
 
 ## 测试定义
 
-V1.1 扩充游戏 Runtime，并新增 Memory Prompt Service 测试，静态定义为：
+V1.2 扩充内容中心、事件牌组、归档与 Evidence V2 回归，静态定义为：
 
 ```text
 Test files: 67
-it/test:    580
-Couple Board related: 30
+it/test:    597
+Couple Board related: 46
 ```
 
 当前容器 npm registry 无法解析，因此没有把语法/静态检查冒充完整 Vitest。正式发布以 Windows / CI 两轮 `npm run verify` 为准。

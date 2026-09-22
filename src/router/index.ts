@@ -7,30 +7,31 @@ import LockScreen from '../views/LockScreen.vue'
 import HomeScreen from '../views/HomeScreen.vue'
 import ChatList from '../views/ChatList.vue'
 import ChatRoom from '../views/ChatRoom.vue'
-import ContactsView from '../views/ContactsView.vue'
-import CharacterCreate from '../views/CharacterCreate.vue'
-import CharacterDetailView from '../views/CharacterDetailView.vue'
-import CharacterEditView from '../views/CharacterEditView.vue'
-import CharacterCardEditorView from '../views/CharacterCardEditorView.vue'
-import UserProfileView from '../views/UserProfileView.vue'
-import CompanionMeView from '../views/CompanionMeView.vue'
-import CompanionDiscoverView from '../views/CompanionDiscoverView.vue'
-import CompanionWalletView from '../views/CompanionWalletView.vue'
-import CompanionSpaceSettingsView from '../views/CompanionSpaceSettingsView.vue'
-import CompanionSpacePeopleView from '../views/CompanionSpacePeopleView.vue'
-import DataBackupView from '../views/DataBackupView.vue'
-import SettingsView from '../views/SettingsView.vue'
-import AppearanceSettingsView from '../views/AppearanceSettingsView.vue'
-import ModelSettingsView from '../views/ModelSettingsView.vue'
-import PersonaManagerView from '../views/PersonaManagerView.vue'
-import LorebookView from '../views/LorebookView.vue'
-import WorldCenterView from '../views/WorldCenterView.vue'
-import PromptDebugView from '../views/PromptDebugView.vue'
-import MemoryManagerView from '../views/MemoryManagerView.vue'
-import MemoryCenterView from '../views/MemoryCenterView.vue'
-import PlaceholderApp from '../views/PlaceholderApp.vue'
+// V1.2: only the lock/home/chat shells stay eager. Editors, settings and secondary apps are route chunks.
+const ContactsView = () => import('../views/ContactsView.vue')
+const CharacterCreate = () => import('../views/CharacterCreate.vue')
+const CharacterDetailView = () => import('../views/CharacterDetailView.vue')
+const CharacterEditView = () => import('../views/CharacterEditView.vue')
+const CharacterCardEditorView = () => import('../views/CharacterCardEditorView.vue')
+const UserProfileView = () => import('../views/UserProfileView.vue')
+const CompanionMeView = () => import('../views/CompanionMeView.vue')
+const CompanionDiscoverView = () => import('../views/CompanionDiscoverView.vue')
+const CompanionWalletView = () => import('../views/CompanionWalletView.vue')
+const CompanionSpaceSettingsView = () => import('../views/CompanionSpaceSettingsView.vue')
+const CompanionSpacePeopleView = () => import('../views/CompanionSpacePeopleView.vue')
+const DataBackupView = () => import('../views/DataBackupView.vue')
+const SettingsView = () => import('../views/SettingsView.vue')
+const AppearanceSettingsView = () => import('../views/AppearanceSettingsView.vue')
+const ModelSettingsView = () => import('../views/ModelSettingsView.vue')
+const PersonaManagerView = () => import('../views/PersonaManagerView.vue')
+const LorebookView = () => import('../views/LorebookView.vue')
+const WorldCenterView = () => import('../views/WorldCenterView.vue')
+const PromptDebugView = () => import('../views/PromptDebugView.vue')
+const MemoryManagerView = () => import('../views/MemoryManagerView.vue')
+const MemoryCenterView = () => import('../views/MemoryCenterView.vue')
+const PlaceholderApp = () => import('../views/PlaceholderApp.vue')
 
-// 新增的重交互 App 按路由懒加载，避免朋友圈/音乐/海龟汤全部挤进首屏主包。
+// 重交互 App 按路由懒加载，避免朋友圈/音乐/海龟汤/飞行棋挤进首屏主包。
 const MomentsView = () => import('../views/MomentsView.vue')
 const MomentNotificationsView = () => import('../views/MomentNotificationsView.vue')
 const MomentSettingsView = () => import('../views/MomentSettingsView.vue')
@@ -40,6 +41,7 @@ const TurtleSoupHostView = () => import('../views/TurtleSoupHostView.vue')
 const MusicAppView = () => import('../views/MusicAppView.vue')
 const SharedTimelineView = () => import('../views/SharedTimelineView.vue')
 const CoupleBoardView = () => import('../views/CoupleBoardView.vue')
+const CoupleBoardLibraryView = () => import('../views/CoupleBoardLibraryView.vue')
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -183,6 +185,10 @@ export const router = createRouter({
     {
       path: '/app/时光',
       component: SharedTimelineView
+    },
+    {
+      path: '/app/心跳飞行棋/library',
+      component: CoupleBoardLibraryView
     },
     {
       path: '/app/心跳飞行棋',

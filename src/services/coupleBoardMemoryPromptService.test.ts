@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { CharacterMemory } from '../types/domain'
+import type { SharedTimelineItem } from './sharedTimelineService'
 import { createCoupleBoardGame, rollCoupleBoard, type CoupleBoardSettings } from './coupleBoardGameService'
 import {
   buildCoupleBoardMemoryPromptMessages,
+  mergeCoupleBoardEvidence,
   parseCoupleBoardMemoryPrompt,
   selectCoupleBoardMemoryEvidence,
+  selectCoupleBoardTimelineEvidence,
   type CoupleBoardMemoryEvidence
 } from './coupleBoardMemoryPromptService'
 
@@ -126,4 +129,54 @@ describe('coupleBoardMemoryPromptService', () => {
     expect(prompt?.text).not.toContain('<b>')
     expect(prompt?.text).toContain('看海')
   })
+
+  it('selects only factual Shared Timeline evidence for the same character', () => {
+    const base: SharedTimelineItem = {
+      id: 'timeline-1', worldId: 'world-1', sourceKind: 'state', sourceId: 'state-1',
+      characterId: 'char-1', characterName: '阿澈', title: '一起完成一件事', summary: '我们一起完成了搬家。',
+      occurredAt: '2026-09-01T00:00:00.000Z', sourceLabel: '状态', sourceRoute: '', importance: 4,
+      relationshipSignal: 'shared-event', starred: true, hidden: false
+    }
+    const rows = selectCoupleBoardTimelineEvidence([
+      base,
+      { ...base, id: 'promise', sourceId: 'promise-1', relationshipSignal: 'promise', summary: '以后一起旅行' },
+      { ...base, id: 'other', sourceId: 'other-1', characterId: 'char-2' },
+      { ...base, id: 'hidden', sourceId: 'hidden-1', hidden: true }
+    ], 'char-1')
+    expect(rows.map(row => row.id)).toEqual(['timeline:timeline-1'])
+    expect(rows[0].source).toBe('timeline')
+  })
+
+  it('does not duplicate a timeline row whose source memory is already in the memory evidence set', () => {
+    const item: SharedTimelineItem = {
+      id: 'timeline-memory', worldId: 'world-1', sourceKind: 'memory', sourceId: 'mem-1',
+      characterId: 'char-1', characterName: '阿澈', title: '看海', summary: '一起看海',
+      occurredAt: '2026-08-01T00:00:00.000Z', sourceLabel: '记忆', sourceRoute: '', importance: 3,
+      starred: false, hidden: false
+    }
+    expect(selectCoupleBoardTimelineEvidence([item], 'char-1', 6, new Set(['mem-1']))).toEqual([])
+  })
+
+  it('merges memory and timeline evidence with stable ids and a hard limit', () => {
+    const merged = mergeCoupleBoardEvidence(
+      [{ ...evidence[0], source: 'memory' }],
+      [{ id: 'timeline:e1', text: '一起看过日落', layer: 'shared-timeline', importance: 3, updatedAt: '2026-09-01', source: 'timeline' }],
+      2
+    )
+    expect(merged.map(row => row.id)).toEqual(['mem-1', 'timeline:e1'])
+  })
+
+  it('keeps all verified evidence ids while only mirroring actual memories into the legacy memoryEvidenceIds field', () => {
+    const mixed: CoupleBoardMemoryEvidence[] = [
+      { ...evidence[0], source: 'memory' },
+      { id: 'timeline:e1', text: '一起看过日落', layer: 'shared-timeline', importance: 3, updatedAt: '2026-09-01', source: 'timeline' }
+    ]
+    const prompt = parseCoupleBoardMemoryPrompt(
+      '{"type":"truth","text":"那次共同经历里，哪个瞬间你还记得最清楚？","evidenceIds":["mem-1","timeline:e1"]}',
+      pendingGame(), mixed
+    )
+    expect(prompt?.evidenceIds).toEqual(['mem-1', 'timeline:e1'])
+    expect(prompt?.memoryEvidenceIds).toEqual(['mem-1'])
+  })
+
 })

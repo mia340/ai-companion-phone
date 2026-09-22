@@ -1,17 +1,28 @@
 # AI Companion Phone · 当前项目状态
 
 更新于：**2026-09-22**
-当前版本：**V0.5.0-alpha.5.6.0**
+当前版本：**V0.5.0-alpha.5.7.0**
 
 ```text
-App：0.5.0-alpha.5.6.0
+App：0.5.0-alpha.5.7.0
 Launcher：Grid V13（HomeLayout revision 13）
 IndexedDB：V18
 Backup：V12
-测试定义：67 files / 580 it-test declarations
+测试定义：67 files / 597 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+## 0. 本轮 alpha.5.7.0 重点 · 心跳飞行棋 V1.2
+
+- **情侣内容中心**：独立管理自定义题、系统题启停、自定义事件卡和系统事件启停；支持搜索/筛选、编辑删除和 JSON 导入导出。
+- **事件牌组可编程**：自定义卡支持心动变化、交换位置与再掷一次；开局冻结牌组，局中编辑不改变正在进行的游戏。
+- **情侣回忆册**：完成棋局自动归档最近 24 局，记录真实局内统计与 Heartbeat Highlights；只保存游戏记录，不自动提升为角色 Memory。
+- **AI 出题 V2**：候选 evidence 扩展为 Memory + Shared Timeline；只接收当前角色的 memory/shared-event 事实投影，promise/goal/story 继续硬排除，模型返回 id 必须命中允许集合。
+- **主动分享结算**：聊天模式可由用户主动把本局高光写入 ChatRoom 草稿；仍不自动发送，也不替用户/角色补写经历。
+- **性能债**：编辑器、设置、备份、Memory 等次级路由进一步 lazy-load；首屏仅保留 Lock/Home/Chat shell eager。
+- **Schema 不变**：IndexedDB V18、Backup V12、Launcher Grid V13 / HomeLayout revision 13；V2 偏好与回忆册继续复用 `appCustomizations`。
+- **测试定义**：67 files / 597 declarations，Couple Board 直接相关 46 条。
 
 ## 0. 本轮 alpha.5.6.0 重点 · 心跳飞行棋 V1.1
 

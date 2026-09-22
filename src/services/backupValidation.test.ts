@@ -43,6 +43,27 @@ describe('Backup Zod + restore preflight', () => {
     expect(parsed.data.appCustomizations[0].coupleBoardPreferences).toEqual(backup.data.appCustomizations[0].coupleBoardPreferences)
   })
 
+  it('保留心跳飞行棋 V1.2 题库、事件卡和回忆册 passthrough 字段', () => {
+    const backup = minimalBackup()
+    backup.data.appCustomizations.push({
+      id: 'w1:__couple-board-preferences__', worldId: 'w1', appKey: '__couple-board-preferences__',
+      coupleBoardPreferences: {
+        version: 2, customPrompts: [],
+        customEventCards: [{ id: 'custom-event-1', title: '再来一次', text: '当前玩家再掷一次', emoji: '🎲', heartDeltaActor: 0, heartDeltaOther: 0, source: 'custom', extraTurn: true }],
+        disabledBuiltinPromptIds: ['t1-01'], disabledBuiltinEventCardIds: ['event-sync'], updatedAt: '2026-09-22T00:00:00.000Z'
+      },
+      updatedAt: '2026-09-22T00:00:00.000Z'
+    })
+    backup.data.appCustomizations.push({
+      id: 'w1:__couple-board-archive__', worldId: 'w1', appKey: '__couple-board-archive__',
+      coupleBoardArchive: { version: 1, entries: [], updatedAt: '2026-09-22T00:00:00.000Z' },
+      updatedAt: '2026-09-22T00:00:00.000Z'
+    })
+    const parsed = parseBackupEnvelope(backup)
+    expect(parsed.data.appCustomizations[0].coupleBoardPreferences).toEqual(backup.data.appCustomizations[0].coupleBoardPreferences)
+    expect(parsed.data.appCustomizations[1].coupleBoardArchive).toEqual(backup.data.appCustomizations[1].coupleBoardArchive)
+  })
+
   it('恢复前阻止悬空会话/消息引用，避免清库后才发现坏备份', () => {
     const backup = minimalBackup()
     backup.data.messages.push({ id: 'm1', worldId: 'w1', conversationId: 'missing', senderId: 'user', content: 'x', type: 'text', status: 'delivered', createdAt: '' })
