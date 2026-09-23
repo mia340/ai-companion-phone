@@ -1,3 +1,13 @@
+## 2026-09-23 · V0.5.0-alpha.5.8.0 · 心跳飞行棋 V2.0 Alpha
+
+- 把 Couple Board 从“骰子 + 题卡”改成 Interaction-first：新增持久化 Interaction Ledger，单人题只是决定先手，双方都必须真实参与后才能完成。
+- 新增 `coupleBoardInteractionService.ts`：按题目/最近互动检索当前角色 Memory，加载 Shared Timeline / Conversation State，组合完整角色卡约束后生成角色回复；任何过去共同经历都要求 evidence id 命中白名单。
+- 新增 `coupleBoardMemoryBridge.ts`：每段完成互动先保存真实共同对话，再尝试抽取稳定记忆；假设、幻想、临时反应不进入长期事实。
+- 新增 `coupleBoardMapService.ts` 与 `CoupleBoardPixelSprite.vue`：30 个约会地点保持旧 0..29 规则索引，像素小人按骰子步数逐格移动；同时提供浪漫地图表现。
+- CoupleBoardView 重做为 setup + date map + live interaction 舞台；角色回合自动掷骰，当前 Interaction 可随刷新/续局恢复。
+- 新增 3 个 service test 文件并扩充 game service visual-mode 兼容测试，静态定义 70 files / 612 declarations。
+- 数据 schema 不升级；新增 ledger 继续存 `appCustomizations`。当前容器 npm registry 获取依赖超时，完整 verify 交给 Windows / CI。
+
 ## 2026-09-22 · V0.5.0-alpha.5.7.0 · 心跳飞行棋 V1.2
 
 - `CoupleBoardPreferences` 从 V1 向后兼容迁移到 V2：新增自定义事件卡、系统题/系统事件启停；已有 V1 自定义题无损迁移。

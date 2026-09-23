@@ -134,8 +134,9 @@ export function buildCoupleBoardMemoryPromptMessages(
   const intensityRules: Record<number, string> = {
     1: '纯爱：温柔、轻松、日常，不制造压力。',
     2: '暧昧：可以心动和调侃，但不越界。',
-    3: '亲密：可以谈边界、依恋和亲密偏好，但现实动作必须有明确同意。',
-    4: '成人：双方已由 Runtime 完成年龄与确认门禁；仍只做非露骨、同意优先的成人亲密话题。'
+    3: '亲密：可以直接谈接吻、拥抱、身体靠近与亲密偏好；现实动作仍要把选择权留给参与者。',
+    4: '成人：双方已由 Runtime 完成年龄与确认门禁；可以直接谈欲望、性爱、前戏、主动/被动、频率与成人偏好，但不要写成具体性行为步骤。',
+    5: '私房：双方已由 Runtime 完成年龄与确认门禁；可以更直接谈床上默契、性偏好、情趣、节奏与想尝试的内容，但不要替任何一方默认同意，也不要生成具体性行为教学。'
   }
   return [
     {
@@ -223,7 +224,7 @@ export function parseCoupleBoardMemoryPrompt(
     intensity: game.settings.intensity,
     modes: [game.settings.mode],
     text,
-    adultOnly: game.settings.intensity === 4,
+    adultOnly: game.settings.intensity >= 4,
     source: 'memory-ai',
     evidenceIds,
     ...(memoryEvidenceIds.length ? { memoryEvidenceIds } : {})

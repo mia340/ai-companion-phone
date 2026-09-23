@@ -120,6 +120,37 @@ async function checkSource() {
     fail('Couple Board must normalize reactive snapshots before persistence and game transitions')
   }
   pass('Couple Board tap/resume/clone regressions are guarded')
+  if (!coupleBoardService.includes('export type CoupleBoardIntensity = 1 | 2 | 3 | 4 | 5') ||
+      !coupleBoardService.includes("private: '私房'") ||
+      !coupleBoardView.includes("value: 5, title: '私房'")) {
+    fail('Couple Board V1.4 must keep the adult-only L5 private tier wired through service and UI')
+  }
+  pass('Couple Board L5 private tier is wired through service and UI')
+
+  const coupleBoardInteraction = await readText('src/services/coupleBoardInteractionService.ts')
+  const coupleBoardMemoryBridge = await readText('src/services/coupleBoardMemoryBridge.ts')
+  const coupleBoardMap = await readText('src/services/coupleBoardMapService.ts')
+  if (!coupleBoardView.includes('COUPLE BOARD · V2.0 ALPHA') ||
+      !coupleBoardView.includes('CoupleBoardPixelSprite') ||
+      !coupleBoardView.includes('syncCoupleBoardInteractionMemory')) {
+    fail('Couple Board V2 immersive UI / pixel sprite / Memory Bridge must stay wired')
+  }
+  if (!coupleBoardInteraction.includes('角色一致性是最高优先级') ||
+      !coupleBoardInteraction.includes('memoryEvidenceIds') ||
+      !coupleBoardInteraction.includes('游戏氛围不能覆盖原角色设定') ||
+      !coupleBoardInteraction.includes('buildCoupleBoardReplyAuditMessages') ||
+      !coupleBoardInteraction.includes('roleConsistencyChecked')) {
+    fail('Couple Board V2 must keep role-card-first, evidence-bound generation and role-continuity audit')
+  }
+  if (!coupleBoardMemoryBridge.includes("layer: 'shared'") ||
+      !coupleBoardMemoryBridge.includes("scope: 'character'") ||
+      !coupleBoardMemoryBridge.includes("kind !== 'stable'")) {
+    fail('Couple Board V2 Memory Bridge must persist real shared interactions and reject hypothetical/transient semantic memories')
+  }
+  if (!coupleBoardMap.includes('COUPLE_BOARD_MAP_STOPS') || !coupleBoardMap.includes("name: '床边'")) {
+    fail('Couple Board V2 themed 30-stop date map is missing')
+  }
+  pass('Couple Board V2 role continuity, memory writeback and themed map are guarded')
 
   const requiredDocs = [
     'docs/部署与更新.md',

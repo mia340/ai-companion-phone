@@ -1,17 +1,51 @@
 # AI Companion Phone · 当前项目状态
 
-更新于：**2026-09-22**
-当前版本：**V0.5.0-alpha.5.7.2**
+更新于：**2026-09-23**
+当前版本：**V0.5.0-alpha.5.8.0**
 
 ```text
-App：0.5.0-alpha.5.7.2
+App：0.5.0-alpha.5.8.0
 Launcher：Grid V13（HomeLayout revision 13）
 IndexedDB：V18
 Backup：V12
-测试定义：67 files / 600 it-test declarations
+测试定义：70 files / 612 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
+
+## 0. 本轮 alpha.5.8.0 重点 · 心跳飞行棋 V2.0 Alpha 沉浸互动重构
+
+- **角色连续性成为主逻辑**：每次角色回应都重建 Character Context，合并角色卡稳定设定、当前 Conversation State、相关长期 Memory 与当前角色 Shared Timeline；游戏强度不能覆盖原人格，不再用“害羞/吃醋/反撩”固定反应池驱动角色。
+- **单人题也变成双方互动**：题目只决定谁先开口。用户回答后角色必须按人设/记忆回应；角色先答时用户也必须回应。双方可以继续多轮自由对话，只有双方都真实说过话才允许结束并推进棋局。
+- **角色可以自然收尾**：AI 返回 `endInteraction` 只表示角色认为当前段落自然收住；玩家仍可点“我还想继续”。游戏不再为了回合速度强行截断情侣互动。
+- **Memory Bridge V1**：完成互动后，先把真实发生过的双方对话保存为 character-scope shared event，再在 AI 可用时提炼最多 4 条稳定偏好/关系信息；hypothetical/transient 内容硬丢弃，避免把题目假设写成现实。游戏新记忆之后可进入普通聊天检索和 Shared Timeline。
+- **Memory evidence + OOC guard**：角色引用既往共同经历时必须返回当前允许的 Memory / `timeline:<id>`；伪造 evidence id 直接拒绝。候选回复随后再走一次 Role Continuity Audit；明显违背角色卡/边界/记忆时自动带理由重生成一次。
+- **角色自己玩**：角色回合自动掷骰；骰子停止后按真实格数逐格移动，再触发地点内容，不需要用户替角色机械点击。
+- **30 地点约会路线**：规则索引仍保持 0..29，但表现层重做成家门口、便利店、公园、夜市、电影院、河边、月光桥、天台、客厅、沙发边、阳台、床边等连续路线。
+- **双视觉模式**：新增“像素约会 / 浪漫地图”。像素模式使用完整 CSS 小人（头/身体/手脚/阴影）在地图上逐格走，不再是头像圆点；视觉模式不改变棋局状态或 Memory。
+- **恢复能力**：互动 ledger 按 gameId 持久化在 `appCustomizations`；刷新/继续上一局时可恢复尚未关闭的当前互动，而不是只恢复棋子位置。
+- **数据层继续克制**：IndexedDB V18、Backup V12、Launcher Grid V13、HomeLayout revision 13、CoupleBoardPreferences V2、CoupleBoardArchive V1 均不升级；新增 CoupleBoard Interaction Ledger V1 复用 `appCustomizations`。
+- **测试定义**：70 files / 612 declarations；当前容器 npm registry 依赖获取未完成，正式 `vitest + vue-tsc + vite build` 仍以 Windows 双门禁为发布事实源。
+
+
+## 0. 本轮 alpha.5.7.4 重点 · 心跳飞行棋 V1.4 题库 V3
+
+- **新增 L5「私房」**：16 真心话 + 16 大冒险，专门覆盖性偏好、床上默契、前戏/节奏、主动与被动、性爱频率、成人情趣和事后陪伴。
+- **L4 再升温**：成人档语言更直接，明确使用欲望、性爱、做爱、床上节奏等成年人日常会说的词，但不写成具体性行为步骤或教学。
+- **大冒险更有身体互动**：L1-L5 的面对面大冒险都提高牵手、靠肩、拥抱、贴近、搂腰、亲吻等现实互动比例；聊天模式仍只抽可远程完成的题。
+- **L4/L5 共用 18+ 门禁**：两档都必须显式确认双方成年；角色年龄明确小于 18 岁时两档都硬阻断。
+- **题库 160 道 / 9 主题**：5 档 × 32 题；新增 `private/私房` 主题，内容中心和自定义题筛选支持 L5。
+- **Schema 不变**：IndexedDB V18、Backup V12、Launcher Grid V13、HomeLayout revision 13 不升级；CoupleBoardPreferences 仍为 V2、Archive 仍为 V1。
+
+
+## 0. 本轮 alpha.5.7.3 重点 · 心跳飞行棋 V1.3 题库 V2
+
+- **128 道题整体重写**：保留 4 档 × 真心话/大冒险各 16 道的稳定结构，但语气改成更日常、更像情侣真的会问的内容，减少“关系问卷感”。
+- **暧昧与成人档更直接**：L2/L3 增加吃醋、穿搭、接吻、拥抱、贴近等真实互动；L4 允许直接谈做爱、前戏、欲望、亲吻偏好和事后陪伴，不再每题重复正式的边界说明。
+- **安全机制留在 Runtime**：18+ 门禁、未成年硬阻断、随时换题/跳过继续保留；物理互动题只在必要位置保留简短的“愿意/方便”提示。
+- **8 个题目主题**：日常、回忆、小闹、暧昧、吃醋、心动、亲密、成人。内容中心直接显示主题。
+- **防连续同味题**：抽题会避开最近 3 个同类型题 id，并优先避开最近 2 个主题；池子不足时自动降级，不会因为防重复把题库抽空。
+- **Schema 不变**：主题字段仅为可选 prompt metadata；IndexedDB V18、Backup V12、Launcher Grid V13、HomeLayout revision 13 均不升级。
 
 ## 0. 本轮 alpha.5.7.2 重点 · 心跳飞行棋 V1.2.2 可玩性热修
 

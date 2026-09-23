@@ -1,13 +1,13 @@
 # AI Companion Phone 文档中心
 
-当前开发线：**V0.5.0-alpha.5.7.2**
+当前开发线：**V0.5.0-alpha.5.8.0**
 
 ```text
-应用：0.5.0-alpha.5.7.2
+应用：0.5.0-alpha.5.8.0
 IndexedDB：V18
 Backup：V12
-测试定义：67 个测试文件 / 600 个 it/test 声明
-当前 UI 主线：Launcher Grid V13 / HomeLayout revision 13（4×6 网格 / insert+reflow / App 文件夹 / Inspector V4）+ 原生 App「时光」「心跳飞行棋」
+测试定义：70 个测试文件 / 612 个 it/test 声明
+当前 UI 主线：Launcher Grid V13 / HomeLayout revision 13（4×6 网格 / insert+reflow / App 文件夹 / Inspector V4）+ 原生 App「时光」「心跳飞行棋 V2」
 ```
 
 这里是项目 Markdown 文档的**唯一保管入口**。项目根目录不再散放逐版本说明；版本交付文档统一在 `docs/releases/`，同类项目研究统一在 `docs/research/`。
@@ -18,7 +18,7 @@ Backup：V12
 
 1. `START_HERE_小白启动指南.md`：第一次启动、Build、常见问题。
 2. `部署与更新.md`：长期通用的 Windows / Git / Build 流程。
-3. `releases/V0.5.0-alpha.5.7.2_部署与更新.md`：当前版本的专项验收步骤。
+3. `releases/V0.5.0-alpha.5.8.0_部署与更新.md`：当前版本的专项验收步骤。
 
 ### 当前开发单一事实源
 
@@ -28,7 +28,7 @@ Backup：V12
 4. `COMMUNITY_RUNTIME.md`：Character Card / WorldBook / Preset / Regex / Community UI 语义。
 5. `SOCIAL_RUNTIME_V2.md`：朋友圈候选、权限、持久活动队列和通知。
 6. `知间产品原则.md`：知间当前信息架构、视觉与数据原则。
-7. `COUPLE_BOARD_V1_2.md`：心跳飞行棋 V1.2 内容中心、事件牌组、回忆册、AI evidence V2 与安全边界。
+7. `COUPLE_BOARD_V2.md`：心跳飞行棋 V2 的角色连续性、Memory Bridge、自由双向互动、像素地图与数据边界。V1/V1.2 文档保留为历史。
 8. `DEVELOPMENT_LOG.md`：最近实际开发记录与决策。
 
 ### 研究 / 参考项目
@@ -67,6 +67,7 @@ docs/
 ├─ SOCIAL_RUNTIME_V2.md
 ├─ 知间产品原则.md
 ├─ START_HERE_小白启动指南.md
+├─ COUPLE_BOARD_V2.md
 ├─ 部署与更新.md
 ├─ DEVELOPMENT_LOG.md
 ├─ CHANGELOG.md

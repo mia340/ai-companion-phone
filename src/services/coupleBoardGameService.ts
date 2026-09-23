@@ -3,11 +3,13 @@ import { db } from '../db/database'
 import { sanitizeNativeAppText } from './appPresentationPolicy'
 import type { AppCustomization } from '../types/domain'
 
-export type CoupleBoardIntensity = 1 | 2 | 3 | 4
+export type CoupleBoardIntensity = 1 | 2 | 3 | 4 | 5
 export type CoupleBoardMode = 'chat' | 'reality'
+export type CoupleBoardVisualMode = 'romantic' | 'pixel'
 export type CoupleBoardPlayerId = 'user' | 'partner'
 export type CoupleBoardPromptType = 'truth' | 'dare'
 export type CoupleBoardPromptSource = 'builtin' | 'custom' | 'memory-ai'
+export type CoupleBoardPromptTheme = 'daily' | 'memory' | 'playful' | 'flirt' | 'jealousy' | 'chemistry' | 'intimacy' | 'adult' | 'private'
 export type CoupleBoardCellType =
   | 'start'
   | 'truth'
@@ -32,6 +34,7 @@ export interface CoupleBoardPrompt {
   intensity: CoupleBoardIntensity
   modes: CoupleBoardMode[]
   text: string
+  theme?: CoupleBoardPromptTheme
   adultOnly?: boolean
   source?: CoupleBoardPromptSource
   memoryEvidenceIds?: string[]
@@ -73,6 +76,8 @@ export interface CoupleBoardSettings {
   intensity: CoupleBoardIntensity
   mode: CoupleBoardMode
   adultConfirmed: boolean
+  /** V2 presentation only; old saves default to romantic in the view. */
+  visualMode?: CoupleBoardVisualMode
 }
 
 export interface CoupleBoardPlayerState {
@@ -191,142 +196,183 @@ export const COUPLE_BOARD_CELLS: CoupleBoardCell[] = BOARD_PATTERN.map((cell, in
 
 const BOTH_MODES: CoupleBoardMode[] = ['chat', 'reality']
 
+export const COUPLE_BOARD_PROMPT_THEME_LABELS: Record<CoupleBoardPromptTheme, string> = {
+  daily: '日常',
+  memory: '回忆',
+  playful: '小闹',
+  flirt: '暧昧',
+  jealousy: '吃醋',
+  chemistry: '心动',
+  intimacy: '亲密',
+  adult: '成人',
+  private: '私房'
+}
+
+export function coupleBoardPromptThemeLabel(prompt: CoupleBoardPrompt) {
+  return prompt.theme ? COUPLE_BOARD_PROMPT_THEME_LABELS[prompt.theme] : '自定义'
+}
+
 export const COUPLE_BOARD_PROMPTS: CoupleBoardPrompt[] = [
-  // L1 · sweet
-  { id: 't1-01', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '第一次觉得 {partner} 很特别，是在什么瞬间？' },
-  { id: 't1-02', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '如果今天只能夸 {partner} 一件事，你最想夸什么？' },
-  { id: 't1-03', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '你最喜欢和 {partner} 一起度过哪一种普通日常？' },
-  { id: 't1-04', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '你希望 {partner} 更经常对你说哪句话？' },
-  { id: 't1-05', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '如果给你们的关系起一个电影名，你会叫什么？' },
-  { id: 't1-06', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '最近一次因为 {partner} 偷偷开心是什么时候？' },
-  { id: 't1-07', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '你觉得自己在 {partner} 面前最可爱的一面是什么？' },
-  { id: 't1-08', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '选一个最想和 {partner} 一起实现的小愿望。' },
-  { id: 't1-09', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '第一次和 {partner} 聊天时，你对 TA 的第一印象是什么？' },
-  { id: 't1-10', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '你最喜欢 {partner} 哪一种照顾人的方式？' },
-  { id: 't1-11', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '如果给你们安排一个没有任务的周末，你最想一起做什么？' },
-  { id: 't1-12', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '最近有什么小事，让你很想认真对 {partner} 说一声谢谢？' },
-  { id: 't1-13', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '你最想和 {partner} 保留哪一个每周都能重复的小仪式？' },
-  { id: 't1-14', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '说一个 {partner} 的口头禅、表情或习惯，让你一想到就会笑。' },
-  { id: 't1-15', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '如果今天要拍一张“我们”的照片，你希望背景在哪里？' },
-  { id: 't1-16', type: 'truth', intensity: 1, modes: BOTH_MODES, text: '你觉得你们最适合一起养成什么轻松的新习惯？' },
-  { id: 'd1-01', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '认真对 {partner} 说一句今天份的喜欢。' },
-  { id: 'd1-02', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '用三个词形容 {partner}，不许想太久。' },
-  { id: 'd1-03', type: 'dare', intensity: 1, modes: ['chat'], text: '发一条只由三个 emoji 组成的“我喜欢你”。' },
-  { id: 'd1-04', type: 'dare', intensity: 1, modes: ['reality'], text: '和 {partner} 碰一下拳，再把手留住三秒。' },
-  { id: 'd1-05', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '给 {partner} 取一个这一局限定的可爱昵称。' },
-  { id: 'd1-06', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '说一句“如果今天很累，我会怎么哄你”。' },
-  { id: 'd1-07', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '把一句普通的“晚安”说得像偶像剧台词。' },
-  { id: 'd1-08', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '让 {partner} 指定一个词，你用它完成一句表白。' },
-  { id: 'd1-09', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '连续说出 {partner} 三个优点，中间不许停超过两秒。' },
-  { id: 'd1-10', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '把 {partner} 比作一种天气，并说一句为什么。' },
-  { id: 'd1-11', type: 'dare', intensity: 1, modes: ['chat'], text: '发一句只有十个字以内的“今天也想和你说话”。' },
-  { id: 'd1-12', type: 'dare', intensity: 1, modes: ['reality'], text: '和 {partner} 一起比一个心，停三秒再放下。' },
-  { id: 'd1-13', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '让 {partner} 从 1 到 5 选一个数字，你就说出同样数量的喜欢理由。' },
-  { id: 'd1-14', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '一起发明一个只属于这一局的暗号，并现场用一次。' },
-  { id: 'd1-15', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '用一句话补全：“和你在一起，我最放松的时候是……”' },
-  { id: 'd1-16', type: 'dare', intensity: 1, modes: BOTH_MODES, text: '选“谢谢 / 想念 / 抱歉”中的一个，对 {partner} 说一句具体的话。' },
-
-  // L2 · flirt
-  { id: 't2-01', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '你最容易因为 {partner} 的哪个小动作心跳加快？' },
-  { id: 't2-02', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '如果可以把一次约会重来，你最想重来哪一种场景？' },
-  { id: 't2-03', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '你最想听 {partner} 用什么称呼叫你？' },
-  { id: 't2-04', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '有没有一件你会吃醋、但平时不太好意思承认的事？' },
-  { id: 't2-05', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '如果今晚只有你和 {partner}，你最想怎么安排两个小时？' },
-  { id: 't2-06', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '说一个你希望 {partner} 更主动一点的瞬间。' },
-  { id: 't2-07', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '你觉得 {partner} 最有吸引力的气质是什么？' },
-  { id: 't2-08', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '如果允许偷看 {partner} 一个想法，你最想知道什么？' },
-  { id: 't2-09', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '什么时候你会特别想听 {partner} 主动说“我在”？' },
-  { id: 't2-10', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '你觉得你们两个人谁更容易先服软？为什么？' },
-  { id: 't2-11', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '有没有一种约会安排，你嘴上说普通，心里其实很期待？' },
-  { id: 't2-12', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '你最喜欢 {partner} 在什么场合只把注意力放在你身上？' },
-  { id: 't2-13', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '如果你突然很想撒娇，你最希望 {partner} 怎么接住你？' },
-  { id: 't2-14', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '说一个你明明很在意、却容易装作无所谓的小瞬间。' },
-  { id: 't2-15', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '哪一种“偏心”会让你觉得甜，而不是有压力？' },
-  { id: 't2-16', type: 'truth', intensity: 2, modes: BOTH_MODES, text: '如果 {partner} 今天只能满足你一个小要求，你会选什么？' },
-  { id: 'd2-01', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '用一句暧昧但不过界的话，让 {partner} 猜猜你在想什么。' },
-  { id: 'd2-02', type: 'dare', intensity: 2, modes: ['chat'], text: '给 {partner} 发一条“只看前半句像在生气，读完却很甜”的消息。' },
-  { id: 'd2-03', type: 'dare', intensity: 2, modes: ['reality'], text: '在双方都舒服的前提下，和 {partner} 对视十秒，谁先笑谁认输。' },
-  { id: 'd2-04', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '说出一个你想被 {partner} 偏爱的具体方式。' },
-  { id: 'd2-05', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '模仿一次 {partner} 最让你心动的语气或说话方式。' },
-  { id: 'd2-06', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '把“我想你”换成一句不能出现“想”字的表达。' },
-  { id: 'd2-07', type: 'dare', intensity: 2, modes: ['reality'], text: '如果双方愿意，给 {partner} 一个至少五秒的拥抱。' },
-  { id: 'd2-08', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '由 {partner} 选“可爱 / 酷 / 黏人”，你用对应风格说一句情话。' },
-  { id: 'd2-09', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '盯着 {partner} 的头像或眼睛，说一句你平时会害羞到不敢说的话。' },
-  { id: 'd2-10', type: 'dare', intensity: 2, modes: ['chat'], text: '发一条“今晚给你一个特权：____”的消息，特权必须轻松、可拒绝。' },
-  { id: 'd2-11', type: 'dare', intensity: 2, modes: ['reality'], text: '让 {partner} 选“牵手 / 靠肩 / 对视”中的一个；双方愿意才做十秒。' },
-  { id: 'd2-12', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '把一句普通的“你在干嘛”改成一条明显更暧昧的问法。' },
-  { id: 'd2-13', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '用“我承认，我有点……”开头，坦白一个关于 {partner} 的心动。' },
-  { id: 'd2-14', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '让 {partner} 选一个昵称，你接下来一回合只能用这个昵称叫 TA。' },
-  { id: 'd2-15', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '说一句带点吃醋但不会控制对方的话，并补上一句你的真实需要。' },
-  { id: 'd2-16', type: 'dare', intensity: 2, modes: BOTH_MODES, text: '各自说一个“我希望你更主动一点”的小场景，只描述自己，不替对方承诺。' },
-
-  // L3 · intimate
-  { id: 't3-01', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '在亲密关系里，你最需要被确认的安全感是什么？' },
-  { id: 't3-02', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '你最喜欢 {partner} 哪个外貌或身体细节？可以只说让你舒服的程度。' },
-  { id: 't3-03', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '有没有一种亲密互动，你希望 {partner} 先询问再主动？' },
-  { id: 't3-04', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '你觉得“被需要”和“被尊重边界”之间最理想的平衡是什么？' },
-  { id: 't3-05', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '你最想和 {partner} 建立哪一种只属于两个人的小习惯？' },
-  { id: 't3-06', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '说一个会让你立刻变得很黏人的情境。' },
-  { id: 't3-07', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '如果 {partner} 想让你更放松，你希望 TA 怎么做？' },
-  { id: 't3-08', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '你认为一段亲密关系里最不能被忽略的边界是什么？' },
-  { id: 't3-09', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '当你情绪很重时，你更希望 {partner} 陪着、抱抱、给空间，还是先问你？' },
-  { id: 't3-10', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '哪一种亲密称呼会让你觉得被珍惜，而不是被冒犯？' },
-  { id: 't3-11', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '如果发生争执，你最希望 {partner} 记住你的哪个“修复方式”？' },
-  { id: 't3-12', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '有没有一种你很喜欢的靠近方式，但需要在特定心情下才舒服？' },
-  { id: 't3-13', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '你最希望 {partner} 怎么确认“现在这样可以吗”？' },
-  { id: 't3-14', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '什么情况下你会需要对方先停下来，而不是继续安慰或追问？' },
-  { id: 't3-15', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '对你来说，“很亲密”更像身体距离、说真话、被理解，还是一起承担？' },
-  { id: 't3-16', type: 'truth', intensity: 3, modes: BOTH_MODES, text: '说一个你愿意让 {partner} 更了解的脆弱面，也说清你希望被怎样对待。' },
-  { id: 'd3-01', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '用一句很近、很私密但仍然尊重边界的话夸 {partner}。' },
-  { id: 'd3-02', type: 'dare', intensity: 3, modes: ['reality'], text: '在双方同意的前提下，让 {partner} 选择“牵手 / 拥抱 / 靠肩”中的一个，保持十秒。' },
-  { id: 'd3-03', type: 'dare', intensity: 3, modes: ['chat'], text: '写一条“如果你现在就在我身边，我会……”的暧昧消息，保留让双方都舒服的边界。' },
-  { id: 'd3-04', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '告诉 {partner} 一个你愿意被 TA 主动靠近的信号，也说清一个停止信号。' },
-  { id: 'd3-05', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '说一句只有非常亲近的人才能听到的软话。' },
-  { id: 'd3-06', type: 'dare', intensity: 3, modes: ['reality'], text: '如果双方愿意，靠近到能听清彼此呼吸的位置，停留五秒后再决定要不要继续。' },
-  { id: 'd3-07', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '让 {partner} 选一个词，你把它变成一句带点挑逗感但不越界的情话。' },
-  { id: 'd3-08', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '交换一个“可以更主动”的许可和一个“今晚不想碰”的边界。' },
-  { id: 'd3-09', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '各自说一句“你这样做我会很安心”，把需要讲具体一点。' },
-  { id: 'd3-10', type: 'dare', intensity: 3, modes: ['chat'], text: '发一句“我现在最想靠近你的方式是____，你可以直接说想不想。”' },
-  { id: 'd3-11', type: 'dare', intensity: 3, modes: ['reality'], text: '先问一句“我可以靠近一点吗？”，只有得到明确同意才往前挪一点。' },
-  { id: 'd3-12', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '用一句话告诉 {partner}：什么样的拒绝方式会让你最容易理解和接受。' },
-  { id: 'd3-13', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '说一个你喜欢的亲密信号，再说一个你希望对方看到就停下来的信号。' },
-  { id: 'd3-14', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '让 {partner} 选“温柔 / 调皮 / 认真”，你用对应语气说一句很近的喜欢。' },
-  { id: 'd3-15', type: 'dare', intensity: 3, modes: ['reality'], text: '如果双方愿意，牵住对方的手十秒；中途任何一方松手都算完成。' },
-  { id: 'd3-16', type: 'dare', intensity: 3, modes: BOTH_MODES, text: '各自说一句“今天我可以接受____，但不想____”，不用解释理由。' },
-
-  // L4 · adult, consent-first, non-explicit
-  { id: 't4-01', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '只在你愿意的范围内，说一个你对成年人亲密关系的幻想主题，不需要描述具体过程。' },
-  { id: 't4-02', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '哪一种被 {partner} 主动靠近的方式最容易让你心动？先说边界，再说偏好。' },
-  { id: 't4-03', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '你最喜欢亲密时对方是温柔、直接、黏人还是带点坏心眼？为什么？' },
-  { id: 't4-04', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '说一个你愿意和 {partner} 讨论、但不会默认同意的成人亲密尝试。' },
-  { id: 't4-05', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '如果今晚的亲密氛围由你设计，你更在意灯光、距离、语言还是节奏？' },
-  { id: 't4-06', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '什么样的确认方式会让你在更亲密的互动里最安心？' },
-  { id: 't4-07', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '有没有一种只适合伴侣之间的称呼或语气，会让你明显脸红？' },
-  { id: 't4-08', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '在成年人亲密互动里，你最看重的三件事是什么？' },
-  { id: 't4-09', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '成年人之间更亲密地靠近前，你最希望对方先确认哪一件事？' },
-  { id: 't4-10', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '你更喜欢把亲密偏好提前聊清楚，还是在当下边问边确认？为什么？' },
-  { id: 't4-11', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '哪一种成人向暧昧表达会让你心动，但仍然觉得很被尊重？' },
-  { id: 't4-12', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '在成年人亲密氛围里，什么情况会让你立刻想慢下来或暂停？' },
-  { id: 't4-13', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '你更在意对方主动前先问、过程中确认，还是结束后照顾感受？可以多选。' },
-  { id: 't4-14', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '如果给“今晚的亲密边界”分成绿灯、黄灯、红灯，你会怎么举一个非具体过程的例子？' },
-  { id: 't4-15', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '哪种成人伴侣之间的语言会让你觉得有吸引力，哪种会让你不舒服？' },
-  { id: 't4-16', type: 'truth', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '对你来说，成年人之间“更进一步”最重要的前提是什么？' },
-  { id: 'd4-01', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '用一句只适合成年伴侣之间的暧昧话逗 {partner}；任何一方不舒服就立即换题。' },
-  { id: 'd4-02', type: 'dare', intensity: 4, modes: ['reality'], adultOnly: true, text: '在双方明确同意的前提下，选择一个更久一点的拥抱或亲吻；任意一方都可以随时停。' },
-  { id: 'd4-03', type: 'dare', intensity: 4, modes: ['chat'], adultOnly: true, text: '写一句成年人之间的私密邀请，但必须同时给对方一个很容易说“不”的出口。' },
-  { id: 'd4-04', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '告诉 {partner}：“今晚我愿意更靠近的程度是……”，并让对方也说自己的范围。' },
-  { id: 'd4-05', type: 'dare', intensity: 4, modes: ['reality'], adultOnly: true, text: '如果双方愿意，让 {partner} 选择一个舒服的亲密接触，并由你问一次“这样可以吗？”。' },
-  { id: 'd4-06', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '说一句带明显心动感的成人情话，但不替对方假设任何同意。' },
-  { id: 'd4-07', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '各自说一个“可以主动一点”的信号和一个“必须停下”的信号。' },
-  { id: 'd4-08', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '让 {partner} 在“更温柔 / 更直接 / 更黏人”里选一个，你用一句话回应对应氛围。' },
-  { id: 'd4-09', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '各自说一句“如果今晚更亲密，我希望你先问我____”，说完不代表已经同意。' },
-  { id: 'd4-10', type: 'dare', intensity: 4, modes: ['chat'], adultOnly: true, text: '写一句成年伴侣间的暧昧邀请，并在结尾明确加上“你不想也完全可以”。' },
-  { id: 'd4-11', type: 'dare', intensity: 4, modes: ['reality'], adultOnly: true, text: '如果双方愿意，选择“更久的拥抱 / 亲吻 / 靠近说悄悄话”之一；先问，再做。' },
-  { id: 'd4-12', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '交换一个今晚的绿灯信号和一个黄灯信号；黄灯出现时必须放慢并再次确认。' },
-  { id: 'd4-13', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '说一句你觉得很有吸引力的成人情话，再问 {partner} 这种风格是否舒服。' },
-  { id: 'd4-14', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '各自用三个词描述“理想的成年人亲密氛围”，只聊氛围，不描述具体过程。' },
-  { id: 'd4-15', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '练习一次明确确认：“这样可以吗？”——对方可以回答“可以 / 慢一点 / 停”。' },
-  { id: 'd4-16', type: 'dare', intensity: 4, modes: BOTH_MODES, adultOnly: true, text: '各自说一句“我现在愿意靠近到____”，范围由本人决定，另一方只负责听。' }
+  { id: 't1-01', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'daily', text: '最近最想和 {partner} 一起吃什么？别想高级餐厅，就说现在真想吃的。' },
+  { id: 't1-02', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'memory', text: '你们最近哪一个很普通的小瞬间，回想起来还会觉得挺甜？' },
+  { id: 't1-03', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'playful', text: '{partner} 哪个小习惯最容易让你想笑，又舍不得吐槽？' },
+  { id: 't1-04', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'memory', text: '如果把你们一次散步、吃饭或闲聊重来一遍，你会选哪次？' },
+  { id: 't1-05', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'flirt', text: '你最喜欢 {partner} 怎么叫你？本名、昵称，还是某个只有你们懂的称呼？' },
+  { id: 't1-06', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'daily', text: '如果明天完全没安排，你最想和 {partner} 怎么懒一天？' },
+  { id: 't1-07', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'playful', text: '你觉得 {partner} 什么时候最像小朋友？' },
+  { id: 't1-08', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'daily', text: '最近有没有什么没什么用、但很想和 {partner} 一起买的小东西？' },
+  { id: 't1-09', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'memory', text: '最近一次发生什么事时，你第一反应是“这个得跟 {partner} 说”？' },
+  { id: 't1-10', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'playful', text: '你们两个谁更会撒娇？举个最近的例子。' },
+  { id: 't1-11', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'daily', text: '{partner} 哪个表情、语气词或表情包，你一看就知道 TA 在想什么？' },
+  { id: 't1-12', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'daily', text: '你最想和 {partner} 固定下来一个什么睡前小习惯？' },
+  { id: 't1-13', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'playful', text: '如果现在只能点一份外卖一起吃，你会点什么？' },
+  { id: 't1-14', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'flirt', text: '如果现在马上见到 {partner}，你第一件想做的事是什么？' },
+  { id: 't1-15', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'daily', text: '你最吃 {partner} 哪一种哄人方式？' },
+  { id: 't1-16', type: 'truth', intensity: 1, modes: BOTH_MODES, theme: 'memory', text: '有哪件小事你希望 {partner} 一直记得，因为你会觉得很甜？' },
+  { id: 'd1-01', type: 'dare', intensity: 1, modes: BOTH_MODES, theme: 'playful', text: "用三个词形容 {partner}，不许想超过五秒。" },
+  { id: 'd1-02', type: 'dare', intensity: 1, modes: BOTH_MODES, theme: 'flirt', text: "给 {partner} 起一个今晚限定的昵称，接下来一回合都这么叫。" },
+  { id: 'd1-03', type: 'dare', intensity: 1, modes: ['reality'], theme: 'intimacy', text: "牵住 {partner} 的手十秒，谁都别先松。" },
+  { id: 'd1-04', type: 'dare', intensity: 1, modes: ['reality'], theme: 'playful', text: "和 {partner} 击个掌，然后顺势把手留在一起五秒。" },
+  { id: 'd1-05', type: 'dare', intensity: 1, modes: BOTH_MODES, theme: 'memory', text: "说一个只有你们俩听得懂的小梗。" },
+  { id: 'd1-06', type: 'dare', intensity: 1, modes: ['reality'], theme: 'daily', text: "靠一下 {partner} 的肩，安静待十秒。" },
+  { id: 'd1-07', type: 'dare', intensity: 1, modes: ['chat'], theme: 'flirt', text: "发一条十个字以内、明显是在想对方的消息。" },
+  { id: 'd1-08', type: 'dare', intensity: 1, modes: ['reality'], theme: 'playful', text: "轻轻摸一下 {partner} 的头或头发，然后说一句“今天挺可爱的”。" },
+  { id: 'd1-09', type: 'dare', intensity: 1, modes: BOTH_MODES, theme: 'daily', text: "给 {partner} 安排一个“今天不用动脑”的小福利。" },
+  { id: 'd1-10', type: 'dare', intensity: 1, modes: ['reality'], theme: 'flirt', text: "抱 {partner} 八秒，松开前再抱紧一下。" },
+  { id: 'd1-11', type: 'dare', intensity: 1, modes: BOTH_MODES, theme: 'memory', text: "各说一件最近让你觉得“还好有你”的小事。" },
+  { id: 'd1-12', type: 'dare', intensity: 1, modes: ['reality'], theme: 'playful', text: "和 {partner} 勾小拇指十秒，随便约定一件很小的事。" },
+  { id: 'd1-13', type: 'dare', intensity: 1, modes: BOTH_MODES, theme: 'flirt', text: "补一句：“我其实最喜欢你____的时候。”" },
+  { id: 'd1-14', type: 'dare', intensity: 1, modes: ['reality'], theme: 'daily', text: "坐近一点，让肩膀轻轻贴着，保持十秒。" },
+  { id: 'd1-15', type: 'dare', intensity: 1, modes: BOTH_MODES, theme: 'playful', text: "让 {partner} 从 1 到 3 选数字，你就说同样数量个 TA 的可爱点。" },
+  { id: 'd1-16', type: 'dare', intensity: 1, modes: ['reality'], theme: 'chemistry', text: "和 {partner} 手掌贴手掌比一下大小，停五秒再放开。" },
+  { id: 't2-01', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'flirt', text: '{partner} 怎么撩你最有效？直接一点、黏一点，还是装没事？' },
+  { id: 't2-02', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'chemistry', text: '你觉得 {partner} 哪种穿搭最戳你？' },
+  { id: 't2-03', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'jealousy', text: '你最容易在哪种小事上吃 {partner} 的醋？' },
+  { id: 't2-04', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'flirt', text: '你更喜欢 {partner} 主动找你，还是故意等你先忍不住？' },
+  { id: 't2-05', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'daily', text: '如果今晚能单独待两个小时，你最想怎么过？' },
+  { id: 't2-06', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'flirt', text: '你最想听 {partner} 在什么时候突然说一句“想你了”？' },
+  { id: 't2-07', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'chemistry', text: '你觉得 {partner} 最好看的地方是哪儿？只能选一个。' },
+  { id: 't2-08', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'playful', text: '你有没有故意晚回过 {partner} 消息，想看看 TA 会不会来找你？' },
+  { id: 't2-09', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'jealousy', text: '如果有人当着你的面夸 {partner} 很有魅力，你第一反应是什么？' },
+  { id: 't2-10', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'flirt', text: '你更喜欢被叫“宝贝”、名字，还是别的？说一个你真的会心动的。' },
+  { id: 't2-11', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'chemistry', text: '如果可以偷亲 {partner} 一下，你第一反应会选额头、脸还是嘴？' },
+  { id: 't2-12', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'daily', text: '你最喜欢几点收到 {partner} 的消息：早上醒来、下班后，还是睡前？' },
+  { id: 't2-13', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'flirt', text: '你什么时候最想让 {partner} 多黏你一会儿？' },
+  { id: 't2-14', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'playful', text: '你们俩谁比较会嘴硬？谁先说“没事”但其实最有事？' },
+  { id: 't2-15', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'chemistry', text: '{partner} 哪个眼神或表情最容易让你心软？' },
+  { id: 't2-16', type: 'truth', intensity: 2, modes: BOTH_MODES, theme: 'flirt', text: '如果 {partner} 现在说“过来”，你希望下一句是什么？' },
+  { id: 'd2-01', type: 'dare', intensity: 2, modes: BOTH_MODES, theme: 'flirt', text: "对 {partner} 说一句明显在撩 TA 的话，不许用“喜欢你”三个字。" },
+  { id: 'd2-02', type: 'dare', intensity: 2, modes: ['chat'], theme: 'flirt', text: "发一句“你再这样我就____了”，空格自己填。" },
+  { id: 'd2-03', type: 'dare', intensity: 2, modes: ['reality'], theme: 'chemistry', text: "和 {partner} 对视十秒，谁先笑谁输。" },
+  { id: 'd2-04', type: 'dare', intensity: 2, modes: ['reality'], theme: 'intimacy', text: "和 {partner} 十指扣住十秒，再决定谁先松手。" },
+  { id: 'd2-05', type: 'dare', intensity: 2, modes: ['reality'], theme: 'chemistry', text: "靠近一点，认真夸 {partner} 一个外貌细节。" },
+  { id: 'd2-06', type: 'dare', intensity: 2, modes: ['chat'], theme: 'flirt', text: "发一条像是随口问、其实很想见 TA 的消息。" },
+  { id: 'd2-07', type: 'dare', intensity: 2, modes: ['reality'], theme: 'intimacy', text: "抱 {partner} 十二秒，中间不说话。" },
+  { id: 'd2-08', type: 'dare', intensity: 2, modes: BOTH_MODES, theme: 'playful', text: "让 {partner} 选“乖一点 / 坏一点 / 黏一点”，你用那个语气说一句话。" },
+  { id: 'd2-09', type: 'dare', intensity: 2, modes: ['reality'], theme: 'flirt', text: "如果都愿意，亲一下 {partner} 的额头或脸颊。" },
+  { id: 'd2-10', type: 'dare', intensity: 2, modes: ['chat'], theme: 'flirt', text: "给 {partner} 发一句“今晚给你一个特权：____”。" },
+  { id: 'd2-11', type: 'dare', intensity: 2, modes: ['reality'], theme: 'intimacy', text: "让 {partner} 在“牵手 / 靠肩 / 抱一下”里选一个，做十五秒。" },
+  { id: 'd2-12', type: 'dare', intensity: 2, modes: ['reality'], theme: 'chemistry', text: "坐到更近的位置，让膝盖或肩轻轻碰着十秒。" },
+  { id: 'd2-13', type: 'dare', intensity: 2, modes: BOTH_MODES, theme: 'chemistry', text: "盯着 {partner} 的眼睛或头像，说一句你平时会害羞不敢说的话。" },
+  { id: 'd2-14', type: 'dare', intensity: 2, modes: ['reality'], theme: 'flirt', text: "轻轻碰一下 {partner} 的脸颊、头发或手，三选一。" },
+  { id: 'd2-15', type: 'dare', intensity: 2, modes: BOTH_MODES, theme: 'jealousy', text: "说一句：“我会吃醋的点其实是____。”" },
+  { id: 'd2-16', type: 'dare', intensity: 2, modes: ['reality'], theme: 'flirt', text: "牵住 {partner} 的手，把 TA 往自己这边轻轻拉近一点。" },
+  { id: 't3-01', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'intimacy', text: '你最喜欢 {partner} 抱你的哪种方式：正面抱、从背后抱，还是把你搂过去？' },
+  { id: 't3-02', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'chemistry', text: '如果要选一个最喜欢被 {partner} 亲的地方，你会选额头、脸、嘴还是颈侧？' },
+  { id: 't3-03', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'intimacy', text: '你更喜欢短短亲一下，还是慢一点、久一点的吻？' },
+  { id: 't3-04', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'chemistry', text: '{partner} 靠得很近的时候，什么最容易让你心跳加快：眼神、声音、味道还是动作？' },
+  { id: 't3-05', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'daily', text: '如果今晚一起睡，你更想抱着睡、牵手睡，还是各睡各的但靠很近？' },
+  { id: 't3-06', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'intimacy', text: '你最喜欢 {partner} 怎么碰你：摸头、牵手、搂腰、抱紧，还是别的？' },
+  { id: 't3-07', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'memory', text: '有没有哪次亲吻、拥抱或靠得很近的瞬间，你偶尔还会想起来？' },
+  { id: 't3-08', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'flirt', text: '如果 {partner} 在你耳边说一句话，你最想听什么？' },
+  { id: 't3-09', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'chemistry', text: '你觉得自己身上哪个地方最希望 {partner} 觉得好看？' },
+  { id: 't3-10', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'intimacy', text: '你最喜欢什么时候和 {partner} 黏在一起：刚见面、要分别、睡前，还是半夜？' },
+  { id: 't3-11', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'flirt', text: '如果 {partner} 把你拉近一点，你更可能装镇定，还是直接顺势靠过去？' },
+  { id: 't3-12', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'playful', text: '你觉得你们两个谁亲人的时候更容易害羞？' },
+  { id: 't3-13', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'intimacy', text: '你最喜欢被 {partner} 从哪里抱住：肩、腰，还是整个人圈住？' },
+  { id: 't3-14', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'chemistry', text: '哪种“很近但还没亲上”的瞬间最撩你？' },
+  { id: 't3-15', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'flirt', text: '如果今晚只能选一种亲密感，你要拥抱、接吻、贴着聊天，还是一起睡到自然醒？' },
+  { id: 't3-16', type: 'truth', intensity: 3, modes: BOTH_MODES, theme: 'intimacy', text: '你最喜欢 {partner} 在亲密的时候叫你什么？' },
+  { id: 'd3-01', type: 'dare', intensity: 3, modes: ['reality'], theme: 'intimacy', text: "和 {partner} 抱十五秒，这次抱紧一点。" },
+  { id: 'd3-02', type: 'dare', intensity: 3, modes: ['reality'], theme: 'chemistry', text: "让 {partner} 选额头、脸或嘴，亲一下。" },
+  { id: 'd3-03', type: 'dare', intensity: 3, modes: ['chat'], theme: 'flirt', text: "发一句：“你现在要是在我旁边，我大概会先____。”" },
+  { id: 'd3-04', type: 'dare', intensity: 3, modes: ['reality'], theme: 'intimacy', text: "坐近一点，让你们的肩或腿贴着，保持十五秒。" },
+  { id: 'd3-05', type: 'dare', intensity: 3, modes: ['reality'], theme: 'flirt', text: "贴近 {partner} 耳边说一句只有 TA 听得到的暧昧话。" },
+  { id: 'd3-06', type: 'dare', intensity: 3, modes: ['reality'], theme: 'chemistry', text: "如果都愿意，和 {partner} 接一个至少八秒的吻。" },
+  { id: 'd3-07', type: 'dare', intensity: 3, modes: BOTH_MODES, theme: 'flirt', text: "让 {partner} 选“温柔 / 直接一点 / 黏人”，你用那个风格说一句想靠近 TA 的话。" },
+  { id: 'd3-08', type: 'dare', intensity: 3, modes: ['reality'], theme: 'intimacy', text: "从背后抱住 {partner} 十秒，或者让 TA 从背后抱你。" },
+  { id: 'd3-09', type: 'dare', intensity: 3, modes: ['reality'], theme: 'chemistry', text: "把手轻轻放在 {partner} 腰侧五秒，再告诉 TA 刚刚哪里最让你心动。" },
+  { id: 'd3-10', type: 'dare', intensity: 3, modes: ['chat'], theme: 'flirt', text: "发一句不带 emoji 的暧昧消息，让 {partner} 一眼就看懂。" },
+  { id: 'd3-11', type: 'dare', intensity: 3, modes: ['reality'], theme: 'intimacy', text: "牵住 {partner} 的手，把 TA 拉到离你更近的位置，停十秒。" },
+  { id: 'd3-12', type: 'dare', intensity: 3, modes: ['reality'], theme: 'playful', text: "让 {partner} 选“亲一下 / 抱紧一点 / 坐得更近”，完成一个。" },
+  { id: 'd3-13', type: 'dare', intensity: 3, modes: BOTH_MODES, theme: 'flirt', text: "说一句：“你别这样看我，不然我会____。”" },
+  { id: 'd3-14', type: 'dare', intensity: 3, modes: ['reality'], theme: 'chemistry', text: "轻轻摸一下 {partner} 的头发、脸颊或后颈，三选一。" },
+  { id: 'd3-15', type: 'dare', intensity: 3, modes: ['reality'], theme: 'intimacy', text: "抱住 {partner}，在 TA 耳边说一句你最想听到的情话。" },
+  { id: 'd3-16', type: 'dare', intensity: 3, modes: ['reality'], theme: 'flirt', text: "如果都愿意，亲 {partner} 一下，再说：“今晚别离我太远。”" },
+  { id: 't4-01', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "如果今晚真的想做爱，你更希望谁先开口？你会怎么说？" },
+  { id: 't4-02', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "你更喜欢慢慢撩到有感觉，还是直接听见 {partner} 说“我现在想要你”？" },
+  { id: 't4-03', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "什么最容易把你的欲望勾起来：接吻、身体贴近、耳边说话，还是对方主动？" },
+  { id: 't4-04', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "前戏对你有多重要？你更吃接吻、触碰、说话还是气氛这一套？" },
+  { id: 't4-05', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'chemistry', adultOnly: true, text: "你最喜欢 {partner} 亲你哪里？不用绕，直接说。" },
+  { id: 't4-06', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "做爱前，你最想听 {partner} 对你说哪一句话？" },
+  { id: 't4-07', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'intimacy', adultOnly: true, text: "做完以后你最想要什么：抱着、聊天、洗澡、吃东西，还是直接睡？" },
+  { id: 't4-08', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "你更喜欢开灯、留一点光，还是关灯？哪种最容易进入状态？" },
+  { id: 't4-09', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "在床上你更喜欢自己主动带节奏，还是让 {partner} 主动一点？" },
+  { id: 't4-10', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "你喜欢性爱更温柔慢一点，还是更直接、更有冲劲一点？" },
+  { id: 't4-11', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'flirt', adultOnly: true, text: "{partner} 穿什么、做什么，最容易让你一下子觉得“今天很危险”？" },
+  { id: 't4-12', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "你更喜欢提前有点预告、慢慢期待，还是临时起意更刺激？" },
+  { id: 't4-13', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "如果只能选一个，你更在意接吻合拍、身体贴得舒服，还是床上节奏合拍？" },
+  { id: 't4-14', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "你理想的性爱频率更像“看感觉”、固定一点，还是想要就直接说？" },
+  { id: 't4-15', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "床上你喜欢对方多说话吗？更想听夸你的、哄你的，还是直接一点的话？" },
+  { id: 't4-16', type: 'truth', intensity: 4, modes: BOTH_MODES, theme: 'intimacy', adultOnly: true, text: "性爱里你最不想省掉哪件事：避孕、确认舒服、结束后抱一会，还是别的？" },
+  { id: 'd4-01', type: 'dare', intensity: 4, modes: BOTH_MODES, theme: 'flirt', adultOnly: true, text: "看着 {partner}，直接说：“我今天真的有点想要你。”" },
+  { id: 'd4-02', type: 'dare', intensity: 4, modes: ['reality'], theme: 'intimacy', adultOnly: true, text: "如果现在方便也都愿意，和 {partner} 接一个十五秒的吻。" },
+  { id: 'd4-03', type: 'dare', intensity: 4, modes: ['chat'], theme: 'adult', adultOnly: true, text: "发一句成年人一看就懂的暧昧消息，不准用 emoji 糊弄过去。" },
+  { id: 'd4-04', type: 'dare', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "直接告诉 {partner}：今晚你最想被怎么亲、亲哪里。" },
+  { id: 'd4-05', type: 'dare', intensity: 4, modes: ['reality'], theme: 'intimacy', adultOnly: true, text: "让 {partner} 选“抱紧 / 搂腰 / 亲久一点”，完成一个。" },
+  { id: 'd4-06', type: 'dare', intensity: 4, modes: ['reality'], theme: 'adult', adultOnly: true, text: "如果都愿意，坐到 {partner} 腿上或让 TA 坐到你腿上，停十秒。" },
+  { id: 'd4-07', type: 'dare', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "用 1 到 10 给你现在对 {partner} 的欲望值打分，再说一句为什么。" },
+  { id: 'd4-08', type: 'dare', intensity: 4, modes: BOTH_MODES, theme: 'flirt', adultOnly: true, text: "让 {partner} 选“温柔一点 / 直接一点 / 坏一点”，你用那个风格撩 TA 一句。" },
+  { id: 'd4-09', type: 'dare', intensity: 4, modes: ['reality'], theme: 'adult', adultOnly: true, text: "贴近 {partner} 耳边，直接说今晚你最想和 TA 做什么。" },
+  { id: 'd4-10', type: 'dare', intensity: 4, modes: ['chat'], theme: 'adult', adultOnly: true, text: "发一句：“你要是在我旁边，我今晚大概不会只想抱你。”" },
+  { id: 'd4-11', type: 'dare', intensity: 4, modes: ['reality'], theme: 'chemistry', adultOnly: true, text: "让 {partner} 从嘴、颈侧、耳边三个位置里选一个，你亲一下。" },
+  { id: 'd4-12', type: 'dare', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "各自说一个性爱里希望对方多做一点的事，再说一个不想碰的点。" },
+  { id: 'd4-13', type: 'dare', intensity: 4, modes: ['reality'], theme: 'intimacy', adultOnly: true, text: "从背后抱住 {partner}，手放在腰上十秒，再亲一下脸或颈侧。" },
+  { id: 'd4-14', type: 'dare', intensity: 4, modes: ['reality'], theme: 'chemistry', adultOnly: true, text: "关掉手机一分钟，贴近一点，只看着对方；想亲就先问一句“可以吗”。" },
+  { id: 'd4-15', type: 'dare', intensity: 4, modes: BOTH_MODES, theme: 'adult', adultOnly: true, text: "说一句你真的会在做爱前对成年伴侣说的话，别写成偶像剧台词。" },
+  { id: 'd4-16', type: 'dare', intensity: 4, modes: ['reality'], theme: 'adult', adultOnly: true, text: "如果都愿意，抱着 {partner} 接一个慢一点的吻，停下后各说一句“还想继续什么”。" },
+  { id: 't5-01', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "说真的，你理想的性爱频率大概是多少？如果你们想要的频率不一样，你更希望怎么协调？" },
+  { id: 't5-02', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "前戏你更喜欢慢慢来，还是很快进入正题？大概什么节奏最舒服？" },
+  { id: 't5-03', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "床上你更喜欢谁主导？是固定一点，还是看当天谁更有感觉？" },
+  { id: 't5-04', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "你更喜欢温柔、慢一点的性爱，还是更直接、更激烈一点？" },
+  { id: 't5-05', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "接吻时你最喜欢哪种感觉：轻一点、久一点、主动一点，还是被对方按住节奏？" },
+  { id: 't5-06', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "床上你喜欢安静一点，还是喜欢对方说话？你最想听哪类话？" },
+  { id: 't5-07', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "你有没有特别吃的一种“被需要感”？比如对方主动抱你、拉你过去，或者直接说想要你。" },
+  { id: 't5-08', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "你什么时候最容易有欲望：早上、洗完澡、睡前、久别重逢，还是完全看感觉？" },
+  { id: 't5-09', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "有没有一种情趣你愿意和 {partner} 聊聊：角色扮演、蒙眼、情趣穿搭、成人玩具，还是别的？" },
+  { id: 't5-10', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "你更喜欢性爱有一点计划和仪式感，还是临时起意更带劲？" },
+  { id: 't5-11', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "你最希望 {partner} 在床上更主动问你的是什么：舒服吗、想怎么来、要不要慢一点，还是别的？" },
+  { id: 't5-12', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "如果你们床上节奏不太一样，你更希望直接说，还是用动作和反应让对方知道？" },
+  { id: 't5-13', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "你更在意自己舒服、对方舒服，还是两个人都很投入的同步感？为什么？" },
+  { id: 't5-14', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "有没有一种你喜欢、但平时不太会主动提的亲密偏好？可以只说到你舒服的程度。" },
+  { id: 't5-15', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "做完以后你更想黏着一会、聊几句、洗澡，还是各自安静一下？" },
+  { id: 't5-16', type: 'truth', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "床上默契这件事，你觉得你们现在最合拍的是哪一点，最想继续磨合的又是哪一点？" },
+  { id: 'd5-01', type: 'dare', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "直接告诉 {partner}：床上你最希望 TA 更主动的一件事是什么。" },
+  { id: 'd5-02', type: 'dare', intensity: 5, modes: ['reality'], theme: 'private', adultOnly: true, text: "如果都愿意，坐到 {partner} 腿上面对 TA 十秒，只看着对方。" },
+  { id: 'd5-03', type: 'dare', intensity: 5, modes: ['reality'], theme: 'private', adultOnly: true, text: "和 {partner} 接一个二十秒的吻，中间谁想停都可以直接停。" },
+  { id: 'd5-04', type: 'dare', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "各说一个“我在床上其实很吃这一套”的偏好，越具体越好，但不用现场做。" },
+  { id: 'd5-05', type: 'dare', intensity: 5, modes: ['reality'], theme: 'private', adultOnly: true, text: "从背后抱住 {partner}，搂着腰，在耳边说一句“今晚我想你怎么对我”。" },
+  { id: 'd5-06', type: 'dare', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "让 {partner} 在“更温柔 / 更主动 / 更慢一点 / 更大胆一点”里选一个，你也选一个。" },
+  { id: 'd5-07', type: 'dare', intensity: 5, modes: ['reality'], theme: 'private', adultOnly: true, text: "如果都愿意，让 {partner} 选嘴、颈侧或锁骨附近，你亲一下。" },
+  { id: 'd5-08', type: 'dare', intensity: 5, modes: ['chat'], theme: 'private', adultOnly: true, text: "发一句你真的可能在深夜发给 {partner} 的成人暧昧消息，别写得像文案。" },
+  { id: 'd5-09', type: 'dare', intensity: 5, modes: ['reality'], theme: 'private', adultOnly: true, text: "把手放在 {partner} 的腰或背上，把 TA 轻轻拉近，保持十秒。" },
+  { id: 'd5-10', type: 'dare', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "各自说一个想尝试的情趣，再给它打“现在就能聊 / 以后再聊 / 没兴趣”三选一。" },
+  { id: 'd5-11', type: 'dare', intensity: 5, modes: ['reality'], theme: 'private', adultOnly: true, text: "如果都愿意，抱着 {partner} 亲一下颈侧，再停下来问 TA 还想不想继续。" },
+  { id: 'd5-12', type: 'dare', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "直接说一句：“我做爱时最喜欢你____。”空格自己填。" },
+  { id: 'd5-13', type: 'dare', intensity: 5, modes: ['reality'], theme: 'private', adultOnly: true, text: "贴到 {partner} 耳边，用一句话说清楚你现在最想被怎么亲。" },
+  { id: 'd5-14', type: 'dare', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "各自说一个床上“绝对加分”的点和一个“马上没感觉”的点。" },
+  { id: 'd5-15', type: 'dare', intensity: 5, modes: ['reality'], theme: 'private', adultOnly: true, text: "如果都愿意，关掉屏幕，抱着接吻十五秒；结束后各用一个词形容刚才的感觉。" },
+  { id: 'd5-16', type: 'dare', intensity: 5, modes: BOTH_MODES, theme: 'private', adultOnly: true, text: "用一句最直接的话告诉 {partner}：今晚你的状态是“只想抱 / 想亲 / 想做爱 / 看感觉”，选一个。" },
 ]
 
 export const COUPLE_BOARD_EVENT_CARDS: CoupleBoardEventCard[] = [
@@ -341,9 +387,10 @@ export const COUPLE_BOARD_EVENT_CARDS: CoupleBoardEventCard[] = [
 const promptSchema = z.object({
   id: z.string().min(1).max(120),
   type: z.union([z.literal('truth'), z.literal('dare')]),
-  intensity: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  intensity: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
   modes: z.array(z.union([z.literal('chat'), z.literal('reality')])).min(1).max(2),
   text: z.string().min(1).max(240),
+  theme: z.union([z.literal('daily'), z.literal('memory'), z.literal('playful'), z.literal('flirt'), z.literal('jealousy'), z.literal('chemistry'), z.literal('intimacy'), z.literal('adult'), z.literal('private')]).optional(),
   adultOnly: z.boolean().optional(),
   source: z.union([z.literal('builtin'), z.literal('custom'), z.literal('memory-ai')]).optional(),
   memoryEvidenceIds: z.array(z.string().min(1)).max(12).optional(),
@@ -367,9 +414,10 @@ const settingsSchema = z.object({
   characterName: z.string().min(1).max(80),
   characterAvatar: z.string().optional(),
   characterAge: z.number().finite().positive().optional(),
-  intensity: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  intensity: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
   mode: z.union([z.literal('chat'), z.literal('reality')]),
-  adultConfirmed: z.boolean()
+  adultConfirmed: z.boolean(),
+  visualMode: z.union([z.literal('romantic'), z.literal('pixel')]).optional()
 })
 
 const playerSchema = z.object({
@@ -466,7 +514,7 @@ export interface CoupleBoardArchive {
 const archiveEntrySchema: z.ZodType<CoupleBoardArchiveEntry> = z.object({
   id: z.string(), gameId: z.string(), characterId: z.string(), characterName: z.string(),
   mode: z.union([z.literal('chat'), z.literal('reality')]),
-  intensity: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  intensity: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
   winner: z.union([z.literal('user'), z.literal('partner')]).optional(),
   totalHearts: z.number().int().min(0), completed: z.number().int().min(0), skipped: z.number().int().min(0),
   eventCount: z.number().int().min(0), evidencePromptCount: z.number().int().min(0), turnCount: z.number().int().min(0),
@@ -534,7 +582,7 @@ function normalizeSessionPrompt(prompt: CoupleBoardPrompt): CoupleBoardPrompt | 
     ...parsed.data,
     modes: uniqueModes(parsed.data.modes),
     text,
-    adultOnly: parsed.data.adultOnly || parsed.data.intensity === 4,
+    adultOnly: parsed.data.adultOnly || parsed.data.intensity >= 4,
     ...(parsed.data.evidenceIds?.length ? { evidenceIds: [...new Set(parsed.data.evidenceIds)].slice(0, 16) } : {}),
     ...(parsed.data.memoryEvidenceIds?.length ? { memoryEvidenceIds: [...new Set(parsed.data.memoryEvidenceIds)].slice(0, 12) } : {})
   }
@@ -564,12 +612,12 @@ function uniqueKnownIds(value: readonly string[], known: ReadonlySet<string>, ma
 }
 
 export function validateCoupleBoardAdultMode(settings: CoupleBoardSettings): string | undefined {
-  if (settings.intensity !== 4) return undefined
+  if (settings.intensity < 4) return undefined
   if (typeof settings.characterAge === 'number' && settings.characterAge < 18) {
-    return '成人模式不能用于年龄明确小于 18 岁的角色。'
+    return '成人/私房模式不能用于年龄明确小于 18 岁的角色。'
   }
   if (!settings.adultConfirmed) {
-    return '开启 18+ 模式前，需要确认双方均为成年人并同意成人向题目。'
+    return '开启 L4/L5 前，需要确认双方均为成年人并同意成人向题目。'
   }
   return undefined
 }
@@ -586,7 +634,7 @@ export function createCoupleBoardCustomPrompt(
     intensity: draft.intensity,
     modes: uniqueModes(draft.modes),
     text,
-    adultOnly: draft.intensity === 4,
+    adultOnly: draft.intensity >= 4,
     source: 'custom'
   }
 }
@@ -604,7 +652,7 @@ export function updateCoupleBoardCustomPrompt(
     intensity: draft.intensity,
     modes: uniqueModes(draft.modes),
     text,
-    adultOnly: draft.intensity === 4,
+    adultOnly: draft.intensity >= 4,
     source: 'custom'
   }
 }
@@ -829,7 +877,7 @@ export function promptsFor(
     prompt.type === type &&
     prompt.intensity <= intensity &&
     prompt.modes.includes(mode) &&
-    (!prompt.adultOnly || intensity === 4)
+    (!prompt.adultOnly || intensity >= 4)
   )
 }
 
@@ -839,7 +887,7 @@ function sessionPromptPool(game: CoupleBoardGame, type: CoupleBoardPromptType) {
     prompt.type === type &&
     prompt.intensity <= game.settings.intensity &&
     prompt.modes.includes(game.settings.mode) &&
-    (!prompt.adultOnly || game.settings.intensity === 4)
+    (!prompt.adultOnly || game.settings.intensity >= 4)
   )
 }
 
@@ -865,6 +913,20 @@ export function drawCoupleBoardPrompt(
   return pool[Math.floor(clampRandom(random) * pool.length)]
 }
 
+function recentPromptVariety(game: CoupleBoardGame, type: CoupleBoardPromptType) {
+  const ids: string[] = []
+  const themes: CoupleBoardPromptTheme[] = []
+  for (const entry of [...game.history].reverse()) {
+    if (!entry.promptId) continue
+    const prompt = getCoupleBoardGamePrompt(game, entry.promptId)
+    if (!prompt || prompt.type !== type) continue
+    ids.push(prompt.id)
+    if (prompt.theme && !themes.includes(prompt.theme)) themes.push(prompt.theme)
+    if (ids.length >= 3) break
+  }
+  return { ids: new Set(ids), themes: new Set(themes.slice(0, 2)) }
+}
+
 export function drawCoupleBoardGamePrompt(
   game: CoupleBoardGame,
   type: CoupleBoardPromptType,
@@ -872,9 +934,17 @@ export function drawCoupleBoardGamePrompt(
   excludeId?: string
 ): CoupleBoardPrompt {
   const candidates = promptsForGame(game, type)
-  const withoutExcluded = excludeId ? candidates.filter(prompt => prompt.id !== excludeId) : candidates
-  const pool = withoutExcluded.length ? withoutExcluded : candidates
-  if (!pool.length) throw new Error('当前模式没有可用题目。')
+  if (!candidates.length) throw new Error('当前模式没有可用题目。')
+
+  const recent = recentPromptVariety(game, type)
+  let pool = candidates.filter(prompt =>
+    prompt.id !== excludeId &&
+    !recent.ids.has(prompt.id) &&
+    (!prompt.theme || !recent.themes.has(prompt.theme))
+  )
+  if (!pool.length) pool = candidates.filter(prompt => prompt.id !== excludeId && !recent.ids.has(prompt.id))
+  if (!pool.length) pool = candidates.filter(prompt => prompt.id !== excludeId)
+  if (!pool.length) pool = candidates
   return pool[Math.floor(clampRandom(random) * pool.length)]
 }
 
@@ -1012,7 +1082,7 @@ export function rollCoupleBoard(
     if (promptType) {
       const pool = promptsForGame(next, promptType)
       if (pool.length) {
-        const prompt = pool[Math.floor(clampRandom(random) * pool.length)]
+        const prompt = drawCoupleBoardGamePrompt(next, promptType, random)
         entry.promptId = prompt.id
         next.pending = {
           actor,

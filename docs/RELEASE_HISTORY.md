@@ -1,3 +1,17 @@
+## V0.5.0-alpha.5.8.0 · Couple Board V2.0 Alpha immersive interaction
+
+心跳飞行棋第一次把“角色是谁、角色记得什么、这一局之后又记住什么”放在棋盘规则之上。角色每次回应都从角色卡、当前会话状态、相关长期 Memory 与 Shared Timeline 建立上下文，不再套通用恋爱反应模板；引用过去共同经历时必须有合法 evidence id。单人题只决定谁先开始，Interaction Ledger 允许双方围绕一个问题持续多轮，角色可自然收尾，玩家也可以继续。
+
+完成的真实互动通过 Memory Bridge 写回长期 Memory：真实对话作为 shared event 持久化，稳定偏好由 AI 在严格的 stable/hypothetical/transient 分类后提炼。视觉层同时重做为 30 地点约会路线，并加入角色自动掷骰与像素小人逐格行走；旧 0..29 索引与 V18 数据层保持兼容。
+
+## V0.5.0-alpha.5.7.4 · Couple Board V1.4 question bank V3
+
+心跳飞行棋从 4 档扩为 5 档：新增 L5「私房」覆盖性偏好、床上默契、成人情趣、节奏与事后陪伴；L4 也改得更直接。面对面大冒险在每个强度都提高身体接触比例，并继续由模式筛选避免聊天局抽到必须现实完成的动作。L4/L5 统一走现有 18+ 确认与未成年硬阻断；数据库、Backup 与 Launcher revision 均不升级。
+
+## V0.5.0-alpha.5.7.3 · Couple Board V1.3 question bank V2
+
+在不改变棋局/数据库 schema 的前提下重做整套 128 道系统题：从偏正式的关系沟通问卷改成更日常、更暧昧、成人档更直接的情侣游戏语气。每题加入轻量主题 metadata，Runtime 抽题会避开近期重复 id 与主题；18+ 门禁、未成年阻断、换题与跳过能力继续保留。
+
 ## V0.5.0-alpha.5.7.2 · Couple Board V1.2.2 playability hotfix
 
 针对 5.7.1 实机反馈的两条阻断型问题：触屏角色选择点击被自定义拖拽捕获，以及继续/掷骰子对 Vue reactive Proxy 直接 structuredClone 导致 DataCloneError。V1.2.2 改回原生滚动手势并统一使用 schema clone；开局持久化失败时不会进入半开局状态。数据 schema 不升级。

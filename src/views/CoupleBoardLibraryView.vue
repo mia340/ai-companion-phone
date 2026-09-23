@@ -6,6 +6,7 @@ import { getActiveWorldId } from '../services/momentService'
 import {
   COUPLE_BOARD_EVENT_CARDS,
   COUPLE_BOARD_PROMPTS,
+  coupleBoardPromptThemeLabel,
   createCoupleBoardCustomEventCard,
   createCoupleBoardCustomPrompt,
   exportCoupleBoardLibrary,
@@ -101,7 +102,7 @@ function matchesPrompt(prompt: CoupleBoardPrompt) {
   if (typeFilter.value !== 'all' && prompt.type !== typeFilter.value) return false
   if (intensityFilter.value !== 'all' && prompt.intensity !== intensityFilter.value) return false
   if (!q) return true
-  return `${prompt.text} ${prompt.type} L${prompt.intensity}`.toLocaleLowerCase('zh-CN').includes(q)
+  return `${prompt.text} ${prompt.type} L${prompt.intensity} ${coupleBoardPromptThemeLabel(prompt)}`.toLocaleLowerCase('zh-CN').includes(q)
 }
 
 const visibleCustomPrompts = computed(() => preferences.value.customPrompts.filter(matchesPrompt))
@@ -307,7 +308,7 @@ onMounted(async () => {
     <main class="library-shell">
       <header class="topbar">
         <button class="circle" @click="router.push('/app/心跳飞行棋')">‹</button>
-        <div><small>COUPLE BOARD · V1.2.2</small><b>情侣内容中心</b></div>
+        <div><small>COUPLE BOARD · V2.0 ALPHA</small><b>情侣内容中心</b></div>
         <button class="circle home" @click="router.push('/home')">⌂</button>
       </header>
 
@@ -331,10 +332,10 @@ onMounted(async () => {
 
       <template v-else-if="tab === 'prompts'">
         <section class="editor-card">
-          <header><div><small>{{ editingPromptId ? 'EDIT CARD' : 'NEW CARD' }}</small><b>{{ editingPromptId ? '编辑专属题' : `内置已经有 ${COUPLE_BOARD_PROMPTS.length} 道，也可以继续加你们自己的` }}</b></div><button v-if="editingPromptId" @click="resetPromptDraft">取消编辑</button></header>
+          <header><div><small>{{ editingPromptId ? 'EDIT CARD' : 'NEW CARD' }}</small><b>{{ editingPromptId ? '编辑专属题' : `题库 V3 已经有 ${COUPLE_BOARD_PROMPTS.length} 道，也可以继续加你们自己的` }}</b></div><button v-if="editingPromptId" @click="resetPromptDraft">取消编辑</button></header>
           <div class="segmented"><button :class="{ active: promptDraft.type === 'truth' }" @click="promptDraft.type = 'truth'">真心话</button><button :class="{ active: promptDraft.type === 'dare' }" @click="promptDraft.type = 'dare'">大冒险</button></div>
           <div class="field-grid">
-            <label>强度<select v-model.number="promptDraft.intensity"><option :value="1">L1 纯爱</option><option :value="2">L2 暧昧</option><option :value="3">L3 亲密</option><option :value="4">L4 成人</option></select></label>
+            <label>强度<select v-model.number="promptDraft.intensity"><option :value="1">L1 纯爱</option><option :value="2">L2 暧昧</option><option :value="3">L3 亲密</option><option :value="4">L4 成人</option><option :value="5">L5 私房</option></select></label>
             <label>模式<select v-model="promptDraft.mode"><option value="both">聊天 + 面对面</option><option value="chat">仅聊天</option><option value="reality">仅面对面</option></select></label>
           </div>
           <textarea v-model="promptDraft.text" maxlength="160" placeholder="例如：说一个只有我们两个人懂的小梗，然后告诉对方为什么你一直记得。"></textarea>
@@ -344,7 +345,7 @@ onMounted(async () => {
         <section class="library-tools">
           <div class="scope-switch"><button :class="{ active: scope === 'mine' }" @click="scope = 'mine'">我的题 {{ preferences.customPrompts.length }}</button><button :class="{ active: scope === 'system' }" @click="scope = 'system'">系统题 {{ enabledSystemPromptCount }}/{{ COUPLE_BOARD_PROMPTS.length }}</button></div>
           <input v-model="query" placeholder="搜索题目…">
-          <div class="filters"><select v-model="typeFilter"><option value="all">全部类型</option><option value="truth">真心话</option><option value="dare">大冒险</option></select><select v-model="intensityFilter"><option value="all">全部强度</option><option :value="1">L1</option><option :value="2">L2</option><option :value="3">L3</option><option :value="4">L4</option></select></div>
+          <div class="filters"><select v-model="typeFilter"><option value="all">全部类型</option><option value="truth">真心话</option><option value="dare">大冒险</option></select><select v-model="intensityFilter"><option value="all">全部强度</option><option :value="1">L1</option><option :value="2">L2</option><option :value="3">L3</option><option :value="4">L4</option><option :value="5">L5</option></select></div>
         </section>
 
         <section class="card-list" v-if="scope === 'mine'">
@@ -359,7 +360,7 @@ onMounted(async () => {
         <section class="card-list" v-else>
           <article v-for="prompt in visibleSystemPrompts" :key="prompt.id" class="content-card system" :class="{ disabled: preferences.disabledBuiltinPromptIds.includes(prompt.id) }">
             <span class="kind" :class="prompt.type">{{ prompt.type === 'truth' ? '真心话' : '大冒险' }}</span>
-            <div><small>L{{ prompt.intensity }} · {{ prompt.modes.length === 2 ? '双模式' : prompt.modes.join(' / ') }}</small><p>{{ prompt.text }}</p></div>
+            <div><small>L{{ prompt.intensity }} · {{ coupleBoardPromptThemeLabel(prompt) }} · {{ prompt.modes.length === 2 ? '双模式' : prompt.modes.join(' / ') }}</small><p>{{ prompt.text }}</p></div>
             <button class="toggle" :aria-label="preferences.disabledBuiltinPromptIds.includes(prompt.id) ? '启用' : '停用'" @click="toggleSystemPrompt(prompt.id)"><i></i></button>
           </article>
         </section>
@@ -402,7 +403,7 @@ onMounted(async () => {
               <button class="danger" @click="deleteArchive(row.gameId)">从回忆册删除</button>
             </div>
           </article>
-          <div v-if="!archive.entries.length" class="empty history-empty">完成一局心跳飞行棋后，这里会留下本局高光。回忆册不会自动写入角色记忆。</div>
+          <div v-if="!archive.entries.length" class="empty history-empty">完成一局心跳飞行棋后，这里会留下本局高光。V2 的已完成互动会在游戏过程中写入长期记忆；回忆册本身只负责归档，不会重复写入。</div>
         </section>
       </template>
 
@@ -411,7 +412,7 @@ onMounted(async () => {
         <button @click="importInput?.click()">导入题库</button>
         <button @click="exportArchive">导出回忆册</button>
         <input ref="importInput" hidden type="file" accept="application/json,.json" @change="importLibraryFile">
-        <small>题库导入只覆盖飞行棋题库/事件偏好；回忆册只提供导出备份。两者都不会修改角色、聊天、记忆或正在进行的棋局。</small>
+        <small>题库导入只覆盖飞行棋题库/事件偏好；回忆册只提供导出备份。内容中心本身不会修改角色或聊天；V2 游戏里被双方完成的真实互动会通过 Memory Bridge 写入长期记忆。</small>
       </footer>
 
       <transition name="toast"><div v-if="notice" class="toast">{{ notice }}</div></transition>

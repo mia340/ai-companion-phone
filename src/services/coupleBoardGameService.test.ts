@@ -15,6 +15,7 @@ import {
   createCoupleBoardCustomPrompt,
   createCoupleBoardGame,
   drawCoupleBoardGameEventCard,
+  drawCoupleBoardGamePrompt,
   drawCoupleBoardPrompt,
   exportCoupleBoardLibrary,
   getCoupleBoardGameEventCard,
@@ -62,12 +63,33 @@ describe('coupleBoardGameService', () => {
   })
 
   it('ships a substantial built-in question bank with unique ids across every intensity and type', () => {
-    expect(COUPLE_BOARD_PROMPTS).toHaveLength(128)
+    expect(COUPLE_BOARD_PROMPTS).toHaveLength(160)
     expect(new Set(COUPLE_BOARD_PROMPTS.map(prompt => prompt.id)).size).toBe(COUPLE_BOARD_PROMPTS.length)
-    for (const intensity of [1, 2, 3, 4] as const) {
+    for (const intensity of [1, 2, 3, 4, 5] as const) {
       expect(COUPLE_BOARD_PROMPTS.filter(prompt => prompt.intensity === intensity && prompt.type === 'truth')).toHaveLength(16)
       expect(COUPLE_BOARD_PROMPTS.filter(prompt => prompt.intensity === intensity && prompt.type === 'dare')).toHaveLength(16)
     }
+    expect(COUPLE_BOARD_PROMPTS.every(prompt => Boolean(prompt.theme))).toBe(true)
+    expect(new Set(COUPLE_BOARD_PROMPTS.map(prompt => prompt.theme)).size).toBeGreaterThanOrEqual(9)
+  })
+
+  it('keeps reality dares physically interactive across every level', () => {
+    for (const intensity of [1, 2, 3, 4, 5] as const) {
+      const realityDares = COUPLE_BOARD_PROMPTS.filter(prompt => prompt.intensity === intensity && prompt.type === 'dare' && prompt.modes.includes('reality'))
+      expect(realityDares.length).toBeGreaterThanOrEqual(8)
+    }
+  })
+
+  it('rotates away from recently used prompt themes when alternatives exist', () => {
+    const game = createCoupleBoardGame({ ...baseSettings, intensity: 4, adultConfirmed: true })
+    game.history = [
+      { id: 'h1', actor: 'user', dice: 1, from: 0, to: 1, cellType: 'truth', promptId: 't1-01', createdAt: '2026-09-21T00:00:00.000Z' },
+      { id: 'h2', actor: 'partner', dice: 1, from: 0, to: 1, cellType: 'truth', promptId: 't1-02', createdAt: '2026-09-21T00:01:00.000Z' }
+    ]
+    const drawn = drawCoupleBoardGamePrompt(game, 'truth', 0)
+    expect(drawn.id).not.toBe('t1-01')
+    expect(drawn.id).not.toBe('t1-02')
+    expect(['daily', 'memory']).not.toContain(drawn.theme)
   })
 
   it('starts a game with the user turn and isolated player state', () => {
@@ -97,19 +119,22 @@ describe('coupleBoardGameService', () => {
     expect(entry.game.winner).toBe('user')
   })
 
-  it('blocks adult mode for an explicitly underage character', () => {
-    const error = validateCoupleBoardAdultMode({ ...baseSettings, intensity: 4, characterAge: 17, adultConfirmed: true })
-    expect(error).toContain('小于 18')
+  it('blocks adult/private mode for an explicitly underage character', () => {
+    expect(validateCoupleBoardAdultMode({ ...baseSettings, intensity: 4, characterAge: 17, adultConfirmed: true })).toContain('小于 18')
+    expect(validateCoupleBoardAdultMode({ ...baseSettings, intensity: 5, characterAge: 17, adultConfirmed: true })).toContain('小于 18')
   })
 
-  it('requires explicit adult confirmation for level 4', () => {
+  it('requires explicit adult confirmation for levels 4 and 5', () => {
     expect(validateCoupleBoardAdultMode({ ...baseSettings, intensity: 4, adultConfirmed: false })).toContain('确认')
     expect(validateCoupleBoardAdultMode({ ...baseSettings, intensity: 4, adultConfirmed: true })).toBeUndefined()
+    expect(validateCoupleBoardAdultMode({ ...baseSettings, intensity: 5, adultConfirmed: false })).toContain('确认')
+    expect(validateCoupleBoardAdultMode({ ...baseSettings, intensity: 5, adultConfirmed: true })).toBeUndefined()
   })
 
-  it('never exposes adult-only prompts below level 4', () => {
+  it('never exposes adult-only prompts below level 4 and includes private prompts at level 5', () => {
     expect(promptsFor('truth', 3, 'chat').some(prompt => prompt.adultOnly)).toBe(false)
     expect(promptsFor('truth', 4, 'chat').some(prompt => prompt.adultOnly)).toBe(true)
+    expect(promptsFor('truth', 5, 'chat').some(prompt => prompt.id.startsWith('t5-'))).toBe(true)
   })
 
   it('creates an evidence-free local challenge when landing on a truth cell', () => {
@@ -204,7 +229,7 @@ describe('coupleBoardGameService', () => {
     expect(drawCoupleBoardPrompt('dare', 1, 'chat', 0).type).toBe('dare')
   })
 
-  it('sanitizes custom prompts and forces level-4 entries behind the adult gate', () => {
+  it('sanitizes custom prompts and forces level-4/5 entries behind the adult gate', () => {
     const prompt = createCoupleBoardCustomPrompt({
       type: 'truth',
       intensity: 4,
@@ -215,6 +240,8 @@ describe('coupleBoardGameService', () => {
     expect(prompt.adultOnly).toBe(true)
     expect(prompt.modes).toEqual(['chat'])
     expect(prompt.text).not.toContain('<b>')
+    const privatePrompt = createCoupleBoardCustomPrompt({ type: 'dare', intensity: 5, modes: ['reality'], text: '靠近一点' })
+    expect(privatePrompt.adultOnly).toBe(true)
   })
 
   it('freezes eligible custom prompts into a game and filters them by mode and intensity', () => {
@@ -434,6 +461,16 @@ describe('coupleBoardGameService', () => {
     expect(mergeCoupleBoardResultShareIntoDraft('', share)).toBe(share.draft)
     expect(mergeCoupleBoardResultShareIntoDraft(share.draft, share)).toBe(share.draft)
     expect(buildCoupleBoardResultChatShare(createCoupleBoardGame(baseSettings), 'conv-1')).toBeUndefined()
+  })
+
+
+  it('round-trips the V2 visual mode while legacy saves remain compatible', () => {
+    const pixel = createCoupleBoardGame({ ...baseSettings, visualMode: 'pixel' })
+    expect(parseCoupleBoardGame(pixel)?.settings.visualMode).toBe('pixel')
+
+    const legacy = structuredClone(pixel) as any
+    delete legacy.settings.visualMode
+    expect(parseCoupleBoardGame(legacy)?.settings.visualMode).toBeUndefined()
   })
 
   it('edits custom prompts without changing their stable ids', () => {

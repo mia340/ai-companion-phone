@@ -38,6 +38,8 @@ export interface AppCustomization {
   coupleBoardPreferences?: unknown
   /** 心跳飞行棋 V1.2：已完成对局的轻量回忆册，最多保留最近 24 局。 */
   coupleBoardArchive?: unknown
+  /** 心跳飞行棋 V2：局内自由互动 ledger，复用非索引字段，不增加 IndexedDB store。 */
+  coupleBoardInteractionLedger?: unknown
   sharedTimelineState?: {
     starredIds?: string[]
     hiddenIds?: string[]

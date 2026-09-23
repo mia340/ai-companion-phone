@@ -1,3 +1,32 @@
+## V0.5.0-alpha.5.8.0 · 心跳飞行棋 V2.0 Alpha 沉浸互动重构
+
+- 新增 Character Context / Partner Reply Runtime：角色回复每次都带角色卡、相关长期 Memory、Shared Timeline 与当前会话状态；不使用固定恋爱反应类型，游戏氛围不得覆盖原人设；候选回复再经过 Role Continuity Audit，不通过时自动带理由重生成一次。
+- 单人题升级为双向 Interaction Ledger：双方至少各回应一次才允许完成；互动可以多轮延长，角色可自然发出收尾信号，玩家仍可继续。
+- 新增 Couple Board Memory Bridge：完成互动先保存真实对话 shared-event，再可选提炼稳定偏好；hypothetical/transient 不进入长期事实，未知 evidence id 拒绝。
+- 角色回合自动掷骰；棋子按每一步动画移动。规则 0..29 不变，视觉重做成 30 地点约会路线。
+- 新增像素约会 / 浪漫地图双风格；像素模式使用完整小人在地图上移动，不再只移动头像。
+- 当前互动可随游戏恢复；Interaction Ledger V1 复用 appCustomizations，不新增 IndexedDB store。
+- IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 13 / Preferences V2 / Archive V1 均不升级。
+- 测试静态定义提升为 70 files / 612 declarations；正式通过以 Windows / CI `npm run verify` 为准。
+
+## V0.5.0-alpha.5.7.4 · 心跳飞行棋 V1.4 题库 V3
+
+- 系统题库 128 → **160**，新增 L5「私房」：16 真心话 + 16 大冒险，集中覆盖性偏好、床上默契、性爱节奏、情趣与事后陪伴。
+- L4 成人档进一步改成成年人更自然、直接的表达；保留 18+ 门禁和随时换题/跳过，但不再把每张卡写成正式说明书。
+- L1-L5 面对面大冒险整体增加身体接触：牵手、靠肩、拥抱、贴近、搂腰与亲吻会随强度逐级增加；聊天模式继续只提供可远程完成的任务。
+- L4/L5 共用成年人确认，明确未成年角色两档都硬阻断；自定义 L5 题自动进入 adult-only。
+- 新增 `private/私房` 主题；内容中心和筛选 UI 支持 L5。
+- 数据 schema 不变；测试定义提升为 67 files / 602 declarations。
+
+## V0.5.0-alpha.5.7.3 · 心跳飞行棋 V1.3 题库 V2
+
+- 重写全部 128 道系统题：四档结构与 id 保持稳定，内容改成更日常、更口语、更暧昧的情侣互动。
+- L3/L4 不再重复大段“边界/许可”措辞；L4 成人档可直接谈做爱、前戏、欲望、接吻偏好、亲密节奏和事后陪伴。
+- 新增 8 个题目主题 metadata，并在情侣内容中心显示主题标签。
+- 抽题加入近期主题轮换：优先避开最近 3 个同类型题 id 与最近 2 个主题，减少连续抽到同一种问题。
+- 18+ 门禁、未成年硬阻断、随时换题/跳过继续保留；数据版本不变。
+- 测试定义提升为 67 files / 601 declarations。
+
 ## V0.5.0-alpha.5.7.2 · 心跳飞行棋 V1.2.2 可玩性热修
 
 - 修复角色卡片在触屏上被自定义 pointer capture / drag 手势吞掉点击的问题；角色选择改回浏览器原生横向滚动，点击选择优先。
