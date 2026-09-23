@@ -12,6 +12,7 @@ import type { CoupleBoardGame, CoupleBoardPlayerId, CoupleBoardPrompt } from './
 
 export type CoupleBoardInteractionSpeaker = 'user' | 'partner' | 'system'
 export type CoupleBoardInteractionStatus = 'active' | 'closing' | 'closed' | 'skipped'
+export type CoupleBoardSkipRequest = { requester: CoupleBoardPlayerId; requestedAt: string }
 
 export interface CoupleBoardInteractionMessage {
   id: string
@@ -33,6 +34,7 @@ export interface CoupleBoardInteraction {
   status: CoupleBoardInteractionStatus
   messages: CoupleBoardInteractionMessage[]
   memorySyncedIds: string[]
+  skipRequest?: CoupleBoardSkipRequest
   createdAt: string
   updatedAt: string
 }
@@ -85,6 +87,8 @@ export interface CoupleBoardPartnerReply {
   memoryEvidenceIds: string[]
   model: string
   roleConsistencyChecked: boolean
+  requestSkip: boolean
+  skipDecision?: 'approve' | 'decline'
 }
 
 export interface CoupleBoardReplyAudit {
@@ -132,6 +136,7 @@ const interactionSchema: z.ZodType<CoupleBoardInteraction> = z.object({
   status: z.enum(['active', 'closing', 'closed', 'skipped']),
   messages: z.array(messageSchema).max(MAX_MESSAGES),
   memorySyncedIds: z.array(z.string().min(1)).max(24),
+  skipRequest: z.object({ requester: z.enum(['user', 'partner']), requestedAt: z.string() }).optional(),
   createdAt: z.string(),
   updatedAt: z.string()
 })
@@ -200,6 +205,27 @@ export function setCoupleBoardInteractionStatus(
   now = new Date()
 ): CoupleBoardInteraction {
   return interactionSchema.parse({ ...interaction, status, updatedAt: nowIso(now) })
+}
+
+export function requestCoupleBoardInteractionSkip(
+  interaction: CoupleBoardInteraction,
+  requester: CoupleBoardPlayerId,
+  now = new Date()
+): CoupleBoardInteraction {
+  return interactionSchema.parse({
+    ...interaction,
+    skipRequest: { requester, requestedAt: nowIso(now) },
+    updatedAt: nowIso(now)
+  })
+}
+
+export function clearCoupleBoardInteractionSkipRequest(
+  interaction: CoupleBoardInteraction,
+  now = new Date()
+): CoupleBoardInteraction {
+  const next = { ...interaction, updatedAt: nowIso(now) } as CoupleBoardInteraction & { skipRequest?: CoupleBoardSkipRequest }
+  delete next.skipRequest
+  return interactionSchema.parse(next)
 }
 
 export function markCoupleBoardInteractionMemories(
@@ -357,7 +383,7 @@ export function buildCoupleBoardPartnerReplyMessages(options: {
   prompt: CoupleBoardPrompt
   interaction: CoupleBoardInteraction
   context: CoupleBoardCharacterContext
-  intent: 'answer' | 'react' | 'continue'
+  intent: 'answer' | 'react' | 'continue' | 'skip_decision'
 }): ChatTurn[] {
   const { game, prompt, interaction, context, intent } = options
   const allowedEvidenceIds = [
@@ -368,10 +394,12 @@ export function buildCoupleBoardPartnerReplyMessages(options: {
   const characterIsActor = interaction.actor === 'partner'
   const mapStop = getCoupleBoardMapStop(game.pending?.cellIndex ?? game.players[interaction.actor].position)
   const intentRule = intent === 'answer'
-    ? `现在由 ${context.character.name} 先完成这道题。要直接回答/完成，不要把问题又丢回给用户。`
+    ? `现在由 ${context.character.name} 先完成这道题。要直接回答/完成，不要把问题又丢回给用户。如果这题明显触碰角色自己的稳定边界、角色确实不愿继续，可以在回复里自然提出想跳过，并把 requestSkip=true；不要为了省事随便请求跳过。`
     : intent === 'react'
       ? '用户刚刚完成或回答了题目。你要像角色本人一样对这句话做真实反应；可以追问、接话、靠近、沉默或自然收住，但不要套固定反应模板。'
-      : '这是同一段互动的继续。顺着刚才的内容自然接下去，不要突然换话题。'
+      : intent === 'skip_decision'
+        ? '用户正在请求跳过这道属于用户自己的题。你就是对方，必须根据角色本人、人设、边界和当前互动决定是否同意。可以同意，也可以不同意；不要机械批准。用自然的一句话回应，并在 skipDecision 返回 approve 或 decline。'
+        : '这是同一段互动的继续。顺着刚才的内容自然接下去，不要突然换话题。如果角色在继续过程中明确不想再碰这道题，可以自然提出跳过，并把 requestSkip=true。'
 
   return [
     {
@@ -384,13 +412,16 @@ export function buildCoupleBoardPartnerReplyMessages(options: {
         '如果回复明确提到某段过去的共同经历，必须在 memoryEvidenceIds 返回支撑它的 id；只能返回 allowedEvidenceIds 中存在的 id。',
         '不要把固定的“害羞/吃醋/反撩”等反应标签当规则。你的反应只由角色本人、人设、记忆、当前关系和眼前互动决定。',
         '这是情侣互动游戏，不赶进度。可以只回一句，也可以让话题继续。如果角色觉得这一小段已经自然说完，可将 endInteraction=true；用户仍然可以选择继续。',
-        '地图地点是这局游戏里的舞台语境，可以影响措辞和气氛，但不能被当成现实世界已经发生过的共同经历。',
-        '现实模式下，不替用户决定现实身体接触的同意；涉及身体动作时把选择权留给双方。',
+        '这局游戏固定为现实面对面互动：双方现实中正待在同一空间一起玩。具体实际地点可能是房间、酒店或别的地方；除非用户或已有记忆明确说明，否则不要猜具体地点。',
+        '棋盘地点（例如花店、公园、电影院、床边）只是虚构棋盘格/美术舞台，不代表现实中真的在那里。禁止把棋盘格写成现实环境，例如不要说“花店里没人”“电影院很暗”“我们现在在河边”。',
+        '所有回合都按面对面现实互动处理；不替用户决定现实身体接触的同意，涉及身体动作时把选择权留给双方。',
         game.settings.intensity >= 4
           ? '本局已经通过成人门禁，可以使用符合角色本人口吻的直接成人表达；不要变成性行为教学，也不要把同意当默认。'
           : '保持在本局强度范围内，不主动升级到成人内容。',
         intentRule,
-        '严格返回 JSON：{"reply":"角色回复","endInteraction":false,"memoryEvidenceIds":[]}',
+        intent === 'skip_decision'
+          ? '严格返回 JSON：{"reply":"角色回复","skipDecision":"approve","endInteraction":false,"requestSkip":false,"memoryEvidenceIds":[]}；skipDecision 只能是 approve 或 decline。'
+          : '严格返回 JSON：{"reply":"角色回复","endInteraction":false,"requestSkip":false,"memoryEvidenceIds":[]}；requestSkip 只在角色本人确实想跳过当前题时设为 true。',
         'reply 最多 260 个汉字；不要返回 Markdown、代码围栏、HTML/XML 或额外解释。'
       ].join('\n')
     },
@@ -403,12 +434,12 @@ export function buildCoupleBoardPartnerReplyMessages(options: {
         timeline: context.timeline,
         allowedEvidenceIds,
         game: {
-          mode: game.settings.mode,
+          mode: 'face-to-face',
           intensity: game.settings.intensity,
           turn: game.turn,
-          location: interaction.locationName,
-          locationMood: mapStop.hint,
-          locationZone: mapStop.zone,
+          realWorldPresence: '双方现实中面对面；具体实际地点未知，除非本轮或既有记忆明确说明',
+          boardStop: `${interaction.locationName}（仅棋盘格，不是现实地点）`,
+          boardStopZone: mapStop.zone,
           actor: actorName,
           characterIsActor,
           promptType: prompt.type,
@@ -449,9 +480,12 @@ export function parseCoupleBoardPartnerReply(
     ? row.memoryEvidenceIds.filter((item): item is string => typeof item === 'string')
     : []
   if (providedIds.some(id => !allowed.has(id))) return undefined
+  const skipDecision = row.skipDecision === 'approve' || row.skipDecision === 'decline' ? row.skipDecision : undefined
   return {
     reply,
     endInteraction: row.endInteraction === true,
+    requestSkip: row.requestSkip === true,
+    ...(skipDecision ? { skipDecision } : {}),
     memoryEvidenceIds: ids
   }
 }
@@ -468,6 +502,7 @@ export function buildCoupleBoardReplyAuditMessages(options: {
         '你是角色连续性审校器，不负责把回复改得更甜，也不规定角色应该害羞、吃醋或反撩。',
         '只检查候选回复是否明显违背已经给出的角色卡、稳定边界、说话方式、关系设定或真实记忆。',
         '如果候选声称某个过去共同事件发生过，但没有与该说法对应的 evidence id，应判定不通过。',
+        '如果候选把棋盘格（花店、公园、电影院等）当成现实所处地点或真实共同经历，也应判定不通过；除非本轮用户明确说现实里就在那个地方。',
         '不要因为回复直接、克制、冷淡、主动或成人化就判 OOC；判断标准只能来自这个角色自己的设定与已有上下文。',
         '不要要求候选迎合用户，也不要把游戏题目本身当成角色事实。',
         '严格返回 JSON：{"pass":true,"reason":""}。不通过时 reason 用一句短中文指出最具体的冲突。'
@@ -523,7 +558,7 @@ export async function generateCoupleBoardPartnerReply(options: {
   prompt: CoupleBoardPrompt
   interaction: CoupleBoardInteraction
   character: Character
-  intent: 'answer' | 'react' | 'continue'
+  intent: 'answer' | 'react' | 'continue' | 'skip_decision'
 }): Promise<CoupleBoardPartnerReply> {
   const query = [options.interaction.questionText, ...options.interaction.messages.slice(-6).map(row => row.text)].join(' ')
   const { context } = await buildCoupleBoardCharacterContext({

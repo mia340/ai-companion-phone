@@ -69,7 +69,7 @@ export function mapStopBias(stop: CoupleBoardMapStop, cellType?: CoupleBoardCell
     private: ['intimacy', 'adult', 'private']
   } as const
   return {
-    location: stop.name,
+    boardStop: stop.name,
     zone: stop.zone,
     themes: [...themesByZone[stop.zone]],
     cellType

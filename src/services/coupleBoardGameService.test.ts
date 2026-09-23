@@ -80,6 +80,14 @@ describe('coupleBoardGameService', () => {
     }
   })
 
+  it('keeps every built-in dare usable face to face and assigns the task only to the dice roller', () => {
+    const dares = COUPLE_BOARD_PROMPTS.filter(prompt => prompt.type === 'dare')
+    expect(dares.every(prompt => prompt.modes.includes('reality'))).toBe(true)
+    for (const prompt of dares) {
+      expect(prompt.text).not.toMatch(/各自说|双方各自|轮流作答|两个人都要|互相完成|各说|各用/)
+    }
+  })
+
   it('rotates away from recently used prompt themes when alternatives exist', () => {
     const game = createCoupleBoardGame({ ...baseSettings, intensity: 4, adultConfirmed: true })
     game.history = [
@@ -224,8 +232,8 @@ describe('coupleBoardGameService', () => {
   it('keeps mode-specific prompts out of the wrong mode pool', () => {
     const chat = promptsFor('dare', 4, 'chat')
     const reality = promptsFor('dare', 4, 'reality')
-    expect(chat.some(prompt => prompt.id === 'd4-03')).toBe(true)
-    expect(reality.some(prompt => prompt.id === 'd4-03')).toBe(false)
+    expect(chat.some(prompt => prompt.id === 'd4-02')).toBe(false)
+    expect(reality.some(prompt => prompt.id === 'd4-02')).toBe(true)
     expect(drawCoupleBoardPrompt('dare', 1, 'chat', 0).type).toBe('dare')
   })
 

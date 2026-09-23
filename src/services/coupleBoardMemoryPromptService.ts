@@ -149,7 +149,8 @@ export function buildCoupleBoardMemoryPromptMessages(
         '必须选择至少 1 条 evidence id，并且只能返回输入中存在的 id。日期只用于帮助定位回忆，不能据此补写细节。',
         `当前必须出一道${kind}，不能改成另一种题型。`,
         intensityRules[game.settings.intensity],
-        '如果是现实互动，必须把同意权留给参与者；不要默认任何身体接触或成人行为已经获同意。',
+        '本游戏固定为面对面互动；必须把同意权留给参与者，不要默认任何身体接触或成人行为已经获同意。',
+        `这道题只属于当前掷骰的人「${actorName}」。真心话只问 ${actorName}；大冒险只要求 ${actorName} 完成。另一方不承担这道题的回答或任务要求；当前玩家完成后，另一方只在后续互动里按自己的人设自然回应。不能要求双方各自回答、互相完成、轮流作答或同时承担任务。`,
         '题目最多 90 个汉字，像情侣游戏卡片，不要解释你为什么这样出题。',
         '严格返回 JSON：{"type":"truth|dare","text":"...","evidenceIds":["..."]}。',
         '不要返回 Markdown、代码围栏、HTML、XML 或其它文字。'
@@ -164,7 +165,7 @@ export function buildCoupleBoardMemoryPromptMessages(
           name: character.name,
           safetyBoundaries: sanitizeNativeAppText(character.boundaries || '', { singleLine: true }).slice(0, 160)
         },
-        mode: game.settings.mode,
+        mode: 'face-to-face',
         intensity: game.settings.intensity,
         requiredType: game.pending.promptType,
         evidence
@@ -200,6 +201,11 @@ function parseJsonObject(raw: string): Record<string, unknown> | undefined {
   }
 }
 
+
+function hasDualOwnerInstruction(text: string) {
+  return /(双方(?:各自)?|两个人都|你们(?:两个|俩)(?:都|各自)|各自(?:回答|说|做|完成)|各(?:回答|说|做|完成)|轮流(?:回答|说|做)|互相(?:回答|完成)|一人一句|每人(?:说|回答|做))/u.test(text)
+}
+
 export function parseCoupleBoardMemoryPrompt(
   raw: string,
   game: CoupleBoardGame,
@@ -212,7 +218,7 @@ export function parseCoupleBoardMemoryPrompt(
   const type = row.type === 'truth' || row.type === 'dare' ? row.type as CoupleBoardPromptType : undefined
   if (!type || type !== game.pending.promptType) return undefined
   const text = sanitizeNativeAppText(String(row.text ?? ''), { singleLine: true }).slice(0, 120).trim()
-  if (!text) return undefined
+  if (!text || hasDualOwnerInstruction(text)) return undefined
   const allowed = new Set(evidence.map(item => item.id))
   const evidenceIds = uniqueStrings(row.evidenceIds).filter(id => allowed.has(id)).slice(0, 8)
   if (!evidenceIds.length) return undefined

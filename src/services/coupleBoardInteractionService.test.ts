@@ -7,6 +7,8 @@ import {
   parseCoupleBoardInteractionLedger,
   parseCoupleBoardPartnerReply,
   parseCoupleBoardReplyAudit,
+  requestCoupleBoardInteractionSkip,
+  clearCoupleBoardInteractionSkipRequest,
   setCoupleBoardInteractionStatus,
   type CoupleBoardCharacterContext
 } from './coupleBoardInteractionService'
@@ -14,7 +16,7 @@ import { createCoupleBoardGame, rollCoupleBoard, getCoupleBoardGamePrompt, rende
 
 const settings = {
   characterId: 'char-1', characterName: '阿澈', characterAge: 24,
-  intensity: 2 as const, mode: 'chat' as const, adultConfirmed: false, visualMode: 'pixel' as const
+  intensity: 2 as const, mode: 'reality' as const, adultConfirmed: false, visualMode: 'pixel' as const
 }
 
 function pendingGame() {
@@ -51,7 +53,11 @@ describe('coupleBoardInteractionService', () => {
     const messages = buildCoupleBoardPartnerReplyMessages({ game, prompt, interaction, context, intent: 'react' })
     expect(messages[0].content).toContain('角色一致性是最高优先级')
     expect(messages[0].content).toContain('游戏氛围不能覆盖原角色设定')
+    expect(messages[0].content).toContain('固定为现实面对面互动')
+    expect(messages[0].content).toContain('只是虚构棋盘格')
     expect(messages[1].content).toContain('用户喜欢晚饭后散步')
+    expect(messages[1].content).toContain('\"mode\":\"face-to-face\"')
+    expect(messages[1].content).toContain('\"boardStop\"')
   })
 
 
@@ -62,10 +68,11 @@ describe('coupleBoardInteractionService', () => {
     const messages = buildCoupleBoardReplyAuditMessages({
       interaction,
       context,
-      candidate: { reply: '那就走一会。', endInteraction: false, memoryEvidenceIds: [] }
+      candidate: { reply: '那就走一会。', endInteraction: false, requestSkip: false, memoryEvidenceIds: [] }
     })
     expect(messages[0].content).toContain('不规定角色应该害羞、吃醋或反撩')
     expect(messages[0].content).toContain('角色卡')
+    expect(messages[0].content).toContain('棋盘格')
     expect(messages[1].content).toContain('克制、嘴硬')
   })
 
@@ -79,4 +86,21 @@ describe('coupleBoardInteractionService', () => {
     expect(parseCoupleBoardPartnerReply('{"reply":"记得那次散步。","endInteraction":false,"memoryEvidenceIds":["fake"]}', ['mem-1'])).toBeUndefined()
     expect(parseCoupleBoardPartnerReply('{"reply":"我记得。","endInteraction":false,"memoryEvidenceIds":["mem-1"]}', ['mem-1'])?.memoryEvidenceIds).toEqual(['mem-1'])
   })
+  it('persists a skip request until the other side decides', () => {
+    const game = pendingGame()
+    const prompt = getCoupleBoardGamePrompt(game, game.pending!.promptId)!
+    const base = createCoupleBoardInteraction({ game, prompt, questionText: '这一题要不要继续？', conversationId: 'conv-1' })
+    const requested = requestCoupleBoardInteractionSkip(base, 'user', new Date('2026-09-23T00:00:00.000Z'))
+    expect(requested.skipRequest).toEqual({ requester: 'user', requestedAt: '2026-09-23T00:00:00.000Z' })
+    const parsed = parseCoupleBoardInteractionLedger({ version: 1, gameId: game.id, interactions: [requested], updatedAt: requested.updatedAt })
+    expect(parsed?.interactions[0].skipRequest?.requester).toBe('user')
+    expect(clearCoupleBoardInteractionSkipRequest(requested).skipRequest).toBeUndefined()
+  })
+
+  it('supports partner skip requests and explicit approve/decline decisions', () => {
+    expect(parseCoupleBoardPartnerReply('{"reply":"这题我想先跳过，可以吗？","requestSkip":true,"endInteraction":false,"memoryEvidenceIds":[]}', [])?.requestSkip).toBe(true)
+    expect(parseCoupleBoardPartnerReply('{"reply":"可以，这题跳过。","skipDecision":"approve","requestSkip":false,"endInteraction":false,"memoryEvidenceIds":[]}', [])?.skipDecision).toBe('approve')
+    expect(parseCoupleBoardPartnerReply('{"reply":"我想听你说完。","skipDecision":"decline","requestSkip":false,"endInteraction":false,"memoryEvidenceIds":[]}', [])?.skipDecision).toBe('decline')
+  })
+
 })

@@ -129,8 +129,9 @@ async function checkSource() {
 
   const coupleBoardInteraction = await readText('src/services/coupleBoardInteractionService.ts')
   const coupleBoardMemoryBridge = await readText('src/services/coupleBoardMemoryBridge.ts')
+  const coupleBoardMemoryPrompt = await readText('src/services/coupleBoardMemoryPromptService.ts')
   const coupleBoardMap = await readText('src/services/coupleBoardMapService.ts')
-  if (!coupleBoardView.includes('COUPLE BOARD · V2.0 ALPHA') ||
+  if (!coupleBoardView.includes('COUPLE BOARD · V2.2 ALPHA') ||
       !coupleBoardView.includes('CoupleBoardPixelSprite') ||
       !coupleBoardView.includes('syncCoupleBoardInteractionMemory')) {
     fail('Couple Board V2 immersive UI / pixel sprite / Memory Bridge must stay wired')
@@ -151,6 +152,34 @@ async function checkSource() {
     fail('Couple Board V2 themed 30-stop date map is missing')
   }
   pass('Couple Board V2 role continuity, memory writeback and themed map are guarded')
+
+  if (!coupleBoardView.includes("mode: 'reality'") ||
+      coupleBoardView.includes("@click=\"mode = 'chat'\"") ||
+      !coupleBoardView.includes('面对面互动')) {
+    fail('Couple Board V2.1 must be face-to-face only in the playable UI')
+  }
+  if (!coupleBoardView.includes("'has-challenge': Boolean(game?.pending && pendingPrompt)") ||
+      !coupleBoardView.includes('.love-game-shell.is-game.has-challenge .board-card') ||
+      !coupleBoardView.includes('.challenge-backdrop{position:absolute;z-index:20;left:0;right:0;top:50%;bottom:0')) {
+    fail('Couple Board V2.2 must keep the fixed half-map / half-interaction layout')
+  }
+  if (!coupleBoardInteraction.includes('棋盘地点（例如花店、公园、电影院、床边）只是虚构棋盘格') ||
+      !coupleBoardMemoryBridge.includes('仅游戏舞台')) {
+    fail('Couple Board V2.1 must never turn board-stop scenery into a real-world location or memory fact')
+  }
+  if (!coupleBoardInteraction.includes("mode: 'face-to-face'") ||
+      !coupleBoardView.includes('这题只归本轮掷骰的人') ||
+      !coupleBoardView.includes('对方只负责真实回应') ||
+      !coupleBoardMemoryPrompt.includes('hasDualOwnerInstruction') ||
+      !coupleBoardMemoryPrompt.includes('另一方不承担这道题的回答或任务要求')) {
+    fail('Couple Board V2.1 must keep each question owned by the dice roller while allowing partner reactions')
+  }
+  if (coupleBoardView.includes('换一题') || coupleBoardView.includes('@click="replaceChallenge"') ||
+      !coupleBoardView.includes('请求跳过') || !coupleBoardView.includes('approvePartnerSkip') ||
+      !coupleBoardInteraction.includes('skipDecision') || !coupleBoardInteraction.includes('requestSkip')) {
+    fail('Couple Board V2.2 must forbid question replacement and require partner approval for skips')
+  }
+  pass('Couple Board V2.2 fixed split layout, no-replace and mutual skip-consent rules are guarded')
 
   const requiredDocs = [
     'docs/部署与更新.md',

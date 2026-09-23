@@ -1,20 +1,33 @@
 # AI Companion Phone · 当前项目状态
 
+## 0.5.0-alpha.5.8.2 · Couple Board V2.2
+
+- 心跳飞行棋改为固定 50/50 分屏：上半地图、下半互动，同一题期间页面结构不再展开/收起或遮住地图。
+- 删除当前题“换一题”能力，也移除用 Memory 题覆盖当前题的入口；骰子落到哪题就围绕哪题互动。
+- 新增双方跳过同意协议：用户题由角色决定是否同意跳过；角色题只有角色主动请求后才交给用户批准。
+- 跳过请求进入 Interaction Ledger，可随续局恢复；现实身体互动仍可由任意一方随时拒绝或终止。
+- Couple Board V2.2 release safety 新增固定分屏、禁止换题和 mutual skip-consent 守卫。
+
+
 更新于：**2026-09-23**
-当前版本：**V0.5.0-alpha.5.8.0**
+当前版本：**V0.5.0-alpha.5.8.1**
 
 ```text
-App：0.5.0-alpha.5.8.0
+App：0.5.0-alpha.5.8.1
 Launcher：Grid V13（HomeLayout revision 13）
 IndexedDB：V18
 Backup：V12
-测试定义：70 files / 612 it-test declarations
+测试定义：70 files / 614 it-test declarations
 ```
 
 > 本文件只描述“现在”。历史版本请看 `CHANGELOG.md`、`RELEASE_HISTORY.md` 和 `releases/`。
 
-## 0. 本轮 alpha.5.8.0 重点 · 心跳飞行棋 V2.0 Alpha 沉浸互动重构
+## 0. 本轮 alpha.5.8.1 重点 · 心跳飞行棋 V2.1 面对面互动修正
 
+- **可拉伸互动面板**：题卡/对话 Bottom Sheet 支持上下拖动，三档停靠；默认只占中部高度，“看地图”可快速收起，顶部返回始终留在遮罩外。
+- **面对面固定**：新开/续局/再来一局统一使用 `reality`；真实地点可以是房间、酒店或任何双方实际所在空间，Runtime 不擅自猜地点。
+- **棋盘地点不是现实地点**：花店、公园、电影院、床边等只作为 Board Stop / 美术舞台传给模型与 Memory Bridge，禁止写成“现在在花店”等现实事实。
+- **单题单归属**：谁掷骰子，题目就只属于谁；另一方在题目完成后按人设、Memory 与当前对话自然回应，不再出现双方各自回答/共同承担同一道题。
 - **角色连续性成为主逻辑**：每次角色回应都重建 Character Context，合并角色卡稳定设定、当前 Conversation State、相关长期 Memory 与当前角色 Shared Timeline；游戏强度不能覆盖原人格，不再用“害羞/吃醋/反撩”固定反应池驱动角色。
 - **单人题也变成双方互动**：题目只决定谁先开口。用户回答后角色必须按人设/记忆回应；角色先答时用户也必须回应。双方可以继续多轮自由对话，只有双方都真实说过话才允许结束并推进棋局。
 - **角色可以自然收尾**：AI 返回 `endInteraction` 只表示角色认为当前段落自然收住；玩家仍可点“我还想继续”。游戏不再为了回合速度强行截断情侣互动。
@@ -25,7 +38,7 @@ Backup：V12
 - **双视觉模式**：新增“像素约会 / 浪漫地图”。像素模式使用完整 CSS 小人（头/身体/手脚/阴影）在地图上逐格走，不再是头像圆点；视觉模式不改变棋局状态或 Memory。
 - **恢复能力**：互动 ledger 按 gameId 持久化在 `appCustomizations`；刷新/继续上一局时可恢复尚未关闭的当前互动，而不是只恢复棋子位置。
 - **数据层继续克制**：IndexedDB V18、Backup V12、Launcher Grid V13、HomeLayout revision 13、CoupleBoardPreferences V2、CoupleBoardArchive V1 均不升级；新增 CoupleBoard Interaction Ledger V1 复用 `appCustomizations`。
-- **测试定义**：70 files / 612 declarations；当前容器 npm registry 依赖获取未完成，正式 `vitest + vue-tsc + vite build` 仍以 Windows 双门禁为发布事实源。
+- **测试定义**：70 files / 614 declarations；5.8.1 在 5.8.0 已实跑 612/612 的基础上新增单题单归属回归；本版本完整结果仍以 Windows 双门禁为发布事实源。
 
 
 ## 0. 本轮 alpha.5.7.4 重点 · 心跳飞行棋 V1.4 题库 V3
@@ -177,7 +190,7 @@ Backup：V12
 
 ## 0. 本轮 alpha.5.2.4 重点
 
-- **alpha.5.2.3 TypeScript 发布热修**：修复 Windows 首轮 verify 暴露的 TS2352 / TS6133 / TS2739。
+- **alpha.5.2.3 TypeScript 发布热修**：修复 Windows 首轮 verify 暴露的 TS2352 / TS6143 / TS2739。
 - Community UI compiled candidate 与 canonical `RegexPipelineView` 对齐，保留 `rawText` / `traces`；测试 Persona fixture 补齐真实必需字段。
 - ChatRoom 删除已无调用方的 `renderRoleplayText` import。
 - Runtime 行为、IndexedDB V18、Backup V12、Launcher Grid V13 / HomeLayout revision 12 均不变；测试矩阵仍为 52 文件 / 440 tests。
@@ -247,7 +260,7 @@ Backup：V12
 
 ## 0. 本轮 alpha.5.1.23 重点
 
-- 发布门禁热修：删除 `HomeScreen.vue` 中已无调用的 `pageDiagnosticLine()` 死代码，修复 `vue-tsc` 的 TS6133。
+- 发布门禁热修：删除 `HomeScreen.vue` 中已无调用的 `pageDiagnosticLine()` 死代码，修复 `vue-tsc` 的 TS6143。
 - 保留 alpha.5.1.22 的 Launcher canonical layout 修复：已有 `homeLayoutPages` 时不再从 legacy `homeAppKeys/homeWidgetKeys` 复活幽灵项目。
 - IndexedDB V18 / Backup V12 / Launcher Grid V13 / HomeLayout revision 12 均不变。
 - 测试定义仍为 42 文件 / 349 声明；最终以 Windows 两次 `npm run verify` 为准。

@@ -14,5 +14,6 @@ describe('coupleBoardMapService', () => {
     expect(stop.name).toBe('床边')
     expect(mapStopBias(stop).themes).toContain('intimacy')
     expect(mapStopBias(stop).themes).toContain('private')
+    expect(mapStopBias(stop).boardStop).toBe(stop.name)
   })
 })

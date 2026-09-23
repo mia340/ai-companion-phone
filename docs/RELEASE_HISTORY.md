@@ -1,3 +1,16 @@
+## V0.5.0-alpha.5.8.1 · Couple Board V2.1 face-to-face interaction correction
+
+## 0.5.0-alpha.5.8.2 · Couple Board V2.2
+
+- 心跳飞行棋改为固定 50/50 分屏：上半地图、下半互动，同一题期间页面结构不再展开/收起或遮住地图。
+- 删除当前题“换一题”能力，也移除用 Memory 题覆盖当前题的入口；骰子落到哪题就围绕哪题互动。
+- 新增双方跳过同意协议：用户题由角色决定是否同意跳过；角色题只有角色主动请求后才交给用户批准。
+- 跳过请求进入 Interaction Ledger，可随续局恢复；现实身体互动仍可由任意一方随时拒绝或终止。
+- Couple Board V2.2 release safety 新增固定分屏、禁止换题和 mutual skip-consent 守卫。
+
+
+V2.1 针对首轮实机体验修正互动规则：Bottom Sheet 改为可上下拉伸并保留顶部返回/地图视野；游戏固定现实面对面，但具体真实地点不预设，棋盘的花店、公园、电影院、床边只作为 Board Stop，禁止被角色或 Memory 当成现实环境。每道题严格归本轮掷骰者，另一方只在完成后按人设与记忆自然回应；内置大冒险同步移除“双方各说/共同承担”式任务。数据 schema 不升级。
+
 ## V0.5.0-alpha.5.8.0 · Couple Board V2.0 Alpha immersive interaction
 
 心跳飞行棋第一次把“角色是谁、角色记得什么、这一局之后又记住什么”放在棋盘规则之上。角色每次回应都从角色卡、当前会话状态、相关长期 Memory 与 Shared Timeline 建立上下文，不再套通用恋爱反应模板；引用过去共同经历时必须有合法 evidence id。单人题只决定谁先开始，Interaction Ledger 允许双方围绕一个问题持续多轮，角色可自然收尾，玩家也可以继续。

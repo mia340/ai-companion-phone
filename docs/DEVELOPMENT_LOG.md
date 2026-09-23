@@ -1,3 +1,21 @@
+## 2026-09-23 · V0.5.0-alpha.5.8.1 · 心跳飞行棋 V2.1 面对面互动修正
+
+## 0.5.0-alpha.5.8.2 · Couple Board V2.2
+
+- 心跳飞行棋改为固定 50/50 分屏：上半地图、下半互动，同一题期间页面结构不再展开/收起或遮住地图。
+- 删除当前题“换一题”能力，也移除用 Memory 题覆盖当前题的入口；骰子落到哪题就围绕哪题互动。
+- 新增双方跳过同意协议：用户题由角色决定是否同意跳过；角色题只有角色主动请求后才交给用户批准。
+- 跳过请求进入 Interaction Ledger，可随续局恢复；现实身体互动仍可由任意一方随时拒绝或终止。
+- Couple Board V2.2 release safety 新增固定分屏、禁止换题和 mutual skip-consent 守卫。
+
+
+- 根据实机截图把 challenge Bottom Sheet 改为三档高度 + 拖拽；默认 55%，可快速收至 28% 查看地图，最大 82%，并把遮罩起点下移到 topbar 下方，返回键不会再被面板覆盖。
+- 新局、续局和再来一局统一强制 `reality`；实际空间可以是房间、酒店或其他位置，只有用户/可信记忆明确说明时才允许模型知道具体地点。
+- Partner Reply / Role Continuity Audit / Memory Bridge 统一把 `花店/公园/电影院/床边` 等标记为虚构 Board Stop，禁止写成现实地点或共同经历。
+- Memory AI 出题加入严格单题单归属：当前掷骰者独自承担回答/动作，另一方只在后续互动里自然回应；四条残留“双人共同作答”大冒险已改成当前玩家先做/先说。
+- 对话气泡删除重复姓名标签；历史回忆册仅把旧 `chat` 局标记为“旧版聊天局”，不会把历史数据伪装成面对面。
+- 静态测试定义 70 files / 614 declarations；完整 `vitest + vue-tsc + vite build` 仍交 Windows 双门禁。
+
 ## 2026-09-23 · V0.5.0-alpha.5.8.0 · 心跳飞行棋 V2.0 Alpha
 
 - 把 Couple Board 从“骰子 + 题卡”改成 Interaction-first：新增持久化 Interaction Ledger，单人题只是决定先手，双方都必须真实参与后才能完成。
@@ -124,11 +142,11 @@
 
 - Windows PowerShell `Expand-Archive` failed on alpha.5.1.23 before package validation because several historical Chinese document filenames in the ZIP were encoded as CP437/mojibake without the UTF-8 flag.
 - Repaired those filenames back to their intended Chinese names (for example `部署与更新.md`, `知间产品原则.md`, `START_HERE_小白启动指南.md`) and rebuilt the Windows Safe ZIP with UTF-8 filename metadata.
-- Source/runtime behavior is otherwise unchanged from alpha.5.1.23; the TypeScript TS6133 hotfix and canonical HomeLayout fix are preserved.
+- Source/runtime behavior is otherwise unchanged from alpha.5.1.23; the TypeScript TS6143 hotfix and canonical HomeLayout fix are preserved.
 
 ## 2026-09-20 · V0.5.0-alpha.5.1.23
 
-- Windows 发布门禁确认 42/42 测试文件、349/349 测试通过，但 `vue-tsc` 因未使用的 `pageDiagnosticLine()` 报 TS6133。
+- Windows 发布门禁确认 42/42 测试文件、349/349 测试通过，但 `vue-tsc` 因未使用的 `pageDiagnosticLine()` 报 TS6143。
 - 删除该无引用 dead code，不放宽 TypeScript 严格检查，也不修改测试。
 - 为避免同版本 ZIP 覆盖混淆，发布版本推进到 alpha.5.1.23。
 

@@ -15,7 +15,7 @@ const interaction: CoupleBoardInteraction = {
 describe('coupleBoardMemoryBridge', () => {
   it('stores the game interaction as what was actually said, not an invented fact', () => {
     const text = buildCoupleBoardMemoryEventText(interaction, '阿澈')
-    expect(text).toContain('心跳飞行棋 · 沙发边')
+    expect(text).toContain('心跳飞行棋（棋盘格：沙发边，仅游戏舞台）')
     expect(text).toContain('用户：「我喜欢你从后面抱我。」')
     expect(text).toContain('阿澈：「好，我会记住。」')
   })

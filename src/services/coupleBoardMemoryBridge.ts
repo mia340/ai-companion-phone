@@ -42,7 +42,7 @@ export function buildCoupleBoardMemoryEventText(interaction: CoupleBoardInteract
     .slice(-8)
     .map(message => `${speakerLabel(message.speaker, characterName)}：「${clean(message.text, 180)}」`)
   if (!lines.length) return ''
-  return clean(`心跳飞行棋 · ${interaction.locationName}：${lines.join('；')}`, 760)
+  return clean(`心跳飞行棋（棋盘格：${interaction.locationName}，仅游戏舞台）：${lines.join('；')}`, 760)
 }
 
 function parseJsonArray(raw: string): unknown[] {
@@ -99,6 +99,7 @@ export function buildCoupleBoardMemoryCandidateMessages(options: {
       content: [
         '你在做长期记忆整理。只能提取这段“心跳飞行棋”互动里明确说出来、以后确实值得记住的稳定信息。',
         '禁止把题目里的假设、幻想、角色扮演条件句、玩笑或临时情绪改写成现实事实。',
+        '棋盘格名称只是游戏舞台，不是现实地点；不能把“花店/公园/电影院/床边”等棋盘格提炼成现实共同经历。',
         '如果用户说“如果/假如/想象/也许以后”，除非同时明确表达稳定偏好，否则标为 hypothetical，最终不会写入。',
         '不能推断没有说出口的性格、欲望、关系状态或共同经历。不能把游戏题目本身当事实。',
         `角色名是 ${options.character.name}。如果记录角色自己的表达，要写成“${options.character.name}表示/喜欢/不喜欢……”，不要伪装成用户事实。`,
@@ -111,7 +112,7 @@ export function buildCoupleBoardMemoryCandidateMessages(options: {
       role: 'user',
       content: JSON.stringify({
         question: options.interaction.questionText,
-        location: options.interaction.locationName,
+        boardStop: options.interaction.locationName,
         transcript
       })
     }

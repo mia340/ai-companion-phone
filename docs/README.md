@@ -1,12 +1,14 @@
 # AI Companion Phone 文档中心
 
-当前开发线：**V0.5.0-alpha.5.8.0**
+当前 Couple Board：`V2.2 / 0.5.0-alpha.5.8.2`，固定半屏地图 + 半屏互动，当前题不可替换，跳过需对方同意。
+
+当前开发线：**V0.5.0-alpha.5.8.1**
 
 ```text
-应用：0.5.0-alpha.5.8.0
+应用：0.5.0-alpha.5.8.1
 IndexedDB：V18
 Backup：V12
-测试定义：70 个测试文件 / 612 个 it/test 声明
+测试定义：70 个测试文件 / 614 个 it/test 声明
 当前 UI 主线：Launcher Grid V13 / HomeLayout revision 13（4×6 网格 / insert+reflow / App 文件夹 / Inspector V4）+ 原生 App「时光」「心跳飞行棋 V2」
 ```
 
@@ -18,7 +20,7 @@ Backup：V12
 
 1. `START_HERE_小白启动指南.md`：第一次启动、Build、常见问题。
 2. `部署与更新.md`：长期通用的 Windows / Git / Build 流程。
-3. `releases/V0.5.0-alpha.5.8.0_部署与更新.md`：当前版本的专项验收步骤。
+3. `releases/V0.5.0-alpha.5.8.1_部署与更新.md`：当前版本的专项验收步骤。
 
 ### 当前开发单一事实源
 
