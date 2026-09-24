@@ -1,3 +1,7 @@
+## V0.5.0-alpha.5.9.1 · Wardrobe V1.1 / Pixel Avatar polish
+
+穿搭 App 完成第一轮实机视觉返工：固定人物预览、分类编辑器和更清晰的原创 16-bit 风格小人。没有升级 IndexedDB、Backup 或 Wardrobe schema。
+
 ## V0.5.0-alpha.5.9.0 · Companion Avatar V1 / Wardrobe V1 / Couple Board V2.3
 
 这一版把“飞行棋小人”升级为整个小手机可复用的角色视觉基础设施。新增独立「穿搭」App，用户自己与每一个角色都拥有独立 Avatar Profile，可选男女 Q 版骨架、发型、肤色、服装颜色、配饰与多套 Outfit。穿搭状态保存在 appCustomizations 非索引字段中，不升级 IndexedDB。

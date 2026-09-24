@@ -1,12 +1,12 @@
 # AI Companion Phone 文档中心
 
-当前开发线：**V0.5.0-alpha.5.9.0**。新增独立「穿搭」App / Companion Avatar V1；心跳飞行棋为 `V2.3`，共享穿搭小人、紧凑 HUD 与更大的地图已经接入。
+当前开发线：**V0.5.0-alpha.5.9.1**。「穿搭」App 已升级到 Wardrobe V1.1 / Companion Avatar V1.1：固定人物预览、分类编辑和重画后的正面像素小人；心跳飞行棋仍为 `V2.3` 并继续复用同一套造型。
 
 ```text
-应用：0.5.0-alpha.5.9.0
+应用：0.5.0-alpha.5.9.1
 IndexedDB：V18
 Backup：V12
-Launcher：Grid V14 / HomeLayout revision 14
+Launcher：Grid V13 / HomeLayout revision 14
 ```
 
 这里是项目 Markdown 文档的**唯一保管入口**。项目根目录不再散放逐版本说明；版本交付文档统一在 `docs/releases/`，同类项目研究统一在 `docs/research/`。
@@ -17,7 +17,7 @@ Launcher：Grid V14 / HomeLayout revision 14
 
 1. `START_HERE_小白启动指南.md`：第一次启动、Build、常见问题。
 2. `部署与更新.md`：长期通用的 Windows / Git / Build 流程。
-3. `releases/V0.5.0-alpha.5.8.1_部署与更新.md`：当前版本的专项验收步骤。
+3. `releases/V0.5.0-alpha.5.9.1_部署与更新.md`：当前版本的专项验收步骤。
 
 ### 当前开发单一事实源
 

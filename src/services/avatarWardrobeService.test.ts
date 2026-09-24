@@ -37,4 +37,13 @@ describe('avatarWardrobeService', () => {
     expect(look.bottomStyle).toBe('skirt')
     expect(look.topColor).toMatch(/^#/)
   })
+
+
+  it('keeps Wardrobe V1 persisted profiles compatible with the V1.1 editor and sprite refresh', () => {
+    const profile = createAvatarAppearanceProfile('self', 'self', 'female')
+    const state = normalizeWardrobeState({ version: 1, profiles: { self: profile } })
+    expect(state.version).toBe(1)
+    expect(state.profiles.self.activeOutfitId).toBe(profile.activeOutfitId)
+    expect(resolveAvatarLook(state.profiles.self).hairStyle).toBe(profile.hairStyle)
+  })
 })

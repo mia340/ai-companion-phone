@@ -1,3 +1,11 @@
+## V0.5.0-alpha.5.9.1 · Wardrobe V1.1 / Pixel Avatar polish
+
+- 穿搭 App 改成固定预览工作台：上半部人物永远可见，下半部分类编辑独立滚动。
+- 删除超长表单体验，改为人物 / 头发 / 上装 / 下装 / 配饰 / 套装六个 Tab。
+- CompanionPixelAvatar 重画为 64×82 正面 SVG 像素骨架，修复长发遮脸和块状“背影感”。
+- 预览场景改为温暖像素更衣室，切换任何选项都能即时看到结果。
+- Wardrobe 数据格式不变，飞行棋与后续小游戏继续复用同一 Avatar Runtime。
+
 ## V0.5.0-alpha.5.9.0 · Companion Avatar V1 / 穿搭 App / Couple Board V2.3
 
 - 新增独立「穿搭」App：用户自己和每一个角色都拥有独立 Avatar Profile，可切换女生 / 男生版型并保存多套穿搭。

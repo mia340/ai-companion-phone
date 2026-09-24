@@ -189,13 +189,20 @@ async function checkSource() {
       !appCustomizationSource.includes('HOME_LAYOUT_REVISION = 14')) {
     fail('Companion Wardrobe V1 must have a concrete launcher route and one-time launcher migration')
   }
-  if (!wardrobeView.includes('COMPANION WARDROBE · V1') ||
+  if (!wardrobeView.includes('WARDROBE · V1.1') ||
+      !wardrobeView.includes('<PhoneFrame lock-scroll>') ||
+      !wardrobeView.includes('wardrobe-workbench') ||
+      !wardrobeView.includes('preview-pane') ||
+      !wardrobeView.includes('editor-tabs') ||
+      !wardrobeView.includes('editor-scroll') ||
+      !wardrobeView.includes('selectTab(tab.id)') ||
       !wardrobeView.includes("changeGender('female')") ||
       !wardrobeView.includes("changeGender('male')") ||
       !wardrobeService.includes('SELF_AVATAR_TARGET_ID') ||
       !wardrobeService.includes('profiles: Record<string, AvatarAppearanceProfile>') ||
-      !avatarComponent.includes('companion-pixel-avatar')) {
-    fail('Wardrobe V1 must support self + per-character male/female appearance profiles through the shared avatar runtime')
+      !avatarComponent.includes('pixel-avatar') ||
+      !avatarComponent.includes('viewBox="0 0 64 82"')) {
+    fail('Wardrobe V1.1 must keep a fixed always-visible avatar preview, tabbed editor, male/female profiles and the shared pixel avatar runtime')
   }
   if (!coupleBoardView.includes(':appearance="userAppearance"') ||
       !coupleBoardView.includes(':appearance="partnerAppearance"') ||
@@ -204,7 +211,7 @@ async function checkSource() {
       !coupleBoardView.includes('.love-game-shell.is-game.has-challenge .board-card{left:10px;right:10px;top:91px;bottom:49.5%')) {
     fail('Couple Board V2.3 must use wardrobe sprites, compact HUD and the enlarged fixed map')
   }
-  pass('Companion Avatar V1 / Wardrobe V1 / Couple Board V2.3 visual integration are guarded')
+  pass('Companion Avatar V1.1 / Wardrobe V1.1 / Couple Board V2.3 visual integration are guarded')
 
   const requiredDocs = [
     'docs/部署与更新.md',
