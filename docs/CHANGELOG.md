@@ -848,3 +848,11 @@
 - 事件摘要/备注使用稳定 evidence fingerprint；隐藏或变更 evidence 后旧摘要自动失效。
 - 主动旧事可使用仍有效的确认摘要，event/evidence provenance guard 不变。
 - IndexedDB V18 / Backup V12 不变；预期测试矩阵 59 files / 500 tests。
+
+## 0.5.0-alpha.5.9.2
+
+- Wardrobe V1.2：重画暖系 48×64 像素角色骨架。
+- 扩充男女衣服、鞋履和分层配饰。
+- 增加自由 HEX / 颜色选择器和常用色收藏。
+- 增加角色每日自主换装与 30 天轻量 Outfit History。
+- 老 V1/V1.1 穿搭自动兼容升级，不提升 IndexedDB。

@@ -187,22 +187,27 @@ async function checkSource() {
   if (!routerSource.includes("path: '/app/穿搭'") ||
       !appCustomizationSource.includes("key: 'wardrobe'") ||
       !appCustomizationSource.includes('HOME_LAYOUT_REVISION = 14')) {
-    fail('Companion Wardrobe V1 must have a concrete launcher route and one-time launcher migration')
+    fail('Companion Wardrobe must keep a concrete launcher route and launcher migration')
   }
-  if (!wardrobeView.includes('WARDROBE · V1.1') ||
+  if (!wardrobeView.includes('WARDROBE · V1.2') ||
       !wardrobeView.includes('<PhoneFrame lock-scroll>') ||
       !wardrobeView.includes('wardrobe-workbench') ||
       !wardrobeView.includes('preview-pane') ||
       !wardrobeView.includes('editor-tabs') ||
       !wardrobeView.includes('editor-scroll') ||
-      !wardrobeView.includes('selectTab(tab.id)') ||
+      !wardrobeView.includes("type=\"color\"") ||
+      !wardrobeView.includes('每日自主换装') ||
       !wardrobeView.includes("changeGender('female')") ||
       !wardrobeView.includes("changeGender('male')") ||
-      !wardrobeService.includes('SELF_AVATAR_TARGET_ID') ||
+      !wardrobeService.includes('chooseDailyOutfit') ||
+      !wardrobeService.includes('rememberCustomColor') ||
+      !wardrobeService.includes('HEADWEAR') ||
+      !wardrobeService.includes('FACEWEAR') ||
+      !wardrobeService.includes('NECKWEAR') ||
       !wardrobeService.includes('profiles: Record<string, AvatarAppearanceProfile>') ||
       !avatarComponent.includes('pixel-avatar') ||
-      !avatarComponent.includes('viewBox="0 0 64 82"')) {
-    fail('Wardrobe V1.1 must keep a fixed always-visible avatar preview, tabbed editor, male/female profiles and the shared pixel avatar runtime')
+      !avatarComponent.includes('viewBox="0 0 48 64"')) {
+    fail('Wardrobe V1.2 must keep the always-visible warm pixel preview, richer clothes/accessories, free color picker and daily outfit runtime')
   }
   if (!coupleBoardView.includes(':appearance="userAppearance"') ||
       !coupleBoardView.includes(':appearance="partnerAppearance"') ||
@@ -211,7 +216,7 @@ async function checkSource() {
       !coupleBoardView.includes('.love-game-shell.is-game.has-challenge .board-card{left:10px;right:10px;top:91px;bottom:49.5%')) {
     fail('Couple Board V2.3 must use wardrobe sprites, compact HUD and the enlarged fixed map')
   }
-  pass('Companion Avatar V1.1 / Wardrobe V1.1 / Couple Board V2.3 visual integration are guarded')
+  pass('Companion Avatar V1.2 / Wardrobe V1.2 daily outfit + free color integration are guarded')
 
   const requiredDocs = [
     'docs/部署与更新.md',

@@ -552,3 +552,8 @@ npm run verify
 
 - Shared Timeline V1.2 behavior unchanged.
 - Proactive recall safety regression test corrected; expected matrix remains 57 test files / 481 tests.
+
+
+### 0.5.0-alpha.5.9.2
+
+Companion Avatar / Wardrobe 已推进到 V1.2：角色形象使用公共 48×64 暖系像素 Runtime，支持分层配饰、自由 HEX 配色、推荐套装与每日自主换装；飞行棋继续直接读取同一 Avatar 数据。

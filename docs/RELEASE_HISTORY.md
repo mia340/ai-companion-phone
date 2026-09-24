@@ -5369,3 +5369,7 @@ Theme、未知 JSON 与未知文本可以归档，但不会直接执行。第三
 - AI 脉络摘要使用 arc fingerprint + node/evidence 完整集合 guard，用户确认后才持久化。
 - 支持把关系脉络带回真实聊天草稿，永不自动发送。
 - DB V18 / Backup V12 / HomeLayout revision 12 不变。
+
+## V0.5.0-alpha.5.9.2
+
+穿搭 V1.2 / Avatar V1.2：像素比例重画、更多服装配饰、自由配色、角色每日自主换装。数据继续复用 V18 / Backup V12。
