@@ -12,6 +12,7 @@ export type HomeAppKey =
   | 'wallet'
   | 'turtle-soup'
   | 'couple-board'
+  | 'wardrobe'
   | 'profile'
   | 'memory'
   | 'timeline'
@@ -37,7 +38,7 @@ export interface HomeWidgetSettings {
 export const HOME_GRID_COLUMNS = 4
 export const HOME_GRID_ROWS = 6
 export const MAX_HOME_PAGES = 8
-export const HOME_LAYOUT_REVISION = 13
+export const HOME_LAYOUT_REVISION = 14
 
 export interface HomeAppDefinition {
   key: HomeAppKey
@@ -179,6 +180,7 @@ const APP_CATALOG: readonly HomeAppDefinition[] = [
   { key: 'music', label: '音乐', route: '/app/音乐', icon: 'music', tone: ['#8f9cde', '#b9c4ef'] },
   { key: 'turtle-soup', label: '海龟汤', route: '/app/海龟汤', icon: 'turtle-soup', tone: ['#75bcc4', '#a8d8d3'] },
   { key: 'couple-board', label: '心跳飞行棋', route: '/app/心跳飞行棋', icon: 'couple-board', tone: ['#9b3f67', '#dc829d'] },
+  { key: 'wardrobe', label: '穿搭', route: '/app/穿搭', icon: 'wardrobe', tone: ['#b6748d', '#e6b7c8'] },
   { key: 'profile', label: '我的资料', route: '/profile', icon: 'profile', tone: ['#9aa6df', '#c5cdf0'] },
   { key: 'memory', label: '记忆', route: '/memory', icon: 'memory', tone: ['#a8a1dc', '#d0c9ee'] },
   { key: 'timeline', label: '时光', route: '/app/时光', icon: 'timeline', tone: ['#b98a7d', '#dfb9ad'] },
@@ -192,6 +194,7 @@ export const HOME_APPS: HomeAppDefinition[] = pickApps([
   'music',
   'turtle-soup',
   'couple-board',
+  'wardrobe',
   'profile',
   'memory',
   'timeline',
@@ -1336,7 +1339,7 @@ export async function loadHomeAppearance(worldId: string): Promise<HomeAppearanc
   })
   const repaired = repairHomeLayoutIntegrity(normalized)
 
-  // Launcher revision 13 自愈：历史版本可能残留 Dock/桌面重复项、重复 Widget、空页或缺少新 App。
+  // Launcher revision 14 自愈：历史版本可能残留 Dock/桌面重复项、重复 Widget、空页或缺少新 App。
   // 读取时已经会归一化；这里把归一化结果回写一次，避免下一次启动继续携带幽灵页。
   if (row) {
     const storedPages = Array.isArray(row.homeLayoutPages) ? row.homeLayoutPages : []
@@ -1528,6 +1531,7 @@ export function normalizeHomeAppearance(value: HomeAppearanceInput): HomeAppeara
   let migratedPages = rawLayoutPages
   if (storedRevision < 12) migratedPages = migrateLegacyWidgetSizes(migratedPages)
   if (storedRevision < 13) migratedPages = migrateCoupleBoardLauncherApp(migratedPages)
+  if (storedRevision < 14) migratedPages = migrateWardrobeLauncherApp(migratedPages)
   // 无论来自旧数据、迁移结果还是当前写入，都必须经过最终空页压缩。
   // 这样中间空页、尾部空页和历史临时页都不可能进入稳定 HomeLayout。
   const homeLayoutPages = compactLayoutPages(migratedPages)
@@ -1574,6 +1578,14 @@ function migrateCoupleBoardLauncherApp(pages: HomeLayoutPage[]): HomeLayoutPage[
   const next = pages.map(page => ({ items: page.items.map(item => ({ ...item })) as HomeLayoutItem[] }))
   if (collectPageAppKeys(next).includes('couple-board')) return next
   const item = createAppItem('couple-board', 0, 0)
+  placeOnAnyPage(next, { ...item, x: undefined, y: undefined }, 0)
+  return next
+}
+
+function migrateWardrobeLauncherApp(pages: HomeLayoutPage[]): HomeLayoutPage[] {
+  const next = pages.map(page => ({ items: page.items.map(item => ({ ...item })) as HomeLayoutItem[] }))
+  if (collectPageAppKeys(next).includes('wardrobe')) return next
+  const item = createAppItem('wardrobe', 0, 0)
   placeOnAnyPage(next, { ...item, x: undefined, y: undefined }, 0)
   return next
 }

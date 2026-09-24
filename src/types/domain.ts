@@ -40,6 +40,8 @@ export interface AppCustomization {
   coupleBoardArchive?: unknown
   /** 心跳飞行棋 V2：局内自由互动 ledger，复用非索引字段，不增加 IndexedDB store。 */
   coupleBoardInteractionLedger?: unknown
+  /** Companion Avatar / 穿搭：所有角色与用户自己的 Q 版形象和多套穿搭，复用非索引字段。 */
+  wardrobeState?: unknown
   sharedTimelineState?: {
     starredIds?: string[]
     hiddenIds?: string[]

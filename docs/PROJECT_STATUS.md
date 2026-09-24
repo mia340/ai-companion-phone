@@ -1,5 +1,21 @@
 # AI Companion Phone · 当前项目状态
 
+## 0.5.0-alpha.5.9.0 · Companion Avatar V1 / Couple Board V2.3
+
+当前新增独立「穿搭」App，用户自己和每一个角色都可以分别设计 Q 版形象并保存多套穿搭；男女版型使用不同发型、上装和下装选项。共享 Avatar Runtime 已被心跳飞行棋接入，后续其他小游戏可以直接复用。
+
+心跳飞行棋 V2.3 继续保持固定地图 / 互动连续布局，并收窄顶部人物区、放大地图、缩小 Board Stop 信息牌。角色 Memory、Shared Timeline、OOC 审校、单题单归属、不可换题和跳过需对方同意规则不变。
+
+更新于：**2026-09-23**
+当前版本：**V0.5.0-alpha.5.9.0**
+
+```text
+App：0.5.0-alpha.5.9.0
+Launcher：Grid V14（HomeLayout revision 14）
+IndexedDB：V18
+Backup：V12
+```
+
 ## 0.5.0-alpha.5.8.2 · Couple Board V2.2
 
 - 心跳飞行棋改为固定 50/50 分屏：上半地图、下半互动，同一题期间页面结构不再展开/收起或遮住地图。

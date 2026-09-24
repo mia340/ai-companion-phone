@@ -12,9 +12,10 @@ describe('homeLayoutBackup', () => {
   })
 
 
-  it('ships the couple board app in the default launcher catalog', () => {
+  it('ships couple board + wardrobe in the default launcher catalog', () => {
     expect(DEFAULT_HOME_APPEARANCE.homeAppKeys).toContain('couple-board')
-    expect(HOME_LAYOUT_REVISION).toBe(13)
+    expect(DEFAULT_HOME_APPEARANCE.homeAppKeys).toContain('wardrobe')
+    expect(HOME_LAYOUT_REVISION).toBe(14)
   })
 
   it('adds the couple board app once when migrating a revision 12 launcher', () => {
@@ -29,6 +30,22 @@ describe('homeLayoutBackup', () => {
     })
     const matches = restored.homeLayoutPages.flatMap(page => page.items)
       .filter(item => item.type === 'app' && item.key === 'couple-board')
+    expect(matches).toHaveLength(1)
+  })
+
+
+  it('adds the wardrobe app once when migrating a revision 13 launcher', () => {
+    const legacyPages = DEFAULT_HOME_APPEARANCE.homeLayoutPages.map(page => ({
+      items: page.items.filter(item => !(item.type === 'app' && item.key === 'wardrobe'))
+    }))
+    const restored = normalizeHomeAppearance({
+      ...DEFAULT_HOME_APPEARANCE,
+      homeLayoutRevision: 13,
+      homeLayoutPages: legacyPages,
+      homeAppKeys: DEFAULT_HOME_APPEARANCE.homeAppKeys.filter(key => key !== 'wardrobe')
+    })
+    const matches = restored.homeLayoutPages.flatMap(page => page.items)
+      .filter(item => item.type === 'app' && item.key === 'wardrobe')
     expect(matches).toHaveLength(1)
   })
 

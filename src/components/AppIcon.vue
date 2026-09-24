@@ -70,6 +70,12 @@ const props = withDefaults(defineProps<{
         <path d="M14 35h36" stroke="white" stroke-width="3" stroke-linecap="round" opacity=".8"/>
         <path d="M48 19c4-3 7-1 6 3" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"/>
       </g>
+      <g v-else-if="props.icon === 'wardrobe'">
+        <path d="M20 17 27 12h10l7 5 8 5-5 9-5-3v23H22V28l-5 3-5-9 8-5Z" fill="rgba(255,255,255,.95)"/>
+        <path d="M27 12c.8 4 2.4 6 5 6s4.2-2 5-6" fill="none" stroke="var(--icon-a)" stroke-width="2.8" stroke-linecap="round" opacity=".68"/>
+        <path d="M27 29h10M27 36h10" stroke="var(--icon-a)" stroke-width="2.6" stroke-linecap="round" opacity=".5"/>
+        <path d="m44 12 1.1 2.8L48 16l-2.9 1.1L44 20l-1.1-2.9L40 16l2.9-1.2L44 12Z" fill="white"/>
+      </g>
       <g v-else-if="props.icon === 'couple-board'">
         <rect x="14" y="14" width="36" height="36" rx="12" fill="rgba(255,255,255,.94)" transform="rotate(-7 32 32)"/>
         <circle cx="24" cy="25" r="3" fill="var(--icon-a)" opacity=".78"/>

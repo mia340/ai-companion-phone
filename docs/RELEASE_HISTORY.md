@@ -1,3 +1,9 @@
+## V0.5.0-alpha.5.9.0 · Companion Avatar V1 / Wardrobe V1 / Couple Board V2.3
+
+这一版把“飞行棋小人”升级为整个小手机可复用的角色视觉基础设施。新增独立「穿搭」App，用户自己与每一个角色都拥有独立 Avatar Profile，可选男女 Q 版骨架、发型、肤色、服装颜色、配饰与多套 Outfit。穿搭状态保存在 appCustomizations 非索引字段中，不升级 IndexedDB。
+
+心跳飞行棋 V2.3 改用共享 CompanionPixelAvatar，读取双方当前穿搭；同时进一步压缩 HUD、扩大地图、弱化遮挡地图的地点说明。Memory、Shared Timeline 和角色一致性仍然是互动生成的事实层，视觉换装不会改写角色人格或关系事实。
+
 ## V0.5.0-alpha.5.8.1 · Couple Board V2.1 face-to-face interaction correction
 
 ## 0.5.0-alpha.5.8.2 · Couple Board V2.2

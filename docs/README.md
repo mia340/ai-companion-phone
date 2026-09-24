@@ -1,15 +1,12 @@
 # AI Companion Phone 文档中心
 
-当前 Couple Board：`V2.2 / 0.5.0-alpha.5.8.2`，固定半屏地图 + 半屏互动，当前题不可替换，跳过需对方同意。
-
-当前开发线：**V0.5.0-alpha.5.8.1**
+当前开发线：**V0.5.0-alpha.5.9.0**。新增独立「穿搭」App / Companion Avatar V1；心跳飞行棋为 `V2.3`，共享穿搭小人、紧凑 HUD 与更大的地图已经接入。
 
 ```text
-应用：0.5.0-alpha.5.8.1
+应用：0.5.0-alpha.5.9.0
 IndexedDB：V18
 Backup：V12
-测试定义：70 个测试文件 / 614 个 it/test 声明
-当前 UI 主线：Launcher Grid V13 / HomeLayout revision 13（4×6 网格 / insert+reflow / App 文件夹 / Inspector V4）+ 原生 App「时光」「心跳飞行棋 V2」
+Launcher：Grid V14 / HomeLayout revision 14
 ```
 
 这里是项目 Markdown 文档的**唯一保管入口**。项目根目录不再散放逐版本说明；版本交付文档统一在 `docs/releases/`，同类项目研究统一在 `docs/research/`。

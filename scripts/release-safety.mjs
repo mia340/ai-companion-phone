@@ -131,7 +131,7 @@ async function checkSource() {
   const coupleBoardMemoryBridge = await readText('src/services/coupleBoardMemoryBridge.ts')
   const coupleBoardMemoryPrompt = await readText('src/services/coupleBoardMemoryPromptService.ts')
   const coupleBoardMap = await readText('src/services/coupleBoardMapService.ts')
-  if (!coupleBoardView.includes('COUPLE BOARD · V2.2 ALPHA') ||
+  if (!coupleBoardView.includes('COUPLE BOARD · V2.3 ALPHA') ||
       !coupleBoardView.includes('CoupleBoardPixelSprite') ||
       !coupleBoardView.includes('syncCoupleBoardInteractionMemory')) {
     fail('Couple Board V2 immersive UI / pixel sprite / Memory Bridge must stay wired')
@@ -160,7 +160,7 @@ async function checkSource() {
   }
   if (!coupleBoardView.includes("'has-challenge': Boolean(game?.pending && pendingPrompt)") ||
       !coupleBoardView.includes('.love-game-shell.is-game.has-challenge .board-card') ||
-      !coupleBoardView.includes('.challenge-backdrop{position:absolute;z-index:20;left:0;right:0;top:50%;bottom:0')) {
+      !coupleBoardView.includes('.challenge-backdrop{top:50.5%;bottom:0;padding:4px 10px 6px}')) {
     fail('Couple Board V2.2 must keep the fixed half-map / half-interaction layout')
   }
   if (!coupleBoardInteraction.includes('棋盘地点（例如花店、公园、电影院、床边）只是虚构棋盘格') ||
@@ -180,6 +180,31 @@ async function checkSource() {
     fail('Couple Board V2.2 must forbid question replacement and require partner approval for skips')
   }
   pass('Couple Board V2.2 fixed split layout, no-replace and mutual skip-consent rules are guarded')
+
+  const wardrobeView = await readText('src/views/WardrobeView.vue')
+  const wardrobeService = await readText('src/services/avatarWardrobeService.ts')
+  const avatarComponent = await readText('src/components/avatar/CompanionPixelAvatar.vue')
+  if (!routerSource.includes("path: '/app/穿搭'") ||
+      !appCustomizationSource.includes("key: 'wardrobe'") ||
+      !appCustomizationSource.includes('HOME_LAYOUT_REVISION = 14')) {
+    fail('Companion Wardrobe V1 must have a concrete launcher route and one-time launcher migration')
+  }
+  if (!wardrobeView.includes('COMPANION WARDROBE · V1') ||
+      !wardrobeView.includes("changeGender('female')") ||
+      !wardrobeView.includes("changeGender('male')") ||
+      !wardrobeService.includes('SELF_AVATAR_TARGET_ID') ||
+      !wardrobeService.includes('profiles: Record<string, AvatarAppearanceProfile>') ||
+      !avatarComponent.includes('companion-pixel-avatar')) {
+    fail('Wardrobe V1 must support self + per-character male/female appearance profiles through the shared avatar runtime')
+  }
+  if (!coupleBoardView.includes(':appearance="userAppearance"') ||
+      !coupleBoardView.includes(':appearance="partnerAppearance"') ||
+      !coupleBoardView.includes("router.push('/app/穿搭')") ||
+      !coupleBoardView.includes('.location-card{left:7px;right:auto') ||
+      !coupleBoardView.includes('.love-game-shell.is-game.has-challenge .board-card{left:10px;right:10px;top:91px;bottom:49.5%')) {
+    fail('Couple Board V2.3 must use wardrobe sprites, compact HUD and the enlarged fixed map')
+  }
+  pass('Companion Avatar V1 / Wardrobe V1 / Couple Board V2.3 visual integration are guarded')
 
   const requiredDocs = [
     'docs/部署与更新.md',

@@ -30,6 +30,7 @@ describe('知间桌面入口与布局', () => {
       'music',
       'turtle-soup',
       'couple-board',
+      'wardrobe',
       'profile',
       'memory',
       'timeline',
@@ -37,6 +38,7 @@ describe('知间桌面入口与布局', () => {
     ])
     expect(HOME_APPS.find(item => item.key === 'music')?.route).toBe('/app/音乐')
     expect(HOME_APPS.find(item => item.key === 'turtle-soup')?.route).toBe('/app/海龟汤')
+    expect(HOME_APPS.find(item => item.key === 'wardrobe')?.route).toBe('/app/穿搭')
     expect(DOCK_APPS.map(item => item.key)).toEqual([
       'banxin',
       'new-character',
@@ -52,6 +54,7 @@ describe('知间桌面入口与布局', () => {
       'music',
       'turtle-soup',
       'couple-board',
+      'wardrobe',
       'profile',
       'memory',
       'timeline',

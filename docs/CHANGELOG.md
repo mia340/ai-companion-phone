@@ -1,3 +1,11 @@
+## V0.5.0-alpha.5.9.0 · Companion Avatar V1 / 穿搭 App / Couple Board V2.3
+
+- 新增独立「穿搭」App：用户自己和每一个角色都拥有独立 Avatar Profile，可切换女生 / 男生版型并保存多套穿搭。
+- 新增共享 `CompanionPixelAvatar` 与 `avatarWardrobeService`，形象数据不再属于飞行棋私有实现，可供后续小游戏复用。
+- 心跳飞行棋 V2.3 读取双方当前穿搭，像素小人改为完整 Q 版骨架；地图顶部 HUD 收窄、地图放大、Board Stop 改成小型悬浮信息牌。
+- Launcher Grid 升到 revision 14，旧桌面一次性补入「穿搭」入口；IndexedDB 仍为 V18，Backup 仍为 V12。
+- 角色人设、Memory、Shared Timeline、面对面单题单归属、禁止换题与跳过双方同意规则全部保留。
+
 ## V0.5.0-alpha.5.8.1 · 心跳飞行棋 V2.1 面对面互动修正
 
 ## 0.5.0-alpha.5.8.2 · Couple Board V2.2

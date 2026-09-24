@@ -55,6 +55,12 @@ import {
   type CoupleBoardInteraction
 } from '../services/coupleBoardInteractionService'
 import { syncCoupleBoardInteractionMemory } from '../services/coupleBoardMemoryBridge'
+import {
+  SELF_AVATAR_TARGET_ID,
+  ensureWardrobeProfile,
+  loadWardrobeState,
+  type WardrobeState
+} from '../services/avatarWardrobeService'
 import type { Character, Conversation } from '../types/domain'
 
 const router = useRouter()
@@ -88,6 +94,7 @@ const interactionBusy = ref(false)
 const interactionBooting = ref(false)
 const memorySyncing = ref(false)
 const interactionError = ref('')
+const wardrobeState = ref<WardrobeState>({ version: 1, profiles: {} })
 let diceTimer: number | undefined
 let noticeTimer: number | undefined
 let partnerRollTimer: number | undefined
@@ -129,6 +136,14 @@ const builtinAvailableCount = computed(() => {
 })
 const pendingSourceLabel = computed(() => pendingPrompt.value?.source === 'memory-ai' ? 'OUR MEMORY' : pendingPrompt.value?.source === 'custom' ? 'YOUR DECK' : 'BUILT-IN')
 const activeVisualMode = computed<CoupleBoardVisualMode>(() => game.value?.settings.visualMode || visualMode.value || 'romantic')
+const userAppearance = computed(() => ensureWardrobeProfile(wardrobeState.value, SELF_AVATAR_TARGET_ID, 'self', 'female'))
+const partnerAppearance = computed(() => {
+  const character = selectedCharacter.value
+  const id = character?.id || game.value?.settings.characterId
+  if (!id) return undefined
+  const gender = character?.gender === 'male' ? 'male' : 'female'
+  return ensureWardrobeProfile(wardrobeState.value, id, 'character', gender)
+})
 const pathPoints = computed(() => COUPLE_BOARD_MAP_STOPS.map(stop => `${stop.x},${stop.y}`).join(' '))
 const currentLocation = computed(() => {
   if (!game.value) return COUPLE_BOARD_MAP_STOPS[0]
@@ -597,13 +612,15 @@ onMounted(async () => {
   loading.value = true
   try {
     worldId.value = await getActiveWorldId()
-    const [characterRows, stored, preferences, archive] = await Promise.all([
+    const [characterRows, stored, preferences, archive, wardrobe] = await Promise.all([
       db.characters.where('worldId').equals(worldId.value).toArray(),
       loadCoupleBoardGame(worldId.value),
       loadCoupleBoardPreferences(worldId.value),
-      loadCoupleBoardArchive(worldId.value)
+      loadCoupleBoardArchive(worldId.value),
+      loadWardrobeState(worldId.value)
     ])
     characters.value = characterRows.length ? characterRows : await db.characters.toArray()
+    wardrobeState.value = wardrobe
     customPrompts.value = preferences.customPrompts
     customEventCards.value = preferences.customEventCards
     disabledBuiltinPromptIds.value = preferences.disabledBuiltinPromptIds
@@ -641,7 +658,7 @@ onUnmounted(() => {
       <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
       <header class="topbar">
         <button class="round-btn" aria-label="返回" @click="screen === 'game' ? goSetupKeepingGame() : router.push('/home')">‹</button>
-        <div class="brand-lockup"><small>COUPLE BOARD · V2.2 ALPHA</small><b>心跳飞行棋</b></div>
+        <div class="brand-lockup"><small>COUPLE BOARD · V2.3 ALPHA</small><b>心跳飞行棋</b></div>
         <button class="round-btn ghost" aria-label="回到主屏幕" @click="router.push('/home')">⌂</button>
       </header>
 
@@ -683,7 +700,7 @@ onUnmounted(() => {
 
         <section class="setup-section">
           <header><span>04</span><div><b>地图风格</b><small>底层是同一局，换风格不会改变进度和记忆</small></div></header>
-          <div class="visual-grid"><button :class="{ selected: visualMode === 'pixel' }" @click="visualMode = 'pixel'"><span class="pixel-preview"><i></i><i></i><i></i></span><b>像素约会</b><small>两个小人在路线图上真的一格格走</small></button><button :class="{ selected: visualMode === 'romantic' }" @click="visualMode = 'romantic'"><span class="romantic-preview">♡</span><b>浪漫地图</b><small>更柔和的约会路线和地点卡</small></button></div>
+          <div class="visual-grid"><button :class="{ selected: visualMode === 'pixel' }" @click="visualMode = 'pixel'"><span class="pixel-preview"><i></i><i></i><i></i></span><b>像素约会</b><small>两个小人在路线图上真的一格格走</small></button><button :class="{ selected: visualMode === 'romantic' }" @click="visualMode = 'romantic'"><span class="romantic-preview">♡</span><b>浪漫地图</b><small>更柔和的约会路线和地点卡</small></button></div><button class="wardrobe-link" @click="router.push('/app/穿搭')"><span>👗</span><div><b>设计我和 TA 的小人穿搭</b><small>每个角色都能单独保存，飞行棋和其他小游戏共用</small></div><i>›</i></button>
         </section>
 
         <section class="setup-section deck-section">
@@ -699,7 +716,7 @@ onUnmounted(() => {
         <section class="game-head">
           <div class="player-card" :class="{ active: game.currentPlayer === 'user' && !game.pending && !game.pendingEvent }"><div class="avatar user-avatar">我</div><div><small>YOU</small><b>我</b><span>♥ {{ game.players.user.hearts }}</span></div><em>{{ getCoupleBoardMapStop(game.players.user.position).name }}</em></div>
           <div class="versus"><span>♥</span><small>TURN {{ game.turn }}</small></div>
-          <div class="player-card partner" :class="{ active: game.currentPlayer === 'partner' && !game.pending && !game.pendingEvent }"><CharacterAvatar :avatar="selectedCharacter?.avatar || game.settings.characterAvatar" :name="selectedCharacter?.name || game.settings.characterName" :size="42" /><div><small>PARTNER</small><b>{{ game.players.partner.name }}</b><span>♥ {{ game.players.partner.hearts }}</span></div><em>{{ getCoupleBoardMapStop(game.players.partner.position).name }}</em></div>
+          <div class="player-card partner" :class="{ active: game.currentPlayer === 'partner' && !game.pending && !game.pendingEvent }"><CharacterAvatar :avatar="selectedCharacter?.avatar || game.settings.characterAvatar" :name="selectedCharacter?.name || game.settings.characterName" :size="30" /><div><small>PARTNER</small><b>{{ game.players.partner.name }}</b><span>♥ {{ game.players.partner.hearts }}</span></div><em>{{ getCoupleBoardMapStop(game.players.partner.position).name }}</em></div>
         </section>
 
         <section class="board-card" :class="`map-${activeVisualMode}`">
@@ -708,11 +725,11 @@ onUnmounted(() => {
             <div class="map-sky"><i>✦</i><i>·</i><i>✧</i></div>
             <div class="map-landmark landmark-home">🏠</div><div class="map-landmark landmark-park">🌳</div><div class="map-landmark landmark-city">🏙️</div><div class="map-landmark landmark-moon">☾</div>
             <svg class="route-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline :points="pathPoints" /></svg>
-            <div v-for="stop in COUPLE_BOARD_MAP_STOPS" :key="stop.index" class="map-stop" :class="[`zone-${stop.zone}`, { hot: currentLocation.index === stop.index }]" :style="stopStyle(stop.index)" :title="`${stop.index} · ${stop.name}`"><span>{{ stop.scenery }}</span><small v-if="stop.index % 3 === 0 || stop.index >= 27">{{ stop.name }}</small></div>
-            <CoupleBoardPixelSprite v-if="activeVisualMode === 'pixel'" class="map-sprite" :style="spriteStyle('user')" name="我" variant="user" :moving="movingPlayer === 'user'" :active="game.currentPlayer === 'user'" />
-            <CoupleBoardPixelSprite v-if="activeVisualMode === 'pixel'" class="map-sprite" :style="spriteStyle('partner')" :name="game.settings.characterName" :avatar="selectedCharacter?.avatar || game.settings.characterAvatar" variant="partner" :moving="movingPlayer === 'partner'" :active="game.currentPlayer === 'partner'" />
+            <div v-for="stop in COUPLE_BOARD_MAP_STOPS" :key="stop.index" class="map-stop" :class="[`zone-${stop.zone}`, { hot: currentLocation.index === stop.index }]" :style="stopStyle(stop.index)" :title="`${stop.index} · ${stop.name}`"><span>{{ stop.scenery }}</span><small v-if="currentLocation.index === stop.index || stop.index % 6 === 0 || stop.index >= 28">{{ stop.name }}</small></div>
+            <CoupleBoardPixelSprite v-if="activeVisualMode === 'pixel'" class="map-sprite" :style="spriteStyle('user')" name="我" :appearance="userAppearance" variant="user" :moving="movingPlayer === 'user'" :active="game.currentPlayer === 'user'" />
+            <CoupleBoardPixelSprite v-if="activeVisualMode === 'pixel'" class="map-sprite" :style="spriteStyle('partner')" :name="game.settings.characterName" :appearance="partnerAppearance" variant="partner" :moving="movingPlayer === 'partner'" :active="game.currentPlayer === 'partner'" />
             <div v-if="activeVisualMode === 'romantic'" class="romantic-token token-me" :style="spriteStyle('user')">我</div><div v-if="activeVisualMode === 'romantic'" class="romantic-token token-partner" :style="spriteStyle('partner')">♥</div>
-            <div class="location-card"><small>BOARD STOP · {{ currentLocation.index.toString().padStart(2, '0') }}</small><b>{{ currentLocation.scenery }} {{ currentLocation.name }}</b><span>{{ currentLocation.hint }} · 仅游戏地图</span></div>
+            <div class="location-card"><small>{{ currentLocation.index.toString().padStart(2, '0') }}</small><b>{{ currentLocation.name }}</b><span>{{ currentLocation.hint }}</span></div>
           </div>
         </section>
 
@@ -799,4 +816,11 @@ onUnmounted(() => {
 
 @media(max-width:370px){.love-game-shell{padding-left:10px;padding-right:10px}.hero-card h1{font-size:27px}.date-map{height:325px}.love-game-shell.is-game.has-challenge .board-card{left:10px;right:10px;top:108px}.love-game-shell.is-game.has-challenge .date-map{height:calc(100% - 32px);min-height:140px}.challenge-text{font-size:15px}.player-card{grid-template-columns:34px 1fr}.interaction-head{align-items:flex-start;flex-direction:column;gap:2px}.dialogue-line p{max-width:205px}}
 @media(prefers-reduced-motion:reduce){.loading-heart,.event-emoji,.dice-button.rolling span,.typing-line i{animation:none!important}.map-sprite,.romantic-token{transition:none!important}.card-pop-enter-active>section,.card-pop-leave-active>section{transition:none}}
+
+
+/* V2.3: 一屏连续布局 + 更大的约会地图 + 共享穿搭小人 */
+.wardrobe-link{width:100%;display:grid;grid-template-columns:30px 1fr 12px;gap:8px;align-items:center;margin-top:8px;padding:9px 10px;border:1px solid rgba(130,66,91,.1);border-radius:14px;background:linear-gradient(135deg,#fff,#f7e8ee);color:#765063;text-align:left}.wardrobe-link>span{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:#f0dce5;font-size:15px}.wardrobe-link>div{display:grid}.wardrobe-link b{font-size:7px}.wardrobe-link small{font-size:5.6px;color:#9c7b88;margin-top:2px}.wardrobe-link i{font-style:normal;color:#a97a8d}
+.love-game-shell.is-game{height:100%;min-height:0;overflow:hidden;padding:4px 10px 6px}.love-game-shell.is-game .topbar{min-height:40px}.love-game-shell.is-game .brand-lockup small{font-size:4.8px}.love-game-shell.is-game .brand-lockup b{font-size:9.5px}.love-game-shell.is-game .round-btn{width:28px;height:28px;font-size:17px}.love-game-shell.is-game .game-head{height:46px;grid-template-columns:1fr 34px 1fr;gap:4px;margin:2px 0 5px}.love-game-shell.is-game .player-card{grid-template-columns:29px 1fr;gap:5px;padding:4px 6px;border-radius:13px;min-height:38px;background:rgba(255,255,255,.68);box-shadow:none}.love-game-shell.is-game .player-card.active{transform:none;box-shadow:0 4px 12px rgba(145,61,93,.08)}.love-game-shell.is-game .player-card.partner :deep(.character-avatar){width:29px!important;height:29px!important}.love-game-shell.is-game .user-avatar{width:29px;height:29px;font-size:7px}.love-game-shell.is-game .player-card small{font-size:4.6px}.love-game-shell.is-game .player-card b{font-size:7.2px}.love-game-shell.is-game .player-card span{font-size:5.8px}.love-game-shell.is-game .player-card em{display:none}.love-game-shell.is-game .versus span{font-size:9px}.love-game-shell.is-game .versus small{font-size:4.3px}
+.board-card{border-radius:19px;padding:7px;background:linear-gradient(145deg,rgba(255,255,255,.92),rgba(248,235,241,.8));box-shadow:0 10px 30px rgba(88,47,63,.09)}.board-topline{padding:0 1px 5px;align-items:center}.board-topline small{font-size:5.4px}.board-topline b{font-size:6.4px;line-height:1.3}.board-topline>span{font-size:5px;padding:3px 5px}.date-map{height:430px;border-radius:16px;background:radial-gradient(55% 28% at 78% 11%,rgba(255,245,201,.72),transparent 45%),linear-gradient(180deg,#3f5065 0 23%,#657784 23% 34%,#789279 34% 73%,#607d64 73% 100%)}.map-pixel .date-map{background:radial-gradient(46% 24% at 77% 10%,rgba(255,235,171,.32),transparent 48%),linear-gradient(180deg,#26384d 0 22%,#354f62 22% 34%,#5d795d 34% 72%,#456148 72% 100%)}.date-map::before{content:'';position:absolute;z-index:0;left:-12%;top:53%;width:130%;height:15%;border-radius:45% 55% 48% 52%;background:linear-gradient(180deg,rgba(177,213,222,.32),rgba(108,158,178,.4));transform:rotate(-5deg);box-shadow:0 0 0 5px rgba(255,255,255,.04)}.date-map::after{content:'';position:absolute;z-index:0;left:0;right:0;bottom:0;height:28%;background:linear-gradient(90deg,rgba(61,81,64,.26),transparent 20% 80%,rgba(61,81,64,.24)),repeating-linear-gradient(90deg,rgba(255,233,169,.1) 0 2px,transparent 2px 28px)}.map-landmark{z-index:1;font-size:18px;opacity:.58;filter:drop-shadow(0 3px 4px rgba(33,28,34,.16))}.landmark-home{left:4%;bottom:3%}.landmark-park{right:5%;bottom:31%}.landmark-city{right:3%;top:25%}.landmark-moon{right:15%;top:4%;font-size:22px}.route-svg{z-index:2;filter:drop-shadow(0 2px 2px rgba(48,36,40,.18))}.route-svg polyline{stroke:#f5e8bf;stroke-width:2.6;stroke-dasharray:1.2 1.2}.map-pixel .route-svg polyline{stroke:#eddc9f;stroke-width:2.8;stroke-dasharray:1.4 1}.map-stop{width:20px;height:20px;border-radius:7px;border:1.5px solid rgba(255,248,229,.92);background:linear-gradient(145deg,#ac5a79,#7d4864);box-shadow:0 3px 0 rgba(45,38,44,.18),0 6px 10px rgba(47,34,41,.12)}.map-stop>span{font-size:9px;filter:none}.map-stop>small{top:21px;font-size:4.5px;background:rgba(35,47,52,.88);color:#f8edd0;border:1px solid rgba(255,255,255,.08)}.map-pixel .map-stop{border-radius:5px;border:1px solid #f4dda6;background:linear-gradient(145deg,#9c5e7a,#71435e);box-shadow:2px 2px 0 rgba(22,29,31,.32)}.map-stop.hot{transform:translate(-50%,-50%) scale(1.3);box-shadow:0 0 0 4px rgba(255,241,185,.24),0 4px 12px rgba(58,33,44,.28)}.zone-park{background:linear-gradient(145deg,#718f6c,#56755b)}.zone-date{background:linear-gradient(145deg,#c66c7e,#9a4e69)}.zone-night{background:linear-gradient(145deg,#6f6289,#514762)}.zone-private{background:linear-gradient(145deg,#84546c,#633d55)}.map-sprite{transition:left .16s linear,top .16s linear;filter:drop-shadow(0 6px 4px rgba(27,30,31,.16))}.location-card{left:7px;right:auto;bottom:7px;max-width:56%;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:2px 5px;padding:5px 7px;border-radius:9px;background:rgba(31,43,51,.86);color:#fff;border:1px solid rgba(255,255,255,.12);box-shadow:0 5px 14px rgba(21,26,31,.2);backdrop-filter:blur(8px)}.location-card small{grid-row:1/3;font-size:5px;color:#e3c989;border-right:1px solid rgba(255,255,255,.12);padding-right:5px}.location-card b{font-size:7px;margin:0}.location-card span{font-size:4.7px;color:#d5c7cf;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.map-pixel .location-card{border-radius:7px;background:rgba(28,40,48,.9);box-shadow:2px 2px 0 rgba(18,26,31,.3)}
+.love-game-shell.is-game.has-challenge .game-head{margin-bottom:4px}.love-game-shell.is-game.has-challenge .board-card{left:10px;right:10px;top:91px;bottom:49.5%;margin:0;padding:6px;border-radius:17px}.love-game-shell.is-game.has-challenge .board-topline{padding:0 1px 4px}.love-game-shell.is-game.has-challenge .date-map{height:calc(100% - 31px);min-height:178px;border-radius:14px}.love-game-shell.is-game.has-challenge .location-card{padding:4px 6px;bottom:5px}.challenge-backdrop{top:50.5%;bottom:0;padding:4px 10px 6px}.challenge-sheet{border-radius:17px;height:100%;padding:7px 9px 9px;box-shadow:0 -4px 22px rgba(72,30,47,.1)}.challenge-scroll>header{padding:1px 0 4px}.challenge-text{margin:6px 2px 6px;font-size:12.5px;line-height:1.38}.board-stage-note{display:none}.interaction-stage{padding:6px;border-radius:13px}.dialogue-stack{max-height:none;min-height:60px;flex:1}.challenge-scroll{display:flex;flex-direction:column}.interaction-stage{display:flex;flex-direction:column;min-height:0;flex:1}.dialogue-stack{overflow:auto}.interaction-compose{margin-top:5px}.interaction-compose textarea{min-height:38px;max-height:52px}.interaction-actions{margin-top:4px}.memory-footnote{margin-top:4px}.love-game-shell.is-game:not(.has-challenge) .board-card{height:calc(100% - 154px)}.love-game-shell.is-game:not(.has-challenge) .date-map{height:calc(100% - 38px);min-height:300px}.love-game-shell.is-game:not(.has-challenge) .dice-dock{margin-top:7px}
 </style>

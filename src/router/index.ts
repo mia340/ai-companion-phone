@@ -41,6 +41,7 @@ const MusicAppView = () => import('../views/MusicAppView.vue')
 const SharedTimelineView = () => import('../views/SharedTimelineView.vue')
 const CoupleBoardView = () => import('../views/CoupleBoardView.vue')
 const CoupleBoardLibraryView = () => import('../views/CoupleBoardLibraryView.vue')
+const WardrobeView = () => import('../views/WardrobeView.vue')
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -184,6 +185,10 @@ export const router = createRouter({
     {
       path: '/app/时光',
       component: SharedTimelineView
+    },
+    {
+      path: '/app/穿搭',
+      component: WardrobeView
     },
     {
       path: '/app/心跳飞行棋/library',
