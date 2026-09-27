@@ -1,3 +1,8 @@
+## 0.5.0-alpha.5.9.4
+
+- Wardrobe / Companion Avatar V1.4：内置套装主预览改为已确认的原创暖系像素插画，套装卡同步使用插画缩略图；64×80 程序化 Sprite 缩为 GAME SPRITE 运行时预览，不再冒充概念图级主视觉。
+- 数据层保持 IndexedDB V18 / Backup V12 / HomeLayout revision 14。
+
 ## V0.5.0-alpha.5.9.1 · Wardrobe V1.1 / Pixel Avatar polish
 
 - 穿搭 App 改成固定预览工作台：上半部人物永远可见，下半部分类编辑独立滚动。

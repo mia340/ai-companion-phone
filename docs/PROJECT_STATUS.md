@@ -1,3 +1,7 @@
+### 0.5.0-alpha.5.9.4
+
+Wardrobe V1.4：把确认过的原创暖系像素 Look Artwork 接入内置套装预览，避免继续把几何 SVG 放大当作主视觉；实时小游戏 Sprite 与插画预览明确分层。
+
 ## 0.5.0-alpha.5.9.1 · Wardrobe V1.1
 
 穿搭页已从长滚动表单改为固定预览工作台；CompanionPixelAvatar 已重画。当前继续保持 Avatar / Outfit 数据跨游戏复用。

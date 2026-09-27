@@ -1,3 +1,7 @@
+## V0.5.0-alpha.5.9.4 · Wardrobe V1.4 / illustrated look preview
+
+修正 V1.3 概念图与实际 UI 的视觉偏差：精品套装使用原创像素插画作为大预览和套装缩略图，小游戏轻量 Sprite 仍保留为运行时预览。
+
 ## V0.5.0-alpha.5.9.1 · Wardrobe V1.1 / Pixel Avatar polish
 
 穿搭 App 完成第一轮实机视觉返工：固定人物预览、分类编辑器和更清晰的原创 16-bit 风格小人。没有升级 IndexedDB、Backup 或 Wardrobe schema。
