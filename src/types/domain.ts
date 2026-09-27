@@ -523,6 +523,22 @@ export interface Message {
   // 角色卡开场分支。用于切换开场时识别并替换旧的 seed 消息，避免多个开场叠在同一上下文。
   isGreetingSeed?: boolean
   greetingIndex?: number
+
+  /**
+   * V0.5.0-alpha.6 记忆效果可视化：本条助手回复实际召回并注入的记忆摘要。
+   * 仅用于展示与纠错，不参与下一轮上下文拼装。
+   */
+  recalledMemories?: Array<{
+    id: UUID
+    content: string
+    layer?: MemoryLayer
+    importance?: number
+    score?: number
+    reason?: string
+  }>
+  /** V0.5.0-alpha.6 用户对本条助手回复的质量反馈。 */
+  feedback?: 'up' | 'down'
+  feedbackAt?: string
 }
 
 export type MemoryStrength = 'light' | 'standard' | 'deep'
@@ -607,6 +623,11 @@ export interface CharacterMemory {
   mergedFrom?: UUID[]
   conflictWith?: UUID[]
   note?: string
+
+  // V0.5.0-alpha.6 向量语义记忆字段（非索引，旧记录缺省时回退关键词检索）。
+  embedding?: number[]
+  embeddingModel?: string
+  embeddingAt?: string
 
   createdAt: string
   updatedAt: string

@@ -1,0 +1,158 @@
+/* ============================================================
+   AI Companion Phone · Design Tokens
+   单一事实源：颜色 / 间距 / 圆角 / 阴影 / 字体 / 动效 / 层级。
+   旧变量名（--accent / --surface / --line …）在末尾做兼容映射。
+   ============================================================ */
+
+:root {
+  /* ── Brand scale（极淡蓝主色，50 → 900）────────────────── */
+  --brand-50:  #f2f8fe;
+  --brand-100: #e2f0fb;
+  --brand-200: #c4e2f6;
+  --brand-300: #9ccdef;
+  --brand-400: #6fb1e3;
+  --brand-500: #4f97d4;
+  --brand-600: #3d7cba;
+  --brand-700: #346497;
+  --brand-800: #2f547c;
+  --brand-900: #2b4767;
+
+  /* ── Neutral scale（冷灰，带蓝调）──────────────────────── */
+  --neutral-0:   #ffffff;
+  --neutral-50:  #f7fafc;
+  --neutral-100: #eef3f7;
+  --neutral-200: #e1e9f0;
+  --neutral-300: #cbd7e1;
+  --neutral-400: #9fb0bf;
+  --neutral-500: #77889a;
+  --neutral-600: #5d6f82;
+  --neutral-700: #4a5a6b;
+  --neutral-800: #3c4a58;
+  --neutral-900: #2b3744;
+
+  /* ── Semantic colors ───────────────────────────────────── */
+  --success: #2f9e6e;
+  --success-soft: #e6f6ee;
+  --warning: #c68a2e;
+  --warning-soft: #fdf3e2;
+  --danger: #c0506a;
+  --danger-strong: #a93d57;
+  --danger-soft: #fdebf0;
+  --info: var(--brand-500);
+  --info-soft: var(--brand-50);
+
+  /* ── Surfaces ──────────────────────────────────────────── */
+  --bg-page: #e9f3fc;
+  --surface: var(--neutral-0);
+  --surface-raised: var(--neutral-0);
+  --surface-sunken: var(--neutral-100);
+  --surface-subtle: #f5f9fd;
+  --surface-translucent: rgba(255, 255, 255, 0.72);
+  --surface-translucent-strong: rgba(255, 255, 255, 0.9);
+
+  /* ── Text ──────────────────────────────────────────────── */
+  --text-strong: var(--neutral-900);
+  --text: #2a4054;
+  --text-muted: var(--neutral-500);
+  --text-faint: var(--neutral-400);
+  --text-inverse: #ffffff;
+
+  /* ── Borders / lines ───────────────────────────────────── */
+  --line: rgba(45, 67, 85, 0.1);
+  --line-strong: rgba(45, 67, 85, 0.18);
+  --line-faint: rgba(45, 67, 85, 0.06);
+
+  /* ── Spacing（4px base）────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Radius ────────────────────────────────────────────── */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 30px;
+  --radius-full: 999px;
+
+  /* ── Elevation / shadows ───────────────────────────────── */
+  --shadow-xs: 0 1px 2px rgba(40, 66, 92, 0.06);
+  --shadow-sm: 0 2px 8px rgba(43, 72, 100, 0.07);
+  --shadow-md: 0 6px 18px rgba(45, 76, 104, 0.1);
+  --shadow-lg: 0 14px 36px rgba(45, 76, 104, 0.14);
+  --shadow-xl: 0 28px 72px rgba(45, 76, 104, 0.2);
+  --shadow-phone: var(--shadow-xl), inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+
+  /* ── Typography ────────────────────────────────────────── */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
+
+  --text-size-xs: 10px;
+  --text-size-sm: 12px;
+  --text-size-base: 14px;
+  --text-size-md: 15px;
+  --text-size-lg: 17px;
+  --text-size-xl: 22px;
+  --text-size-display: 40px;
+
+  --leading-tight: 1.3;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.75;
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  /* ── Motion ────────────────────────────────────────────── */
+  --duration-fast: 0.14s;
+  --duration-base: 0.22s;
+  --duration-slow: 0.34s;
+  --ease-standard: cubic-bezier(0.2, 0.82, 0.24, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0.7, 0.2, 1);
+
+  /* ── Z-index scale ─────────────────────────────────────── */
+  --z-base: 1;
+  --z-sticky: 10;
+  --z-header: 20;
+  --z-dropdown: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+
+  /* ── Layout ────────────────────────────────────────────── */
+  --phone-max-width: 430px;
+  --phone-max-height: 880px;
+  --status-bar-height: 46px;
+  --app-header-height: 52px;
+}
+
+/* Dark surface tokens（锁屏等深色壁纸页，由组件 tone 触发，不做全局暗色）*/
+.surface-tone-light {
+  --text-strong: #ffffff;
+  --text: rgba(255, 255, 255, 0.92);
+  --text-muted: rgba(255, 255, 255, 0.72);
+  --line: rgba(255, 255, 255, 0.18);
+}
+
+/* ============================================================
+   Backward-compatible aliases（旧变量名 → 新 token）
+   ============================================================ */
+:root {
+  --accent: var(--brand-400);
+  --accent-strong: var(--brand-600);
+  --accent-soft: var(--brand-50);
+  --surface-soft: var(--surface-subtle);
+  --muted: var(--text-muted);
+  --pink: var(--brand-300);
+  --pink-dark: var(--brand-400);
+  --shadow: var(--shadow-xl);
+}

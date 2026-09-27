@@ -23,6 +23,12 @@ import {
 import {
   isVisionUnsupportedError
 } from '../services/ai/provider'
+import {
+  testEmbeddingEndpoint
+} from '../services/ai/embeddingService'
+import {
+  backfillMemoryEmbeddings
+} from '../services/memoryService'
 
 import type {
   ModelSettings,
@@ -51,6 +57,10 @@ const isSaving = ref(false)
 const isTesting = ref(false)
 const isFetchingModels = ref(false)
 const isTestingVision = ref(false)
+const isTestingEmbedding = ref(false)
+const isBackfilling = ref(false)
+const embeddingMessage = ref('')
+const backfillProgress = ref({ done: 0, total: 0 })
 
 const successMessage = ref('')
 const errorMessage = ref('')
@@ -378,6 +388,61 @@ async function testVision() {
   }
 }
 
+async function testEmbedding() {
+  if (isTestingEmbedding.value) return
+
+  isTestingEmbedding.value = true
+  clearMessages()
+  embeddingMessage.value = ''
+
+  try {
+    validateEndpoint()
+    const result = await testEmbeddingEndpoint(form.value)
+    if (!result.ok) throw new Error(result.error || 'Embedding 接口不可用。')
+
+    form.value.embeddingDimensions = result.dimensions
+    form.value.embeddingTestedAt = new Date().toISOString()
+    embeddingMessage.value =
+      `向量接口可用（${result.model}，${result.dimensions} 维）。`
+  } catch (error) {
+    embeddingMessage.value = error instanceof Error
+      ? `向量接口测试失败：${error.message}`
+      : '向量接口测试失败。'
+  } finally {
+    isTestingEmbedding.value = false
+  }
+}
+
+async function runBackfill() {
+  if (isBackfilling.value) return
+
+  isBackfilling.value = true
+  clearMessages()
+  embeddingMessage.value = ''
+
+  try {
+    validate()
+    await saveModelSettings(form.value)
+    form.value = await getModelSettings()
+
+    const count = await backfillMemoryEmbeddings(
+      form.value,
+      (done, total) => {
+        backfillProgress.value = { done, total }
+      }
+    )
+    embeddingMessage.value =
+      count > 0 ? `已为 ${count} 条历史记忆生成向量。` : '历史记忆均已包含向量，无需补充。'
+  } catch (error) {
+    embeddingMessage.value = error instanceof Error
+      ? `向量补充失败：${error.message}`
+      : '向量补充失败。'
+  } finally {
+    isBackfilling.value = false
+    backfillProgress.value = { done: 0, total: 0 }
+  }
+}
+
 </script>
 
 <template>
@@ -592,6 +657,63 @@ async function testVision() {
             {{ isTestingVision ? '正在检测…' : '测试图片理解' }}
           </button>
         </div>
+      </section>
+
+      <section class="setting-card field-card embedding-card">
+        <h2>向量语义记忆</h2>
+
+        <label class="thinking-toggle">
+          <span>
+            <b>启用语义记忆检索</b>
+            <small>
+              开启后，记忆写入时会调用 embeddings 接口生成向量；检索时混合“语义相似度 + 关键词 + 重要度 + 时间”，
+              能识别“猫 / 猫咪 / kitten”这类同义表达。接口不可用时自动回退纯关键词检索。
+            </small>
+          </span>
+          <input
+            v-model="form.embeddingEnabled"
+            type="checkbox"
+          />
+        </label>
+
+        <label>
+          Embedding 模型
+          <input
+            v-model="form.embeddingModel"
+            autocomplete="off"
+            placeholder="text-embedding-3-small"
+          />
+          <small>
+            复用上方 API 地址与 Key；留空默认 text-embedding-3-small。
+          </small>
+        </label>
+
+        <div class="vision-status-row">
+          <span>
+            <b>接口状态</b>
+            <small>{{ embeddingMessage || '尚未测试。' }}</small>
+            <small v-if="isBackfilling">
+              正在补充历史记忆：{{ backfillProgress.done }} / {{ backfillProgress.total }}
+            </small>
+          </span>
+          <button
+            type="button"
+            class="vision-test-button"
+            :disabled="isTestingEmbedding || isBackfilling || isTesting || isSaving || isFetchingModels"
+            @click="testEmbedding"
+          >
+            {{ isTestingEmbedding ? '正在测试…' : '测试向量接口' }}
+          </button>
+        </div>
+
+        <button
+          type="button"
+          class="vision-test-button"
+          :disabled="isBackfilling || isTestingEmbedding || !form.embeddingEnabled"
+          @click="runBackfill"
+        >
+          {{ isBackfilling ? '正在补充…' : '为历史记忆补充向量' }}
+        </button>
       </section>
 
       <p class="security-notice">

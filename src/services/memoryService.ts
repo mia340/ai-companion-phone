@@ -6,6 +6,12 @@ import type {
   Message,
   MemoryScope
 } from '../types/domain'
+import type { ModelSettings } from '../types/modelSettings'
+import {
+  cosineSimilarity,
+  createEmbeddings,
+  embeddingModelName
+} from './ai/embeddingService'
 
 interface MemoryCandidate {
   category: CharacterMemory['category']
@@ -752,4 +758,146 @@ export function createLocalSummary(messages: Message[]) {
       return `${speaker}：${content}`
     })
     .join('；')
+}
+
+// ─────────────────────────────────────────────────────────────
+// V0.5.0-alpha.6 向量语义记忆
+// ─────────────────────────────────────────────────────────────
+
+const EMBED_BATCH_SIZE = 16
+
+/**
+ * Generates embeddings for the given memories and persists them.
+ * Memories that already have an embedding for the same model are skipped.
+ * Failures are soft: memories remain retrievable via keyword matching.
+ */
+export async function embedMemories(
+  rows: CharacterMemory[],
+  modelSettings: ModelSettings
+): Promise<{ embedded: number; skipped: number }> {
+  const model = embeddingModelName(modelSettings)
+  const pending = rows.filter(row =>
+    row.status !== 'invalid' &&
+    (!row.embedding?.length || row.embeddingModel !== model)
+  )
+  if (!pending.length) return { embedded: 0, skipped: rows.length }
+
+  let embedded = 0
+  const now = new Date().toISOString()
+
+  for (let start = 0; start < pending.length; start += EMBED_BATCH_SIZE) {
+    const batch = pending.slice(start, start + EMBED_BATCH_SIZE)
+    try {
+      const results = await createEmbeddings(
+        modelSettings,
+        batch.map(row => row.content),
+        model
+      )
+      await db.transaction('rw', db.memories, async () => {
+        for (let i = 0; i < batch.length; i += 1) {
+          const result = results[i]
+          if (!result?.embedding?.length) continue
+          await db.memories.update(batch[i].id, {
+            embedding: result.embedding,
+            embeddingModel: model,
+            embeddingAt: now
+          })
+          embedded += 1
+        }
+      })
+    } catch {
+      // Soft fail this batch: keyword retrieval still works. Stop to avoid repeated cost.
+      break
+    }
+  }
+
+  return { embedded, skipped: rows.length - embedded }
+}
+
+/**
+ * Backfills embeddings for all active memories that lack them.
+ * Used when a user first enables semantic memory.
+ */
+export async function backfillMemoryEmbeddings(
+  modelSettings: ModelSettings,
+  onProgress?: (done: number, total: number) => void
+): Promise<number> {
+  const all = await db.memories.toArray()
+  const model = embeddingModelName(modelSettings)
+  const pending = all.filter(row =>
+    row.status !== 'invalid' &&
+    (!row.embedding?.length || row.embeddingModel !== model)
+  )
+  if (!pending.length) return 0
+
+  let done = 0
+  for (let start = 0; start < pending.length; start += EMBED_BATCH_SIZE) {
+    const batch = pending.slice(start, start + EMBED_BATCH_SIZE)
+    const result = await embedMemories(batch, modelSettings)
+    done += result.embedded
+    onProgress?.(done, pending.length)
+  }
+  return done
+}
+
+/**
+ * Hybrid retrieval: semantic vector similarity blended with the existing
+ * keyword / importance / recency scoring. Falls back to keyword-only results
+ * if the query embedding cannot be produced.
+ */
+export async function selectMemoryHitsHybrid(
+  memories: CharacterMemory[],
+  query: string,
+  modelSettings: ModelSettings,
+  limit = 10,
+  now = new Date()
+): Promise<MemoryHit[]> {
+  const baseline = selectMemoryHitsDetailed(memories, query, limit, now)
+
+  if (!query.trim() || !modelSettings.embeddingEnabled) return baseline
+
+  const model = embeddingModelName(modelSettings)
+  let queryEmbedding: number[]
+  try {
+    const { createSingleEmbedding } = await import('./ai/embeddingService')
+    queryEmbedding = await createSingleEmbedding(modelSettings, query, model)
+  } catch {
+    return baseline
+  }
+
+  const scored = memories
+    .map(normalizeMemory)
+    .filter(memory => memory.status !== 'invalid')
+    .map(memory => {
+      // Recompute the keyword/base score with the same rules as the detailed path.
+      const baseHit = baseline.find(item => item.memory.id === memory.id)
+      const baseScore = baseHit?.score ?? 0
+      const reasons = baseHit?.reasons ? [...baseHit.reasons] : []
+
+      let vectorScore = 0
+      if (memory.embedding?.length && memory.embedding.length === queryEmbedding.length) {
+        const similarity = cosineSimilarity(queryEmbedding, memory.embedding)
+        vectorScore = similarity * 32
+        if (similarity >= 0.55) {
+          reasons.unshift(`语义相似 ${(similarity * 100).toFixed(0)}%`)
+        }
+      }
+
+      return {
+        memory,
+        score: baseScore + vectorScore,
+        reasons: reasons.length ? reasons : ['重要度与近期性匹配']
+      }
+    })
+
+  const ranked = scored
+    .sort((a, b) => b.score - a.score || b.memory.updatedAt.localeCompare(a.memory.updatedAt))
+
+  // Keep a memory if it is semantically relevant or matched the baseline criteria.
+  const baselineIds = new Set(baseline.map(item => item.memory.id))
+  const relevant = ranked.filter(item =>
+    baselineIds.has(item.memory.id) ||
+    item.reasons.some(reason => /语义相似/.test(reason))
+  )
+  return (relevant.length ? relevant : ranked.slice(0, 2)).slice(0, Math.max(1, limit))
 }

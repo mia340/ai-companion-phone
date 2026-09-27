@@ -13,7 +13,10 @@ import {
   parsePersonaFile,
   type ImportedPersonaPreview
 } from '../services/personaImportService'
-import type { PersonaImportFormat, UserPersona } from '../types/domain'
+import { db } from '../db/database'
+import { createProvider } from '../services/ai/providerFactory'
+import { getModelSettings } from '../services/modelSettings'
+import type { Character, PersonaImportFormat, UserPersona } from '../types/domain'
 
 const personas = ref<UserPersona[]>([])
 const editingId = ref('')
@@ -295,6 +298,124 @@ function downloadPersona(persona: UserPersona) {
 }
 
 onMounted(refresh)
+
+// ── 关系模板：一键填充常见关系设定 ─────────────────────────
+const relationshipTemplates = [
+  {
+    key: 'friend',
+    label: '朋友',
+    apply() {
+      form.relationshipNote = '我们是关系很好的朋友，彼此信任，可以分享日常和烦恼。'
+      form.boundaries = '不要替我说话，不要擅自决定我的行为、想法或感受；我们是平等的朋友关系。'
+    }
+  },
+  {
+    key: 'lover',
+    label: '恋人',
+    apply() {
+      form.relationshipNote = '我们是正在交往的恋人，关系亲密，互相关心，会自然地表达想念和在意。'
+      form.boundaries = '不要替我说话，不要擅自决定我的行为、想法或感受；尊重彼此的边界。'
+    }
+  },
+  {
+    key: 'classmate',
+    label: '同学',
+    apply() {
+      form.relationshipNote = '我们是同班同学，平时一起上课、写作业，关系逐渐熟络。'
+      form.boundaries = '不要替我说话，不要擅自决定我的行为、想法或感受。'
+    }
+  },
+  {
+    key: 'colleague',
+    label: '同事',
+    apply() {
+      form.relationshipNote = '我们是同事，在工作中互相配合，下班后也可以聊些日常。'
+      form.boundaries = '不要替我说话，不要擅自决定我的行为、想法或感受；工作话题保持专业。'
+    }
+  },
+  {
+    key: 'family',
+    label: '家人',
+    apply() {
+      form.relationshipNote = '我们是家人，彼此熟悉、关心，有多年共同生活的经历。'
+      form.boundaries = '不要替我说话，不要擅自决定我的行为、想法或感受；即使是家人也尊重个人空间。'
+    }
+  }
+]
+function applyTemplate(template: typeof relationshipTemplates[number]) {
+  template.apply()
+  message.value = `已套用「${template.label}」关系模板，可继续修改。`
+}
+
+// ── 试聊：用当前编辑的 Persona 直接测试角色回复 ────────────
+const testCharacters = ref<Character[]>([])
+const testCharacterId = ref('')
+const testText = ref('')
+const testReply = ref('')
+const isTesting = ref(false)
+
+onMounted(async () => {
+  testCharacters.value = await db.characters.toArray()
+  testCharacterId.value = testCharacters.value[0]?.id || ''
+})
+
+async function runPersonaTest() {
+  if (isTesting.value) return
+  if (!testCharacterId.value) {
+    message.value = '请先创建一个角色再试聊。'
+    return
+  }
+  if (!testText.value.trim()) {
+    message.value = '请输入一句测试消息。'
+    return
+  }
+  isTesting.value = true
+  testReply.value = ''
+  try {
+    const character = testCharacters.value.find(item => item.id === testCharacterId.value)
+    const modelSettingsRow = await getModelSettings()
+    const provider = createProvider(modelSettingsRow)
+
+    const userPersonaLines = [
+      form.name ? `用户姓名：${form.name}` : '',
+      form.identity ? `身份：${form.identity}` : '',
+      form.age ? `年龄：${form.age}` : '',
+      form.personality ? `用户性格：${form.personality}` : '',
+      form.appearance ? `外貌：${form.appearance}` : '',
+      form.background ? `背景：${form.background}` : '',
+      form.relationshipNote ? `关系：${form.relationshipNote}` : '',
+      form.boundaries ? `边界：${form.boundaries}` : ''
+    ].filter(Boolean)
+
+    const systemPrompt = [
+      character
+        ? `你正在扮演「${character.name}」。${character.persona || ''}`
+        : '你是陪伴用户的角色。',
+      character?.speakingStyle ? `说话风格：${character.speakingStyle}` : '',
+      '以下是当前用户 Persona 设定，请严格依据它理解用户：',
+      userPersonaLines.join('\n'),
+      '请以角色身份自然回复，不要提及这是测试，也不要解释设定。'
+    ].filter(Boolean).join('\n\n')
+
+    const response = await provider.chat({
+      model: modelSettingsRow.model,
+      temperature: modelSettingsRow.temperature,
+      character: {
+        characterName: character?.name || '角色',
+        userName: form.name || '你'
+      },
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: testText.value }
+      ]
+    })
+    testReply.value = response.text || '（角色没有返回内容）'
+  } catch (error) {
+    testReply.value = error instanceof Error ? `试聊失败：${error.message}` : '试聊失败。'
+  } finally {
+    isTesting.value = false
+  }
+}
 </script>
 
 <template>
@@ -375,6 +496,16 @@ onMounted(refresh)
           <label>来源链接<input v-model="form.sourceUrl" maxlength="500" /></label>
         </details>
         <label>背景<textarea v-model="form.background" rows="4" placeholder="在当前世界中的经历和处境" /></label>
+        <div class="template-row">
+          <small>快速套用关系模板：</small>
+          <button
+            v-for="template in relationshipTemplates"
+            :key="template.key"
+            type="button"
+            class="template-chip"
+            @click="applyTemplate(template)"
+          >{{ template.label }}</button>
+        </div>
         <label>与角色的关系补充<textarea v-model="form.relationshipNote" rows="3" placeholder="例如：我们从小认识，但还没有确认关系" /></label>
         <label>角色已经知道的事<textarea v-model="form.characterKnowledge" rows="3" placeholder="明确允许角色长期知道的信息" /></label>
         <label>边界<textarea v-model="form.boundaries" rows="3" /></label>
@@ -383,6 +514,29 @@ onMounted(refresh)
         <p v-else class="truth-tip">这是角色专属 Persona，只会用于绑定的角色，不能设为全局默认。</p>
         <button class="primary" type="submit">{{ editingId ? '保存修改' : '创建人设' }}</button>
       </form>
+
+      <section class="test-chat-card">
+        <b>试一句 · 用当前编辑内容测试</b>
+        <p class="test-hint">无需保存，直接用上方正在编辑的 Persona 向角色发一条消息，预览人设效果。</p>
+        <label class="test-character-select">
+          选择角色
+          <select v-model="testCharacterId">
+            <option v-for="character in testCharacters" :key="character.id" :value="character.id">
+              {{ character.name }}
+            </option>
+          </select>
+        </label>
+        <div class="test-input-row">
+          <input v-model="testText" placeholder="输入一句测试消息，例如：今天有点累" @keyup.enter="runPersonaTest" />
+          <button type="button" class="primary compact" :disabled="isTesting" @click="runPersonaTest">
+            {{ isTesting ? '发送中…' : '发送' }}
+          </button>
+        </div>
+        <div v-if="testReply" class="test-reply">
+          <small>角色回复</small>
+          <p>{{ testReply }}</p>
+        </div>
+      </section>
 
       <p v-if="message" class="message">{{ message }}</p>
 
@@ -416,5 +570,25 @@ onMounted(refresh)
 </template>
 
 <style scoped>
-.persona-page{min-height:100%;padding:14px;background:#f2f8fc;color:#40566a}.intro-card,.editor-card,.persona-card,.preview-card{border:1px solid rgba(109,70,87,.08);border-radius:20px;background:#fff;box-shadow:0 8px 28px rgba(79,46,61,.06)}.intro-card{padding:16px;margin-bottom:12px}.intro-card p{margin:6px 0;color:#748b9e;line-height:1.6;font-size:13px}.intro-card small{display:block;margin-top:9px;color:#7d91a3;line-height:1.5}.import-actions{margin-top:12px}.hidden-file{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none}.editor-card{display:grid;gap:12px;padding:16px}.section-title,.preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.section-title h2,.preview-head h2{margin:0;font-size:18px}.section-title button,.card-actions button,.preview-head button,.preview-actions button{border:0;background:#eaf3fa;color:#6f9dc4;border-radius:10px;padding:7px 10px}.editor-card label,.advanced-fields label{display:grid;gap:6px;font-size:13px;font-weight:700}.editor-card input,.editor-card textarea{width:100%;box-sizing:border-box;border:1px solid #d7e5f0;border-radius:12px;background:#fbfdff;padding:10px 12px;color:#40566a;font:inherit;resize:vertical}.two-fields{display:grid;grid-template-columns:1fr 150px;gap:10px}.persona-avatar-editor__row{display:flex;align-items:center;gap:8px}.persona-avatar-editor__row input{min-width:0}.persona-avatar-editor__image-label{flex:1;color:#9b7a88;font-size:11px}.avatar-file-button{display:block!important;padding:8px 9px;border-radius:10px;background:#eaf4fb;color:#668eae;text-align:center;cursor:pointer}.avatar-clear-button{padding:6px 8px;border:0;border-radius:9px;background:#eef7fd;color:#b75570;font-size:11px}.three-fields{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.default-switch{display:flex!important;grid-template-columns:auto 1fr;align-items:center}.default-switch input{width:auto}.primary{border:0;border-radius:14px;background:#79add8!important;color:#fff!important;padding:12px;font-weight:800}.compact{padding:9px 12px!important}.message{padding:10px 12px;border-radius:12px;background:#f5faff;color:#b65178}.truth-tip{margin:0;padding:10px 12px;border-radius:12px;background:#f5faff;color:#718fa8;font-size:12px;line-height:1.55}.advanced-fields{border:1px solid #e2eef7;border-radius:14px;padding:10px 12px}.advanced-fields summary{cursor:pointer;font-weight:800;color:#6f94b2}.advanced-fields[open]{display:grid;gap:10px}.advanced-fields[open] summary{margin-bottom:4px}.persona-list{display:grid;gap:10px;margin-top:14px;padding-bottom:30px}.persona-card{display:grid;grid-template-columns:48px minmax(0,1fr);gap:10px;padding:14px}.persona-avatar{display:grid;place-items:center;width:48px;height:48px}.persona-copy{min-width:0}.persona-copy>div{display:flex;align-items:center;gap:7px}.persona-copy span{border-radius:999px;background:#dcecf7;color:#5f8fb8;padding:2px 7px;font-size:10px}.persona-copy small{color:#748b9e}.persona-copy p{margin:7px 0;color:#506a80;line-height:1.5;font-size:12px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.card-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap}.card-actions .danger{color:#b64c63}.preview-card{padding:16px;margin-bottom:12px}.preview-head small{color:#a1818f}.preview-head button{border-radius:50%;width:34px;height:34px;font-size:20px}.detect-row{display:flex;align-items:center;justify-content:space-between;margin:12px 0;padding:10px 12px;border-radius:12px;background:#f5faff}.detect-row span{font-size:11px;color:#718fa8}.preview-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.preview-grid>div{display:grid;gap:3px;padding:11px;border-radius:12px;background:#f4f9fd}.preview-grid small{color:#9b7b88}.preview-grid b{font-size:20px;color:#6d9fc8}.preview-card p{font-size:12px;line-height:1.55;white-space:pre-wrap}.preview-card .note{color:#718fa8}.preview-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}@media(max-width:390px){.two-fields,.three-fields{grid-template-columns:1fr}.card-actions{justify-content:flex-start}}
+.persona-page{min-height:100%;padding:14px;background:#f2f8fc;color:#40566a}.intro-card,.editor-card,.persona-card,.preview-card{border:1px solid rgba(109,70,87,.08);border-radius:20px;background:#fff;box-shadow:0 8px 28px rgba(79,46,61,.06)}.intro-card{padding:16px;margin-bottom:12px}.intro-card p{margin:6px 0;color:#748b9e;line-height:1.6;font-size:13px}.intro-card small{display:block;margin-top:9px;color:#7d91a3;line-height:1.5}.import-actions{margin-top:12px}.hidden-file{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none}.editor-card{display:grid;gap:12px;padding:16px}.section-title,.preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.section-title h2,.preview-head h2{margin:0;font-size:18px}.section-title button,.card-actions button,.preview-head button,.preview-actions button{border:0;background:#eaf3fa;color:#6f9dc4;border-radius:10px;padding:7px 10px}.editor-card label,.advanced-fields label{display:grid;gap:6px;font-size:13px;font-weight:700}.editor-card input,.editor-card textarea{width:100%;box-sizing:border-box;border:1px solid #d7e5f0;border-radius:12px;background:#fbfdff;padding:10px 12px;color:#40566a;font:inherit;resize:vertical}.two-fields{display:grid;grid-template-columns:1fr 150px;gap:10px}.persona-avatar-editor__row{display:flex;align-items:center;gap:8px}.persona-avatar-editor__row input{min-width:0}.persona-avatar-editor__image-label{flex:1;color:#9b7a88;font-size:11px}.avatar-file-button{display:block!important;padding:8px 9px;border-radius:10px;background:#eaf4fb;color:#668eae;text-align:center;cursor:pointer}.avatar-clear-button{padding:6px 8px;border:0;border-radius:9px;background:#eef7fd;color:#b75570;font-size:11px}.three-fields{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.default-switch{display:flex!important;grid-template-columns:auto 1fr;align-items:center}.default-switch input{width:auto}.primary{border:0;border-radius:14px;background:#79add8!important;color:#fff!important;padding:12px;font-weight:800}.compact{padding:9px 12px!important}.message{padding:10px 12px;border-radius:12px;background:#f5faff;color:#b65178}.truth-tip{margin:0;padding:10px 12px;border-radius:12px;background:#f5faff;color:#718fa8;font-size:12px;line-height:1.55}.advanced-fields{border:1px solid #e2eef7;border-radius:14px;padding:10px 12px}.advanced-fields summary{cursor:pointer;font-weight:800;color:#6f94b2}.advanced-fields[open]{display:grid;gap:10px}.advanced-fields[open] summary{margin-bottom:4px}.persona-list{display:grid;gap:10px;margin-top:14px;padding-bottom:30px}.persona-card{display:grid;grid-template-columns:48px minmax(0,1fr);gap:10px;padding:14px}.persona-avatar{display:grid;place-items:center;width:48px;height:48px}.persona-copy{min-width:0}.persona-copy>div{display:flex;align-items:center;gap:7px}.persona-copy span{border-radius:999px;background:#dcecf7;color:#5f8fb8;padding:2px 7px;font-size:10px}.persona-copy small{color:#748b9e}.persona-copy p{margin:7px 0;color:#506a80;line-height:1.5;font-size:12px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.card-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap}.card-actions .danger{color:#b64c63}.preview-card{padding:16px;margin-bottom:12px}.preview-head small{color:#a1818f}.preview-head button{border-radius:50%;width:34px;height:34px;font-size:20px}.detect-row{display:flex;align-items:center;justify-content:space-between;margin:12px 0;padding:10px 12px;border-radius:12px;background:#f5faff}.detect-row span{font-size:11px;color:#718fa8}.preview-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.preview-grid>div{display:grid;gap:3px;padding:11px;border-radius:12px;background:#f4f9fd}.preview-grid small{color:#9b7b88}.preview-grid b{font-size:20px;color:#6d9fc8}.preview-card p{font-size:12px;line-height:1.55;white-space:pre-wrap}.preview-card .note{color:#718fa8}.preview-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+
+/* 关系模板 */
+.template-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;border:1px dashed #cfe0ee;border-radius:12px;background:#f8fbfe}
+.template-row small{color:#7d94a8}
+.template-chip{border:1px solid #d3e4f1!important;background:#eef6fc!important;color:#5c8ab3!important;border-radius:999px!important;padding:4px 13px!important;font-size:12px!important;cursor:pointer}
+.template-chip:active{transform:scale(.95)}
+
+/* 试聊卡片 */
+.test-chat-card{display:grid;gap:10px;margin-top:12px;padding:16px;border:1px solid rgba(109,70,87,.1);border-radius:20px;background:linear-gradient(160deg,#fff,#f6fafd);box-shadow:0 8px 24px rgba(79,46,61,.06)}
+.test-chat-card>b{color:#4a6278;font-size:15px}
+.test-hint{margin:0;color:#8aa0b2;font-size:11px;line-height:1.5}
+.test-character-select{display:grid;gap:6px;font-size:12px;font-weight:700;color:#5a7288}
+.test-character-select select{width:100%;border:1px solid #d7e5f0;border-radius:11px;background:#fbfdff;padding:9px 11px;font:inherit;color:#40566a}
+.test-input-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.test-input-row input{border:1px solid #d7e5f0;border-radius:12px;background:#fbfdff;padding:10px 12px}
+.test-reply{padding:11px 13px;border:1px solid #dce9f4;border-radius:14px;background:#f4f9fd}
+.test-reply small{color:#7d9bb5;font-size:10px}
+.test-reply p{margin:5px 0 0;color:#465e73;font-size:13px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+
+@media(max-width:390px){.two-fields,.three-fields{grid-template-columns:1fr}.card-actions{justify-content:flex-start}}
 </style>

@@ -2,6 +2,7 @@ import { nextTick, ref, type Ref } from 'vue'
 
 export interface ChatMessageListHandle {
   getElement: () => HTMLElement | undefined
+  scrollToMessageIndex?: (index: number, behavior?: ScrollBehavior) => Promise<void>
 }
 
 export function useChatScroll(options: {

@@ -980,19 +980,83 @@ async function save() {
           <p>备用开场 {{ importedCard.patch.alternateGreetings?.length || 0 }} 条 · 示例对话 {{ importedCard.patch.exampleDialogues?.length || 0 }} 组 · 内嵌世界书 {{ importedCard.lorebookEntries.length }} 条 · 正则 {{ importedCard.regexScripts.length }} 条</p>
           <details class="card-import-report" open>
             <summary>Character Card 导入报告</summary>
-            <div class="import-report-grid">
-              <article><small>格式</small><b>{{ importedCard.report.format }}</b></article>
-              <article><small>规格</small><b>{{ importedCard.report.spec || '社区 / 旧版' }}{{ importedCard.report.specVersion ? ` · ${importedCard.report.specVersion}` : '' }}</b></article>
-              <article><small>识别字段</small><b>{{ importedCard.report.detectedFields.length }}</b></article>
-              <article><small>未知字段保留</small><b>{{ importedCard.report.compatibility.preservedUnknownFields }}</b></article>
-              <article><small>世界书</small><b>{{ importedCard.report.resources.lorebookEntries }} 条</b></article>
-              <article><small>Regex</small><b>{{ importedCard.report.resources.regexScripts }} 条</b></article>
+
+            <div class="report-format-line">
+              <span class="report-format-badge">{{ importedCard.report.format }}</span>
+              <small>{{ importedCard.report.spec || '社区 / 旧版' }}{{ importedCard.report.specVersion ? ` · ${importedCard.report.specVersion}` : '' }}</small>
             </div>
-            <p><b>运行时：</b>{{ importedCard.report.compatibility.embeddedUserPersona ? '检测到独立 User Persona；' : '' }}{{ importedCard.report.compatibility.depthPrompt ? '含 depth_prompt；' : '' }}{{ importedCard.report.compatibility.talkativeness ? '含 talkativeness；' : '' }}未知社区字段会归档但不会擅自执行。</p>
-            <p><b>安全边界：</b>第三方脚本{{ importedCard.report.safety.thirdPartyScriptDetected ? '已检测到但禁止执行' : '未检测到' }}；已剥离 {{ importedCard.report.safety.strippedPaths.length }} 个凭据 / 本地 UI / 运行时字段。</p>
-            <details v-if="importedCard.report.safety.strippedPaths.length">
+
+            <ul class="report-checklist">
+              <li :class="importedCard.patch.avatar ? 'ok' : 'empty'">
+                <span class="report-dot">{{ importedCard.patch.avatar ? '✓' : '–' }}</span>
+                <span class="report-label">头像</span>
+                <span class="report-value">{{ importedCard.patch.avatar ? '已读取' : '未包含' }}</span>
+              </li>
+              <li class="ok">
+                <span class="report-dot">✓</span>
+                <span class="report-label">角色人设</span>
+                <span class="report-value">{{ importedCard.report.detectedFields.length }} 个字段</span>
+              </li>
+              <li :class="importedCard.patch.firstMessage ? 'ok' : 'empty'">
+                <span class="report-dot">{{ importedCard.patch.firstMessage ? '✓' : '–' }}</span>
+                <span class="report-label">开场语</span>
+                <span class="report-value">{{ importedCard.patch.firstMessage ? '已读取' : '未包含' }}</span>
+              </li>
+              <li :class="importedCard.report.resources.alternateGreetings ? 'ok' : 'empty'">
+                <span class="report-dot">{{ importedCard.report.resources.alternateGreetings ? '✓' : '–' }}</span>
+                <span class="report-label">备用开场</span>
+                <span class="report-value">{{ importedCard.report.resources.alternateGreetings }} 条</span>
+              </li>
+              <li :class="importedCard.report.resources.exampleDialogues ? 'ok' : 'empty'">
+                <span class="report-dot">{{ importedCard.report.resources.exampleDialogues ? '✓' : '–' }}</span>
+                <span class="report-label">示例对话</span>
+                <span class="report-value">{{ importedCard.report.resources.exampleDialogues }} 组</span>
+              </li>
+              <li :class="importedCard.report.resources.lorebookEntries ? 'ok' : 'empty'">
+                <span class="report-dot">{{ importedCard.report.resources.lorebookEntries ? '✓' : '–' }}</span>
+                <span class="report-label">世界书</span>
+                <span class="report-value">{{ importedCard.report.resources.lorebookEntries }} 条</span>
+              </li>
+              <li :class="importedCard.report.resources.regexScripts ? 'ok' : 'empty'">
+                <span class="report-dot">{{ importedCard.report.resources.regexScripts ? '✓' : '–' }}</span>
+                <span class="report-label">Regex 脚本</span>
+                <span class="report-value">{{ importedCard.report.resources.regexScripts }} 条</span>
+              </li>
+              <li :class="importedCard.report.resources.assets ? 'ok' : 'empty'">
+                <span class="report-dot">{{ importedCard.report.resources.assets ? '✓' : '–' }}</span>
+                <span class="report-label">素材资源</span>
+                <span class="report-value">{{ importedCard.report.resources.assets }} 个</span>
+              </li>
+            </ul>
+
+            <div v-if="importedCard.report.warnings.length" class="report-warnings">
+              <b>⚠ 注意</b>
+              <p v-for="warning in importedCard.report.warnings" :key="warning">{{ warning }}</p>
+            </div>
+
+            <div class="report-safety">
+              <p>
+                <span :class="['report-safety-icon', importedCard.report.safety.thirdPartyScriptDetected ? 'warn' : 'ok']">
+                  {{ importedCard.report.safety.thirdPartyScriptDetected ? '⚠' : '✓' }}
+                </span>
+                第三方脚本{{ importedCard.report.safety.thirdPartyScriptDetected ? '已检测到，禁止执行' : '未检测到' }}
+              </p>
+              <p>
+                <span class="report-safety-icon ok">✓</span>
+                已安全剥离 {{ importedCard.report.safety.strippedPaths.length }} 个凭据 / 本地 UI / 运行时字段
+              </p>
+            </div>
+
+            <details v-if="importedCard.report.safety.strippedPaths.length" class="report-stripped">
               <summary>查看被剥离字段</summary>
               <code v-for="path in importedCard.report.safety.strippedPaths" :key="path">{{ path }}</code>
+            </details>
+
+            <details class="report-fields-detail">
+              <summary>查看识别到的字段清单（{{ importedCard.report.detectedFields.length }}）</summary>
+              <div class="report-field-tags">
+                <span v-for="field in importedCard.report.detectedFields" :key="field">{{ field }}</span>
+              </div>
             </details>
           </details>
           <div v-if="duplicateCharacterId" class="duplicate-card-hint">
@@ -1444,4 +1508,32 @@ async function save() {
 .duplicate-card-hint{display:grid;gap:7px;padding:11px 12px;border:1px solid #cfe3f5;border-radius:13px;background:#f1f8ff;color:#58718a}.duplicate-card-hint span{font-size:11px;line-height:1.55}.duplicate-card-hint button{justify-self:start;padding:7px 10px;border:0;border-radius:9px;background:#dceefa;color:#567b9e;font-weight:700}.duplicate-card-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.duplicate-card-actions button{justify-self:stretch}@media(max-width:390px){.duplicate-card-actions{grid-template-columns:1fr}}
 
 .card-import-report{margin-top:10px;border:1px solid rgba(90,124,149,.14);border-radius:14px;background:rgba(245,250,253,.82);padding:10px 11px}.card-import-report>summary{cursor:pointer;font-weight:800;color:#3d6078}.import-report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:9px}.import-report-grid article{display:grid;gap:2px;border-radius:10px;background:#fff;padding:8px 9px}.import-report-grid small{color:#8a9aa6;font-size:9px}.import-report-grid b{overflow:hidden;text-overflow:ellipsis;font-size:11px;white-space:nowrap}.card-import-report p{margin:8px 0 0;color:#60788a;font-size:10px;line-height:1.55}.card-import-report details details{margin-top:8px}.card-import-report code{display:block;margin-top:4px;border-radius:7px;background:#eef5f9;padding:5px 7px;color:#5e7484;font-size:9px;word-break:break-all}
+
+/* 可视化导入报告 */
+.report-format-line{display:flex;align-items:center;gap:8px;margin:9px 0 4px}
+.report-format-badge{padding:3px 10px;border-radius:999px;background:linear-gradient(135deg,#7fb4e0,#5c97ce);color:#fff;font-size:10px;font-weight:700}
+.report-format-line small{color:#8a9aa6;font-size:10px}
+.report-checklist{list-style:none;margin:8px 0;padding:0;display:grid;gap:2px}
+.report-checklist li{display:grid;grid-template-columns:22px 84px minmax(0,1fr);align-items:center;gap:7px;padding:6px 8px;border-radius:10px}
+.report-checklist li.ok{background:rgba(238,247,242,.6)}
+.report-checklist li.empty{background:rgba(245,248,251,.5)}
+.report-dot{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;font-size:10px;font-weight:700}
+.report-checklist li.ok .report-dot{background:#e3f3ea;color:#2f9e6e}
+.report-checklist li.empty .report-dot{background:#eef2f6;color:#9fb0bf}
+.report-label{color:#54697c;font-size:11px;font-weight:700}
+.report-value{color:#7c8ea0;font-size:10px;text-align:right}
+.report-warnings{margin:8px 0;padding:9px 11px;border:1px solid rgba(198,138,46,.22);border-radius:11px;background:var(--warning-soft)}
+.report-warnings b{color:var(--warning);font-size:11px}
+.report-warnings p{margin:4px 0 0;color:#8a6d3b;font-size:10px;line-height:1.55}
+.report-safety{margin:8px 0;display:grid;gap:5px}
+.report-safety p{margin:0;display:flex;align-items:center;gap:7px;color:#60788a;font-size:10.5px}
+.report-safety-icon{display:grid;place-items:center;width:17px;height:17px;border-radius:50%;font-size:9px}
+.report-safety-icon.ok{background:#e3f3ea;color:#2f9e6e}
+.report-safety-icon.warn{background:#fbeed7;color:#c68a2e}
+.report-stripped,.report-fields-detail{margin-top:7px;border-radius:9px;background:#f4f8fb;padding:6px 9px}
+.report-stripped summary,.report-fields-detail summary{cursor:pointer;color:#6a8296;font-size:10px;font-weight:700}
+.report-stripped code{display:block;margin-top:4px;border-radius:6px;background:#eef5f9;padding:4px 6px;color:#5e7484;font-size:9px;word-break:break-all}
+.report-field-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
+.report-field-tags span{padding:2px 8px;border-radius:999px;background:#e9f2f9;color:#5e83a6;font-size:9px}
+
 </style>

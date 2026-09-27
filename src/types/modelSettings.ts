@@ -36,6 +36,17 @@ export interface ModelSettings {
   visionTestedSignature?: string
   visionTestedAt?: string
 
+  /**
+   * 是否启用向量语义记忆。开启后，记忆写入时会调用 embeddings 端点生成向量，
+   * 检索时混合“向量语义相似度 + 关键词 + 重要度 + 时间”评分；
+   * 关闭或 embedding 接口不可用时自动回退纯关键词检索。
+   */
+  embeddingEnabled?: boolean
+  /** Embedding 模型名，默认 text-embedding-3-small；复用上方 baseUrl / apiKey。 */
+  embeddingModel?: string
+  embeddingTestedAt?: string
+  embeddingDimensions?: number
+
   updatedAt: string
 }
 

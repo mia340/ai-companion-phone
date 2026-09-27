@@ -14,7 +14,8 @@ import {
 import {
   buildMemoryPrompt,
   recordMemoryHits,
-  selectMemoryHitsDetailed
+  selectMemoryHitsDetailed,
+  selectMemoryHitsHybrid
 } from '../../services/memoryService'
 import { buildLorebookPrompt } from '../../services/lorebookService'
 import {
@@ -179,16 +180,15 @@ export async function buildGenerationContext(options: BuildGenerationContextOpti
     requestOptions.musicPrompt || '',
     conversationState?.unresolvedTopics?.join(' ') || ''
   ].filter(Boolean).join('\n')
+  const memoryLimit = settings.memoryStrength === 'deep'
+    ? 14
+    : settings.memoryStrength === 'light'
+      ? 6
+      : 10
   const memoryHitDetails = settings.memoryEnabled
-    ? selectMemoryHitsDetailed(
-      memories,
-      memoryQuery,
-      settings.memoryStrength === 'deep'
-        ? 14
-        : settings.memoryStrength === 'light'
-          ? 6
-          : 10
-    )
+    ? modelSettings.embeddingEnabled
+      ? await selectMemoryHitsHybrid(memories, memoryQuery, modelSettings, memoryLimit)
+      : selectMemoryHitsDetailed(memories, memoryQuery, memoryLimit)
     : []
   const memoryHits = memoryHitDetails.map(item => item.memory)
   const memoryPrompt = settings.memoryEnabled

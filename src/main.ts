@@ -7,6 +7,7 @@ import { seedDatabase } from './db/seed'
 import { getModelSettings, MAX_OUTPUT_TOKENS, saveModelSettings } from './services/modelSettings'
 import { startAutoActivityLoop } from './services/momentAutoActivityService'
 import { startSocialRuntimeLoop } from './services/socialRuntimeService'
+import './styles/tokens.css'
 import './assets/main.css'
 
 let requestServiceWorkerUpdate: (reloadPage?: boolean) => Promise<void> = async () => {}

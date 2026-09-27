@@ -114,3 +114,82 @@ button:not(.bubble),
     height: var(--app-viewport-height, 100dvh);
   }
 }
+
+/* ============================================================
+   V0.5.0-alpha.6 视觉层次增强（使用 design tokens）
+   ============================================================ */
+
+/* 桌面环境的舞台背景：更柔和的纵深光场 */
+.page-shell {
+  background:
+    radial-gradient(circle at 50% -12%, #ffffff 0, #eef6fc 38%, #d7e8f6 78%, #c9def0 100%);
+}
+
+/* 手机金属中框：双层边框 + 顶部高光 + 内描边，模拟真实机身 */
+.phone-frame {
+  background: linear-gradient(180deg, #fbfdff, #f3f8fc);
+  border: 7px solid #26394a;
+  box-shadow:
+    var(--shadow-xl),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 0 0 2px rgba(20, 34, 48, 0.4);
+}
+
+/* 听筒：金属凹槽质感 */
+.speaker {
+  background: linear-gradient(180deg, #1d2c3a, #33485a);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.55), 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Home 指示条：柔和深色 */
+.home-indicator {
+  background: linear-gradient(180deg, #3a4d5e, #26394a);
+  box-shadow: 0 1px 1px rgba(255, 255, 255, 0.3);
+}
+
+/* 主屏 / 锁屏壁纸：多层柔和光场，更有 OS 质感 */
+.home-screen,
+.lock-screen {
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.85) 0, transparent 28%),
+    radial-gradient(circle at 85% 8%, rgba(180, 214, 245, 0.55) 0, transparent 32%),
+    linear-gradient(165deg, #eaf5ff 0, #d3e8fb 52%, #bddcf6 100%);
+}
+
+/* App 图标：渐变底 + 顶部高光 + 更柔和投影 */
+.app-symbol {
+  background: linear-gradient(160deg, #ffffff 0, #eef5fb 100%);
+  box-shadow:
+    0 7px 18px rgba(75, 105, 135, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+.app-icon:active .app-symbol { transform: scale(0.92); }
+.app-symbol { transition: transform var(--duration-fast) var(--ease-standard); }
+
+/* Dock：更强的毛玻璃 + 顶部高光描边 */
+.dock {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 12px 32px rgba(50, 80, 110, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+.dock button {
+  background: linear-gradient(160deg, #ffffff, #eef5fb);
+  box-shadow: 0 5px 13px rgba(70, 100, 130, 0.13), inset 0 1px 0 #fff;
+}
+
+/* 应用头部：统一毛玻璃 + 底部细分割线 */
+.app-header {
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 1px 0 rgba(45, 67, 85, 0.06);
+}
+
+/* 卡片类表面统一圆角与投影 */
+.notice-card,
+.profile-widget {
+  box-shadow: var(--shadow-md);
+}
