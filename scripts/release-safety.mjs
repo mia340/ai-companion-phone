@@ -189,7 +189,7 @@ async function checkSource() {
       !appCustomizationSource.includes('HOME_LAYOUT_REVISION = 14')) {
     fail('Companion Wardrobe must keep a concrete launcher route and launcher migration')
   }
-  if (!wardrobeView.includes('WARDROBE · V1.2') ||
+  if (!wardrobeView.includes('WARDROBE · V1.3') ||
       !wardrobeView.includes('<PhoneFrame lock-scroll>') ||
       !wardrobeView.includes('wardrobe-workbench') ||
       !wardrobeView.includes('preview-pane') ||
@@ -204,10 +204,14 @@ async function checkSource() {
       !wardrobeService.includes('HEADWEAR') ||
       !wardrobeService.includes('FACEWEAR') ||
       !wardrobeService.includes('NECKWEAR') ||
+      !wardrobeService.includes('CARRYWEAR') ||
+      !wardrobeService.includes('LEGWEAR') ||
+      !wardrobeService.includes('PATTERNS') ||
       !wardrobeService.includes('profiles: Record<string, AvatarAppearanceProfile>') ||
       !avatarComponent.includes('pixel-avatar') ||
-      !avatarComponent.includes('viewBox="0 0 48 64"')) {
-    fail('Wardrobe V1.2 must keep the always-visible warm pixel preview, richer clothes/accessories, free color picker and daily outfit runtime')
+      !avatarComponent.includes('viewBox="0 0 64 80"') ||
+      !wardrobeView.includes('STYLE LIBRARY')) {
+    fail('Wardrobe V1.3 must keep the polished 64×80 avatar, style library, layered accessories, free color picker and daily outfit runtime')
   }
   if (!coupleBoardView.includes(':appearance="userAppearance"') ||
       !coupleBoardView.includes(':appearance="partnerAppearance"') ||
@@ -216,7 +220,7 @@ async function checkSource() {
       !coupleBoardView.includes('.love-game-shell.is-game.has-challenge .board-card{left:10px;right:10px;top:91px;bottom:49.5%')) {
     fail('Couple Board V2.3 must use wardrobe sprites, compact HUD and the enlarged fixed map')
   }
-  pass('Companion Avatar V1.2 / Wardrobe V1.2 daily outfit + free color integration are guarded')
+  pass('Companion Avatar V1.3 / Wardrobe V1.3 style library + daily outfit + free color integration are guarded')
 
   const requiredDocs = [
     'docs/部署与更新.md',

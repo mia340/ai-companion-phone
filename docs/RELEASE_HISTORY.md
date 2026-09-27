@@ -5373,3 +5373,7 @@ Theme、未知 JSON 与未知文本可以归档，但不会直接执行。第三
 ## V0.5.0-alpha.5.9.2
 
 穿搭 V1.2 / Avatar V1.2：像素比例重画、更多服装配饰、自由配色、角色每日自主换装。数据继续复用 V18 / Backup V12。
+
+## V0.5.0-alpha.5.9.3 · Wardrobe V1.3 / Avatar style library rebuild
+
+穿搭与公共 Companion Avatar 推进到 V1.3：64×80 像素骨架、重新设计五官与发型比例、男女各 12 套风格方案、更多服装鞋履、随身物 / 袜子 / 纹理 / 强调色分层，以及套装实时预览。每日自主换装继续保持同日一致，并默认避开睡衣与私房套装。IndexedDB / Backup / HomeLayout revision 不升级。

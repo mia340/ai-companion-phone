@@ -557,3 +557,7 @@ npm run verify
 ### 0.5.0-alpha.5.9.2
 
 Companion Avatar / Wardrobe 已推进到 V1.2：角色形象使用公共 48×64 暖系像素 Runtime，支持分层配饰、自由 HEX 配色、推荐套装与每日自主换装；飞行棋继续直接读取同一 Avatar 数据。
+
+### 0.5.0-alpha.5.9.3
+
+Companion Avatar / Wardrobe V1.3：公共像素角色升级为 64×80，男女各 12 套风格库，加入更丰富的服装、鞋履、随身物、袜子、纹理与强调色；飞行棋继续复用同一 Avatar Runtime。数据层保持 IndexedDB V18 / Backup V12 / HomeLayout revision 14。
