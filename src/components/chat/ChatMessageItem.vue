@@ -23,7 +23,6 @@ const emit = defineEmits<{
   retryMessage: [message: Message]
   selectAlternative: [message: Message, offset: number]
   selectGreeting: [index: number]
-  feedback: [message: Message, value: 'up' | 'down']
 }>()
 
 const timer = ref<number>()
@@ -87,22 +86,6 @@ function imageButtonStyle(image: MessageImage): CSSProperties | undefined {
 }
 
 onBeforeUnmount(cancel)
-
-const showRecalledMemories = ref(false)
-const layerLabels: Record<string, string> = {
-  fact: '事实',
-  subjective: '感受',
-  shared: '共同记忆',
-  promise: '承诺',
-  relationship: '关系',
-  story: '故事'
-}
-function layerLabel(layer?: string) {
-  return layer ? (layerLabels[layer] || '记忆') : '记忆'
-}
-function toggleRecalledMemories() {
-  showRecalledMemories.value = !showRecalledMemories.value
-}
 </script>
 
 <template>
@@ -196,46 +179,7 @@ function toggleRecalledMemories() {
           <span>{{ alternativeIndex + 1 }} / {{ alternativeCount }}</span>
           <button type="button" :disabled="alternativeIndex >= alternativeCount - 1" @click.stop="emit('selectAlternative', message, 1)">›</button>
         </div>
-        <div v-if="!streaming" class="feedback-row">
-          <button
-            type="button"
-            :class="['feedback-button',{active:message.feedback==='up'}]"
-            aria-label="回复不错"
-            @click.stop="emit('feedback',message,'up')"
-          >👍</button>
-          <button
-            type="button"
-            :class="['feedback-button',{active:message.feedback==='down'}]"
-            aria-label="回复不好"
-            @click.stop="emit('feedback',message,'down')"
-          >👎</button>
-        </div>
         <small v-if="message.status==='cancelled'||message.status==='failed'" :class="['assistant-message-state',`assistant-message-state--${message.status}`]">{{ message.status==='cancelled'?'已停止生成':'回复中断' }}</small>
-
-        <button
-          v-if="message.recalledMemories?.length && !streaming"
-          type="button"
-          class="recalled-memory-toggle"
-          @click.stop="toggleRecalledMemories"
-        >
-          <span class="recalled-memory-icon">🧠</span>
-          参考了 {{ message.recalledMemories.length }} 条记忆
-          <span class="recalled-memory-chevron">{{ showRecalledMemories ? '▴' : '▾' }}</span>
-        </button>
-        <div
-          v-if="showRecalledMemories && message.recalledMemories?.length"
-          class="recalled-memory-panel"
-        >
-          <div
-            v-for="item in message.recalledMemories"
-            :key="item.id"
-            class="recalled-memory-item"
-          >
-            <span class="recalled-memory-tag">{{ layerLabel(item.layer) }}</span>
-            <p>{{ item.content }}</p>
-            <small v-if="item.reason">{{ item.reason }}</small>
-          </div>
-        </div>
       </div>
     </template>
 
@@ -318,15 +262,6 @@ function toggleRecalledMemories() {
 @keyframes bubble-in{from{opacity:0;transform:translate3d(0,6px,0) scale(.987)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}@keyframes stream-caret{0%,45%{opacity:1}46%,100%{opacity:.18}}
 @media(max-width:390px){.message-image-button--portrait{width:min(192px,54vw)}.message-image-button--square{width:min(212px,59vw)}.message-image-button--landscape{width:min(238px,66vw)}.message-image-grid--5 .message-image-button,.message-image-grid--6 .message-image-button{height:80px}}
 @media(prefers-reduced-motion:reduce){.message-row,.streaming-caret{animation:none}}
-
-.recalled-memory-toggle{display:flex;align-items:center;gap:5px;margin:3px 0 0 4px;padding:3px 8px;border:1px solid rgba(91,145,187,.18);border-radius:999px;background:rgba(255,255,255,.7);color:#6a8aa3;font-size:10px;cursor:pointer}.recalled-memory-icon{font-size:11px}.recalled-memory-chevron{margin-left:auto;font-size:9px;opacity:.7}
-.recalled-memory-panel{align-self:stretch;display:grid;gap:5px;margin:5px 0 2px;padding:8px;border:1px solid rgba(91,145,187,.14);border-radius:12px;background:rgba(247,251,254,.92)}
-.recalled-memory-item{display:grid;grid-template-columns:40px minmax(0,1fr);gap:3px 7px;padding:4px 0;border-bottom:1px dashed rgba(91,145,187,.12)}.recalled-memory-item:last-child{border-bottom:0}
-.recalled-memory-tag{grid-row:span 2;align-self:start;padding:2px 0;border-radius:7px;background:#e8f2fa;color:#5c83a8;font-size:9px;text-align:center}.recalled-memory-item p{margin:0;color:#4a6276;font-size:11px;line-height:1.5;word-break:break-word}.recalled-memory-item small{grid-column:2;color:#90a2b3;font-size:9px}
-.feedback-row{display:flex;gap:6px;margin:4px 0 0 4px}
-.feedback-button{width:30px;height:26px;border:1px solid rgba(91,145,187,.16);border-radius:9px;background:rgba(255,255,255,.7);font-size:12px;line-height:1;cursor:pointer;opacity:.6;transition:opacity .14s,transform .14s}
-.feedback-button:active{transform:scale(.9)}
-.feedback-button.active{opacity:1;border-color:rgba(91,145,187,.4);background:#f0f7fd}
 </style>
 
 <style scoped>

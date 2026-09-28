@@ -189,12 +189,18 @@ async function checkSource() {
       !appCustomizationSource.includes('HOME_LAYOUT_REVISION = 14')) {
     fail('Companion Wardrobe must keep a concrete launcher route and launcher migration')
   }
-  if (!wardrobeView.includes('WARDROBE · V1.4') || !wardrobeView.includes('WardrobeLookArtwork') ||
+  if (!wardrobeView.includes('WARDROBE · V1.5') ||
+      wardrobeView.includes('WardrobeLookArtwork') ||
+      wardrobeView.includes('GAME SPRITE') ||
       !wardrobeView.includes('<PhoneFrame lock-scroll>') ||
       !wardrobeView.includes('wardrobe-workbench') ||
       !wardrobeView.includes('preview-pane') ||
       !wardrobeView.includes('editor-tabs') ||
       !wardrobeView.includes('editor-scroll') ||
+      !wardrobeView.includes('CompanionPixelAvatar :profile="activeProfile"') ||
+      !wardrobeView.includes('CompanionPixelAvatar :profile="outfitPreviewProfile(outfit)"') ||
+      !wardrobeView.includes('地图同款') ||
+      !wardrobeView.includes('换衣、换色、配饰都会即时同步') ||
       !wardrobeView.includes("type=\"color\"") ||
       !wardrobeView.includes('每日自主换装') ||
       !wardrobeView.includes("changeGender('female')") ||
@@ -211,7 +217,7 @@ async function checkSource() {
       !avatarComponent.includes('pixel-avatar') ||
       !avatarComponent.includes('viewBox="0 0 64 80"') ||
       !wardrobeView.includes('STYLE LIBRARY')) {
-    fail('Wardrobe V1.4 must keep illustrated preset previews, the live game sprite, style library, layered accessories, free color picker and daily outfit runtime')
+    fail('Wardrobe V1.5 must preview the exact live game sprite, update outfits in real time, and keep style library, layered accessories, free color and daily outfit runtime')
   }
   if (!coupleBoardView.includes(':appearance="userAppearance"') ||
       !coupleBoardView.includes(':appearance="partnerAppearance"') ||
@@ -220,7 +226,45 @@ async function checkSource() {
       !coupleBoardView.includes('.love-game-shell.is-game.has-challenge .board-card{left:10px;right:10px;top:91px;bottom:49.5%')) {
     fail('Couple Board V2.3 must use wardrobe sprites, compact HUD and the enlarged fixed map')
   }
-  pass('Companion Avatar V1.4 / Wardrobe V1.4 illustrated preset preview + style library + daily outfit + free color integration are guarded')
+  pass('Companion Avatar V1.5 / Wardrobe V1.5 live map-sprite preview + style library + daily outfit + free color integration are guarded')
+
+  const chatMessageItem = await readText('src/components/chat/ChatMessageItem.vue')
+  const chatList = await readText('src/views/ChatList.vue')
+  const memoryService = await readText('src/services/memoryService.ts')
+  const generationContextBuilder = await readText('src/runtime/generation/generationContextBuilder.ts')
+  const modelSettingsView = await readText('src/views/ModelSettingsView.vue')
+  const safeRichHtml = await readText('src/components/chat/SafeRichHtml.vue')
+  const embeddingService = await readText('src/services/ai/embeddingService.ts')
+  const consolidationService = await readText('src/services/memoryConsolidationService.ts')
+  const chatRoom = await readText('src/views/ChatRoom.vue')
+
+  if (chatMessageItem.includes('feedback-row') || chatMessageItem.includes('feedback-button') ||
+      chatMessageItem.includes('👍') || chatMessageItem.includes('👎') ||
+      chatMessageItem.includes('参考了') || chatMessageItem.includes('recalled-memories')) {
+    fail('Normal chat must not expose AI grading buttons or memory-debug panels')
+  }
+  if (!chatList.includes('.swipe-row {') || !chatList.includes('background: #fff;') ||
+      !chatList.includes('.delete-action {') || !chatList.includes('background: #e9514c;')) {
+    fail('Chat list swipe-delete must keep a white row surface and confine red to the delete action')
+  }
+  pass('Normal chat immersion is guarded: no thumbs/debug memory UI, and swipe-delete cannot bleed a red seam')
+
+  if (!embeddingService.includes('cosineSimilarity') || !memoryService.includes('selectMemoryHitsHybrid') ||
+      !memoryService.includes('embedMemories') || !memoryService.includes('backfillMemoryEmbeddings') ||
+      !generationContextBuilder.includes('selectMemoryHitsHybrid') ||
+      !modelSettingsView.includes('向量语义记忆')) {
+    fail('Hybrid semantic memory retrieval and its opt-in settings must remain wired')
+  }
+  if (!consolidationService.includes('consolidateConversationMemories') ||
+      !consolidationService.includes('decayStaleMemories') ||
+      !chatRoom.includes('maybeConsolidateMemories') ||
+      chatRoom.includes('已把较早的零散细节巩固')) {
+    fail('Memory consolidation must remain silent, additive and non-immersive')
+  }
+  if (!safeRichHtml.includes('max-width:100%') || !safeRichHtml.includes('table-layout:fixed')) {
+    fail('SafeRichHtml must keep narrow-phone responsive containment')
+  }
+  pass('Vector memory, silent consolidation and narrow-phone rich HTML containment are guarded')
 
   const requiredDocs = [
     'docs/部署与更新.md',

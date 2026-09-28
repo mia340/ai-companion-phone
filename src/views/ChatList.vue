@@ -412,11 +412,13 @@ onUnmounted(() => {
 .swipe-row {
   position: relative;
   overflow: hidden;
-  background: #e9514c;
+  background: #fff;
+  isolation: isolate;
 }
 
 .delete-action {
   position: absolute;
+  z-index: 0;
   inset: 0 0 0 auto;
   width: 86px;
   display: grid;

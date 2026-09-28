@@ -525,8 +525,8 @@ export interface Message {
   greetingIndex?: number
 
   /**
-   * V0.5.0-alpha.6 记忆效果可视化：本条助手回复实际召回并注入的记忆摘要。
-   * 仅用于展示与纠错，不参与下一轮上下文拼装。
+   * V0.5.0-alpha.5.9.5 内部记忆诊断元数据：本条助手回复实际召回并注入的记忆摘要。
+   * 仅供调试/诊断页面读取，不在普通聊天气泡中展示，也不参与下一轮上下文拼装。
    */
   recalledMemories?: Array<{
     id: UUID
@@ -536,9 +536,6 @@ export interface Message {
     score?: number
     reason?: string
   }>
-  /** V0.5.0-alpha.6 用户对本条助手回复的质量反馈。 */
-  feedback?: 'up' | 'down'
-  feedbackAt?: string
 }
 
 export type MemoryStrength = 'light' | 'standard' | 'deep'
@@ -624,7 +621,7 @@ export interface CharacterMemory {
   conflictWith?: UUID[]
   note?: string
 
-  // V0.5.0-alpha.6 向量语义记忆字段（非索引，旧记录缺省时回退关键词检索）。
+  // V0.5.0-alpha.5.9.5 向量语义记忆字段（非索引，旧记录缺省时回退关键词检索）。
   embedding?: number[]
   embeddingModel?: string
   embeddingAt?: string
